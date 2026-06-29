@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "failures": [],
+  "checks": {
+    "bootLitPixels": 6639,
+    "bootLitRatio": 0.04002097800925926,
+    "ignoredClickKeptFrame": true
+  }
+}

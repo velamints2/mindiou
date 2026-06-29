@@ -1,0 +1,25 @@
+{
+  "name": "evenhub-g2-learning",
+  "version": "0.1.4",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5175",
+    "api": "node server.js",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4175",
+    "check": "tsc --noEmit",
+    "test:simulator": "node scripts/pre-release-test.mjs",
+    "launch-url": "node scripts/print-launch-url.mjs"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "0.0.11",
+    "typescript": "^5.7.3",
+    "vite": "^7.0.0"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.13",
+    "pngjs": "^7.0.0",
+    "qrcode": "^1.5.4"
+  }
+}

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Learn Coach</title>
+  </head>
+  <body>
+    <main id="app">
+      <section class="learn-surface">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Learn Coach</p>
+            <h1 id="card-front">Loading</h1>
+          </div>
+          <span id="status-pill" class="pill">mock</span>
+        </header>
+
+        <nav class="tabs" aria-label="Learn Coach sections">
+          <button class="tab is-active" type="button" data-tab="session">Session</button>
+          <button class="tab" type="button" data-tab="sources">Sources</button>
+          <button class="tab" type="button" data-tab="settings">Settings</button>
+        </nav>
+
+        <section class="tab-panel" data-panel="session">
+          <p id="session-state" class="session-state">CONCEPT</p>
+          <p id="card-back" class="answer">Import content to start.</p>
+          <p id="coach-line" class="coach">AI coach is standing by.</p>
+          <div class="study-actions" aria-label="Study controls">
+            <button id="repeat-card" type="button">跟读</button>
+            <button id="ask-card" type="button">提问</button>
+            <button id="next-card" type="button">下一个</button>
+            <button id="known-card" type="button">会了</button>
+          </div>
+          <label>My explanation
+            <textarea id="answer-text" spellcheck="false" placeholder="Explain it in your own words..."></textarea>
+          </label>
+          <button id="submit-answer" class="primary-action" type="button">提交回答</button>
+        </section>
+
+        <section class="tab-panel" data-panel="sources" hidden>
+          <h2>Learning sources</h2>
+          <textarea id="import-text" spellcheck="false">apple 苹果
+resilient 有韧性的
+context 上下文
+iterate 迭代</textarea>
+          <div class="inline-controls">
+            <input id="import-file" type="file" accept=".txt,.md,.csv,.json" />
+            <button id="import-ai" type="button">AI 转卡片</button>
+          </div>
+          <h2>Course plan</h2>
+          <label>
+            Subject
+            <input id="subject-input" autocomplete="off" spellcheck="false" placeholder="psychology, economics, AI, history..." />
+          </label>
+          <label>
+            Current level
+            <input id="level-input" autocomplete="off" spellcheck="false" placeholder="zero basis, know some concepts, practiced before..." />
+          </label>
+          <div class="inline-controls">
+            <button id="plan-course" type="button">生成课程</button>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="settings" hidden>
+          <h2>AI and voice</h2>
+          <label>
+            Learning API
+            <input id="api-base-url" autocomplete="off" spellcheck="false" placeholder="http://localhost:8793" />
+          </label>
+          <label>
+            token
+            <input id="api-token" autocomplete="off" spellcheck="false" />
+          </label>
+          <div class="inline-controls">
+            <button id="save-settings" type="button">保存</button>
+            <button id="toggle-voice" type="button">开启语音</button>
+            <button id="mock-repeat" type="button">模拟跟读</button>
+          </div>
+          <p id="voice-line" class="voice">语音：未开启</p>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
