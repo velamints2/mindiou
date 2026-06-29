@@ -79,6 +79,7 @@ h1 {
   font-size: 30px;
   line-height: 1.18;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .coach,
@@ -87,6 +88,7 @@ h1 {
   color: #98d6c9;
   font-size: 16px;
   line-height: 1.35;
+  white-space: pre-wrap;
 }
 
 .study-actions,

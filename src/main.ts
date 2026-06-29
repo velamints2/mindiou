@@ -16,6 +16,14 @@ import {
   type LearningSessionEvent,
   type LearningSessionState
 } from "./session";
+import {
+  localTutorResponse,
+  tutorGlassesText,
+  tutorPhoneText,
+  tutorStateEvents,
+  type TutorKind,
+  type TutorResponse
+} from "./tutor";
 import "./styles.css";
 
 type LearningCard = {
@@ -38,13 +46,6 @@ type PlanResponse = {
   ok: boolean;
   cards?: LearningCard[];
   overview?: string;
-  error?: string;
-};
-
-type TutorResponse = {
-  ok: boolean;
-  message?: string;
-  nextQuestion?: string;
   error?: string;
 };
 
@@ -519,15 +520,17 @@ async function planCourse(): Promise<void> {
   }
 }
 
-async function askTutor(kind: "ask" | "repeat" | "known" | "answer", transcript = ""): Promise<void> {
+async function askTutor(kind: TutorKind, transcript = ""): Promise<void> {
   const card = currentCard();
   if (!card) return;
   if (kind === "ask") advanceSession("ASK");
+  if (kind === "repeat") advanceSession("EXPLAIN");
   if (kind === "answer") {
     if (sessionState !== "listening") advanceSession("START_LISTENING");
     advanceSession("SUBMIT_ANSWER");
   }
   setStatus("ai");
+  const fallback = localTutorResponse(kind, card, transcript);
   try {
     const payload = await apiPost<TutorResponse>("/api/learn/tutor", {
       kind,
@@ -535,28 +538,18 @@ async function askTutor(kind: "ask" | "repeat" | "known" | "answer", transcript 
       transcript,
       progress: { index: cardIndex, total: cards.length }
     });
-    if (payload.ok) {
-      setCoach(payload.nextQuestion || payload.message || localTutor(kind, card, transcript));
-    } else {
-      setCoach(localTutor(kind, card, transcript));
-    }
+    const response = payload.ok ? payload : fallback;
+    for (const event of tutorStateEvents(kind, response)) advanceSession(event);
+    cardBackEl.textContent = tutorPhoneText(response, fallback);
+    setCoach(tutorGlassesText(response, fallback));
   } catch {
-    setCoach(localTutor(kind, card, transcript));
+    for (const event of tutorStateEvents(kind, fallback)) advanceSession(event);
+    cardBackEl.textContent = tutorPhoneText(fallback, fallback);
+    setCoach(tutorGlassesText(fallback, fallback));
   } finally {
-    advanceSession("FEEDBACK_READY");
+    if (kind === "answer") answerTextEl.value = "";
     setStatus(bridgeReady ? "g2" : "mock");
   }
-}
-
-function localTutor(kind: "ask" | "repeat" | "known" | "answer", card: LearningCard, transcript = ""): string {
-  if (kind === "repeat") return `不错。再读一遍 ${card.front}，然后说：${card.back}`;
-  if (kind === "known") return `已标记会了。下一张前，快速回忆：${card.front} = ?`;
-  if (kind === "answer") {
-    if (!transcript) return "请先用自己的话回答，再提交。";
-    return `已收到回答：“${fit(transcript, 28)}”。再补充一个例子或类比。`;
-  }
-  if (transcript) return `你刚才说“${fit(transcript, 24)}”。请用 ${card.front} 造一个短句。`;
-  return `小测：${card.front} 的意思是什么？`;
 }
 
 async function performAction(action: StudyAction, transcript = ""): Promise<void> {

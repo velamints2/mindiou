@@ -111,5 +111,6 @@ This gate is intentionally deferred until Gates 1 through 5 pass.
 | Real G2 microphone | Not verified | PCM assumptions require device evidence |
 | Real AI interaction | Not verified | No configured AI key in the last validation |
 | End-to-end latency | Not measured | Requires real network, STT, and AI |
-| Learning state machine | Not implemented | Design target only |
+| Learning state machine | Partial pass | `src/session.ts` and `src/tutor.ts` connect answer evaluation to feedback, follow-up, and summary states |
+| Feynman fallback loop | Partial pass | `/api/learn/tutor` returns structured fallback feedback without an AI key |
 | Daily reflection MVP | Deferred | Begins after hardware and latency gates |

@@ -58,8 +58,10 @@ Neither should be mistaken for a final persistence architecture.
 | `summary` | Reflection complete | Session summary | AI reads concise summary |
 | `review_scheduled` | Review saved | Review recommendation | End or continue |
 
-This table is the design target for the next implementation phase. The current
-code does not yet implement this state machine.
+The current code implements this state-machine skeleton in `src/session.ts` and
+connects answer evaluation to `feedback`, `follow_up`, and `summary` through the
+structured tutor protocol in `src/tutor.ts`. Real-device microphone and latency
+evidence are still required before treating the loop as hardware-validated.
 
 ## Voice Rules
 

@@ -4,6 +4,8 @@
   "checks": {
     "bootLitPixels": 7102,
     "bootLitRatio": 0.04281201774691358,
-    "ignoredClickKeptFrame": true
+    "ignoredClickKeptFrame": true,
+    "tutorAssessment": "partial",
+    "tutorG2Text": "Add one example"
   }
 }

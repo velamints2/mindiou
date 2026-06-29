@@ -77,6 +77,123 @@ function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function fit(value, max) {
+  const text = clean(value);
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function textArray(value, maxItems = 3, maxLength = 90) {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => clean(item).slice(0, maxLength)).filter(Boolean).slice(0, maxItems);
+}
+
+function parseJsonObject(text) {
+  const stripped = String(text || "{}").trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "");
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    const start = stripped.indexOf("{");
+    const end = stripped.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(stripped.slice(start, end + 1));
+    throw new Error("Model did not return a JSON object");
+  }
+}
+
+const validAssessments = new Set(["correct", "partial", "incorrect", "unknown"]);
+
+function normalizeAssessment(value, fallback = "unknown") {
+  const assessment = clean(value).toLowerCase();
+  return validAssessments.has(assessment) ? assessment : fallback;
+}
+
+function baseTutorResult(kind, card, transcript) {
+  const front = clean(card.front || "this concept");
+  const back = clean(card.back || "the core idea");
+
+  if (kind === "repeat") {
+    return {
+      assessment: "unknown",
+      message: `再听一遍：${front}。先说核心意思，再补一个例子。`,
+      missingPoints: [],
+      nextQuestion: `用自己的话解释 ${front}，不要照读。`,
+      summary: "",
+      g2Text: `Explain ${fit(front, 24)}`,
+      shouldFollowUp: true
+    };
+  }
+
+  if (kind === "known") {
+    return {
+      assessment: "correct",
+      message: "已标记会了。下一次复习时优先检查你能否举例。",
+      missingPoints: [],
+      nextQuestion: "",
+      summary: `${front}: ${back}`,
+      g2Text: "Marked known",
+      shouldFollowUp: false
+    };
+  }
+
+  if (kind === "answer") {
+    if (!transcript) {
+      return {
+        assessment: "incorrect",
+        message: "还没有收到你的解释。先用一句自己的话说核心意思。",
+        missingPoints: ["需要主动解释核心含义"],
+        nextQuestion: `如果讲给朋友听，${front} 是什么意思？`,
+        summary: "",
+        g2Text: "Try explaining",
+        shouldFollowUp: true
+      };
+    }
+
+    return {
+      assessment: transcript.length > 24 ? "partial" : "partial",
+      message: `收到你的回答：“${fit(transcript, 36)}”。方向可以，下一步要把概念和具体情境连起来。`,
+      missingPoints: ["补一个真实例子或应用场景"],
+      nextQuestion: `请举一个生活或工作里的 ${front} 例子。`,
+      summary: "",
+      g2Text: "Add one example",
+      shouldFollowUp: true
+    };
+  }
+
+  return {
+    assessment: "unknown",
+    message: `小测：${front} 的核心意思是什么？`,
+    missingPoints: [],
+    nextQuestion: `请用简单语言解释 ${front}。`,
+    summary: "",
+    g2Text: `Explain ${fit(front, 24)}`,
+    shouldFollowUp: true
+  };
+}
+
+function normalizeTutorResult(input, context) {
+  const base = baseTutorResult(context.kind, context.card, context.transcript);
+  const assessment = normalizeAssessment(input.assessment, base.assessment);
+  const missingPoints = textArray(input.missingPoints).length ? textArray(input.missingPoints) : base.missingPoints;
+  const nextQuestion = clean(input.nextQuestion || input.followUpQuestion || base.nextQuestion).slice(0, 180);
+  const summary = clean(input.summary || base.summary).slice(0, 220);
+  const shouldFollowUp = typeof input.shouldFollowUp === "boolean"
+    ? input.shouldFollowUp
+    : Boolean(nextQuestion) && context.kind !== "known";
+
+  return {
+    ok: true,
+    action: context.kind,
+    assessment,
+    message: clean(input.message || input.feedback || base.message).slice(0, 360),
+    missingPoints,
+    nextQuestion,
+    summary,
+    g2Text: fit(input.g2Text || base.g2Text || nextQuestion || summary, 42),
+    shouldFollowUp
+  };
+}
+
 function fallbackCards(text, maxCards = 40) {
   const lines = String(text || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   return lines.slice(0, maxCards).map(line => {
@@ -141,7 +258,7 @@ async function chatJson(messages, fallback) {
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error?.message || `OpenAI HTTP ${response.status}`);
   const content = payload.choices?.[0]?.message?.content || "{}";
-  return JSON.parse(content);
+  return parseJsonObject(content);
 }
 
 async function importCards(payload) {
@@ -240,34 +357,31 @@ async function tutor(payload) {
   const card = payload.card || {};
   const kind = clean(payload.kind || "ask");
   const transcript = clean(payload.transcript || "");
-  const fallback = () => ({
-    ok: true,
-    message: kind === "answer"
-      ? `我收到你的回答：“${transcript || "空回答"}”。先确认你理解的部分，再补一个具体例子。`
-      : kind === "known" ? "已标记会了。继续下一张。" : `小测：${clean(card.front)} 的核心意思是什么？`,
-    nextQuestion: kind === "repeat"
-      ? `用自己的话解释 ${clean(card.front)}，不要照读。`
-      : kind === "answer"
-        ? `请再举一个生活例子，说明 ${clean(card.front)}。`
-        : `请用简单语言解释 ${clean(card.front)}。`
-  });
+  const safeKind = ["ask", "repeat", "known", "answer"].includes(kind) ? kind : "ask";
+  const context = { kind: safeKind, card, transcript };
+  const fallback = () => normalizeTutorResult({}, context);
 
   try {
-    return await chatJson([
+    const result = await chatJson([
       {
         role: "system",
         content: [
           learningCoachSystemPrompt,
-          "Return JSON only: {\"ok\":true,\"message\":\"\",\"nextQuestion\":\"\"}.",
-          "message should evaluate or guide the learner briefly.",
-          "nextQuestion should be one Feynman-style question or correction prompt.",
-          "If action is answer, evaluate the learnerSaid field."
+          "Return JSON only using this schema:",
+          "{\"ok\":true,\"assessment\":\"correct|partial|incorrect|unknown\",\"message\":\"\",\"missingPoints\":[\"\"],\"nextQuestion\":\"\",\"summary\":\"\",\"g2Text\":\"\",\"shouldFollowUp\":true}.",
+          "assessment evaluates learnerSaid only when action is answer; otherwise use unknown unless action is known.",
+          "message is the learner-facing feedback. First affirm correct parts, then point out missing or confused parts.",
+          "missingPoints contains at most 3 short missing ideas. Use [] if nothing is missing.",
+          "nextQuestion is one Feynman or Socratic follow-up that makes the learner explain, compare, give an example, or apply the idea.",
+          "summary is optional and should be a compact review note when no follow-up is needed.",
+          "g2Text must be one short glasses line, max 42 characters, no markdown.",
+          "If the answer is wrong or empty, re-explain simply and invite another attempt without criticism."
         ].join(" ")
       },
       {
         role: "user",
         content: JSON.stringify({
-          action: kind,
+          action: safeKind,
           card: {
             front: card.front,
             back: card.back,
@@ -278,6 +392,7 @@ async function tutor(payload) {
         })
       }
     ], fallback);
+    return normalizeTutorResult(result, context);
   } catch (error) {
     return { ...fallback(), fallback: true, error: error.message };
   }

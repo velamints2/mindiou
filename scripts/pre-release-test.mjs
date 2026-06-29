@@ -45,11 +45,43 @@ async function events() {
   return (await response.json()).events || [];
 }
 
+async function apiPost(path, body) {
+  const response = await fetch(`${apiUrl}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+  return response.json();
+}
+
 function assert(condition, message) {
   if (!condition) failures.push(message);
 }
 
+function assertTutorSchema(payload) {
+  const assessments = new Set(["correct", "partial", "incorrect", "unknown"]);
+  assert(payload.ok === true, "Tutor API did not return ok=true.");
+  assert(assessments.has(payload.assessment), "Tutor API returned an invalid assessment.");
+  assert(Array.isArray(payload.missingPoints), "Tutor API missingPoints is not an array.");
+  assert(typeof payload.nextQuestion === "string", "Tutor API nextQuestion is not a string.");
+  assert(typeof payload.g2Text === "string" && payload.g2Text.length > 0, "Tutor API g2Text is empty.");
+  assert(payload.g2Text.length <= 42, "Tutor API g2Text is too long for G2.");
+}
+
 await request("/api/ping");
+const tutorPayload = await apiPost("/api/learn/tutor", {
+  kind: "answer",
+  card: {
+    front: "cognitive dissonance",
+    back: "认知失调",
+    prompt: "Explain it in your own words."
+  },
+  transcript: "就是想法和行为冲突的时候会不舒服",
+  progress: { index: 0, total: 1 }
+});
+assertTutorSchema(tutorPayload);
+
 const boot = await screenshot("01-boot");
 assert(boot.litPixels > 500, "Boot framebuffer is blank.");
 assert(boot.litPixels / boot.totalPixels < 0.35, "Boot framebuffer is overfilled.");
@@ -95,7 +127,9 @@ const report = {
   checks: {
     bootLitPixels: boot.litPixels,
     bootLitRatio: boot.litPixels / boot.totalPixels,
-    ignoredClickKeptFrame: afterClick.hash === boot.hash
+    ignoredClickKeptFrame: afterClick.hash === boot.hash,
+    tutorAssessment: tutorPayload.assessment,
+    tutorG2Text: tutorPayload.g2Text
   }
 };
 await writeFile(`${outputDir}/report.json`, JSON.stringify(report, null, 2));

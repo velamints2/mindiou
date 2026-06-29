@@ -62,11 +62,13 @@ The plugin follows the current Even Hub WebView pattern:
 
 1. Wait for `waitForEvenAppBridge()`.
 2. Call `createStartUpPageContainer(...)`.
-3. Render four text containers: front, answer, coach prompt, progress.
-4. Render one selectable list: `Repeat | Ask | Next | Known`.
-5. Update text with `textContainerUpgrade(...)`.
-6. Start voice with `audioControl(true, AudioInputSource.Glasses)`.
-7. Send MIC PCM to `/api/learn/transcribe` when a backend is configured.
+3. Render one large concept image and one short event-capturing text footer.
+4. Update the footer with `textContainerUpgrade(...)`.
+5. Update the concept image with serialized `updateImageRawData(...)` calls.
+6. Treat swipe up as previous and swipe down as next.
+7. Ignore tap until click events can be distinguished reliably from unsolicited system events.
+8. Start voice with `audioControl(true, AudioInputSource.Glasses)`.
+9. Send MIC PCM to `/api/learn/transcribe` when a backend is configured.
 
 In a normal browser, it uses Web Speech API when available and keeps the G2 bridge in `mock` mode.
 
@@ -74,7 +76,8 @@ In a normal browser, it uses Web Speech API when available and keeps the G2 brid
 
 - `POST /api/learn/import`: turns raw text into cards.
 - `POST /api/learn/plan`: creates learning units from a subject and learner level.
-- `POST /api/learn/tutor`: generates a brief question or feedback.
+- `POST /api/learn/tutor`: returns structured coaching feedback:
+  `assessment`, `missingPoints`, `nextQuestion`, `summary`, and short `g2Text`.
 - `POST /api/learn/transcribe`: accepts base64 PCM16 and returns transcript text.
 - `POST /api/learn/events`: records bridge, G2 input, audio, transcript, and action events.
 - `GET /api/learn/events`: returns recent in-memory telemetry.
@@ -101,8 +104,9 @@ release/learn-coach-0.1.4.ehpk
 
 Version `0.1.4` is a controlled real-device experiment: it uses one serialized
 `288x144` concept image for large text and replaces the clipped vertical list
-with tap/up/down gestures. It ignores ambiguous system events, debounces gestures,
-and skips unchanged image updates. Keep `release/learn-coach-0.1.2.ehpk` as the
+with the current safe contract: swipe up previous, swipe down next, tap ignored.
+It ignores ambiguous system events, debounces gestures, and skips unchanged image
+updates. Keep `release/learn-coach-0.1.2.ehpk` as the
 text-only stable fallback. Do not use `0.1.1`; its four startup image transfers
 caused a real G2 BLE disconnection.
 
