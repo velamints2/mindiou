@@ -8,6 +8,7 @@ build is not evidence that the G2 experience works.
 ## Gate 1: Static
 
 ```bash
+npm test
 npm run check
 node -c server.js
 npm run build
@@ -16,6 +17,7 @@ npm run build
 Required:
 
 - no type or syntax errors;
+- session-state transition tests pass;
 - manifest and package versions match;
 - the package filename uses the same version;
 - no unsupported container dimensions;

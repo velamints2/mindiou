@@ -10,6 +10,12 @@ import {
   TextContainerUpgrade,
   waitForEvenAppBridge
 } from "@evenrealities/even_hub_sdk";
+import {
+  sessionLabel,
+  transitionSession,
+  type LearningSessionEvent,
+  type LearningSessionState
+} from "./session";
 import "./styles.css";
 
 type LearningCard = {
@@ -116,6 +122,7 @@ let apiBaseUrl = readSetting("g2LearningApiBaseUrl", "api", "http://localhost:87
 let apiToken = readSetting("g2LearningApiToken", "token", "");
 let audioChunks: Uint8Array[] = [];
 let lastAudioSendAt = 0;
+let sessionState: LearningSessionState = transitionSession("idle", "START");
 
 apiBaseUrlEl.value = apiBaseUrl;
 apiTokenEl.value = apiToken;
@@ -194,6 +201,12 @@ function setStatus(text: string): void {
   void logEvent("status", { text });
 }
 
+function advanceSession(event: LearningSessionEvent): void {
+  sessionState = transitionSession(sessionState, event);
+  sessionStateEl.textContent = sessionLabel(sessionState);
+  void logEvent("session_state", { state: sessionState, event });
+}
+
 function setCoach(text: string): void {
   coachLineEl.textContent = text;
   void renderGlasses(false);
@@ -239,7 +252,7 @@ function updateWebView(): void {
 
 function glassesContent(card: LearningCard | null): string {
   const prompt = fit(coachLineEl.textContent || card?.prompt || "Explain aloud", 42);
-  return `${prompt}\nUp Previous  Down Next  ${progressText()}`;
+  return `${prompt}\n${sessionLabel(sessionState)}  Up Previous  Down Next  ${progressText()}`;
 }
 
 function displayText(card: LearningCard | null): TextContainerProperty {
@@ -509,6 +522,11 @@ async function planCourse(): Promise<void> {
 async function askTutor(kind: "ask" | "repeat" | "known" | "answer", transcript = ""): Promise<void> {
   const card = currentCard();
   if (!card) return;
+  if (kind === "ask") advanceSession("ASK");
+  if (kind === "answer") {
+    if (sessionState !== "listening") advanceSession("START_LISTENING");
+    advanceSession("SUBMIT_ANSWER");
+  }
   setStatus("ai");
   try {
     const payload = await apiPost<TutorResponse>("/api/learn/tutor", {
@@ -525,6 +543,7 @@ async function askTutor(kind: "ask" | "repeat" | "known" | "answer", transcript 
   } catch {
     setCoach(localTutor(kind, card, transcript));
   } finally {
+    advanceSession("FEEDBACK_READY");
     setStatus(bridgeReady ? "g2" : "mock");
   }
 }
@@ -548,6 +567,7 @@ async function performAction(action: StudyAction, transcript = ""): Promise<void
     cardIndex = cards.length ? (cardIndex + 1) % cards.length : 0;
     saveCards();
     updateWebView();
+    advanceSession("NAVIGATE");
     await renderGlasses(false);
     return;
   }
@@ -556,6 +576,7 @@ async function performAction(action: StudyAction, transcript = ""): Promise<void
     cardIndex = cards.length ? (cardIndex - 1 + cards.length) % cards.length : 0;
     saveCards();
     updateWebView();
+    advanceSession("NAVIGATE");
     await renderGlasses(false);
     return;
   }
@@ -632,6 +653,7 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 async function startVoice(): Promise<void> {
   voiceEnabled = true;
+  advanceSession("START_LISTENING");
   toggleVoiceButton.textContent = "关闭语音";
   setVoice("开启中");
 
@@ -674,6 +696,7 @@ async function startVoice(): Promise<void> {
 
 async function stopVoice(): Promise<void> {
   voiceEnabled = false;
+  advanceSession("END");
   toggleVoiceButton.textContent = "开启语音";
   speechRecognition?.stop();
   speechRecognition = null;
@@ -723,7 +746,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(button => {
 });
 
 updateWebView();
-sessionStateEl.textContent = "CONCEPT";
+sessionStateEl.textContent = sessionLabel(sessionState);
 void logEvent("app_loaded", {
   cards: cards.length,
   url: window.location.href,

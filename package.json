@@ -9,6 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4175",
     "check": "tsc --noEmit",
+    "test": "vitest run",
     "test:simulator": "node scripts/pre-release-test.mjs",
     "launch-url": "node scripts/print-launch-url.mjs"
   },
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.1.13",
     "pngjs": "^7.0.0",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "vitest": "^3.2.4"
   }
 }
