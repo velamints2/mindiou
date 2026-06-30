@@ -66,6 +66,8 @@ These are prototype targets and may be revised from real-device evidence.
       misclassified.
 - [ ] Unclear speech is treated as an answer or clarification request, not a
       destructive command.
+- [ ] Duplicate transcripts do not trigger repeated navigation or repeated tutor
+      submissions inside the dedupe window.
 - [ ] Command and answer classification is included in telemetry.
 - [ ] The learner can recover from a wrong classification by voice or phone.
 

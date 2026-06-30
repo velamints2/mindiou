@@ -20,6 +20,8 @@ Required:
 - session-state transition tests pass;
 - voice command tests prove short explicit commands are recognized and long
   explanatory answers containing command words remain learner answers;
+- transcript intake tests prove empty and duplicate transcripts are ignored
+  without blocking later utterances;
 - manifest and package versions match;
 - the package filename uses the same version;
 - no unsupported container dimensions;

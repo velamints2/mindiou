@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseVoiceAction } from "./voice";
+import { parseVoiceAction, TranscriptIntake } from "./voice";
 
 describe("voice action parser", () => {
   it("recognizes short explicit Chinese commands", () => {
@@ -24,5 +24,21 @@ describe("voice action parser", () => {
     expect(parseVoiceAction("I think next means the following item in a sequence")).toBeNull();
     expect(parseVoiceAction("I got it wrong because I forgot the example")).toBeNull();
     expect(parseVoiceAction("repeat means to say something one more time")).toBeNull();
+  });
+
+  it("deduplicates repeated transcripts inside a short window", () => {
+    const intake = new TranscriptIntake(3000);
+
+    expect(intake.accept("下一张", 1000).accepted).toBe(true);
+    expect(intake.accept("下一张", 2000)).toMatchObject({ accepted: false, reason: "duplicate" });
+    expect(intake.accept("下一张", 4500).accepted).toBe(true);
+  });
+
+  it("allows different transcripts and ignores empty transcripts", () => {
+    const intake = new TranscriptIntake(3000);
+
+    expect(intake.accept("   ", 1000)).toMatchObject({ accepted: false, reason: "empty" });
+    expect(intake.accept("next", 1000).accepted).toBe(true);
+    expect(intake.accept("repeat", 1200).accepted).toBe(true);
   });
 });

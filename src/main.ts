@@ -24,7 +24,7 @@ import {
   type TutorKind,
   type TutorResponse
 } from "./tutor";
-import { parseVoiceAction, type VoiceAction } from "./voice";
+import { parseVoiceAction, TranscriptIntake, type VoiceAction } from "./voice";
 import "./styles.css";
 
 type LearningCard = {
@@ -122,7 +122,11 @@ let apiBaseUrl = readSetting("g2LearningApiBaseUrl", "api", "http://localhost:87
 let apiToken = readSetting("g2LearningApiToken", "token", "");
 let audioChunks: Uint8Array[] = [];
 let lastAudioSendAt = 0;
+let lastTranscribeSkipAt = 0;
+let pcmFlushScheduled = false;
+let transcriptionInFlight = false;
 let sessionState: LearningSessionState = transitionSession("idle", "START");
+const transcriptIntake = new TranscriptIntake();
 
 apiBaseUrlEl.value = apiBaseUrl;
 apiTokenEl.value = apiToken;
@@ -585,23 +589,57 @@ async function performAction(action: StudyAction, transcript = ""): Promise<void
 }
 
 async function handleTranscript(text: string): Promise<void> {
-  void logEvent("transcript", { text });
-  setVoice(fit(text, 42));
-  const action = parseVoiceAction(text);
-  void logEvent("voice_action", { action, text });
-  if (action) await performAction(action, text);
-  else await askTutor("answer", text);
+  const intake = transcriptIntake.accept(text);
+  if (!intake.accepted) {
+    void logEvent("transcript_ignored", {
+      reason: intake.reason,
+      text: fit(text, 42),
+      normalized: intake.normalized
+    });
+    return;
+  }
+
+  void logEvent("transcript", { text: intake.text, normalized: intake.normalized });
+  setVoice(fit(intake.text, 42));
+  const action = parseVoiceAction(intake.text);
+  void logEvent("voice_action", { action, text: intake.text });
+  if (action) await performAction(action, intake.text);
+  else await askTutor("answer", intake.text);
 }
 
 async function handlePcmAudio(chunk: Uint8Array): Promise<void> {
   audioChunks.push(chunk);
   const now = Date.now();
   if (now - lastAudioSendAt < 2200) return;
-  lastAudioSendAt = now;
+
+  await flushPcmAudio();
+}
+
+function schedulePcmFlush(delayMs = 250): void {
+  if (pcmFlushScheduled) return;
+  pcmFlushScheduled = true;
+  window.setTimeout(() => {
+    pcmFlushScheduled = false;
+    void flushPcmAudio();
+  }, delayMs);
+}
+
+async function flushPcmAudio(): Promise<void> {
+  if (transcriptionInFlight) {
+    const now = Date.now();
+    if (now - lastTranscribeSkipAt > 1000) {
+      lastTranscribeSkipAt = now;
+      void logEvent("transcribe_skipped", { reason: "in_flight", chunks: audioChunks.length });
+    }
+    return;
+  }
+
+  lastAudioSendAt = Date.now();
 
   const merged = mergeChunks(audioChunks.splice(0));
   if (!merged.length) return;
 
+  transcriptionInFlight = true;
   try {
     const payload = await apiPost<TranscriptResponse>("/api/learn/transcribe", {
       source: "even-g2",
@@ -612,6 +650,9 @@ async function handlePcmAudio(chunk: Uint8Array): Promise<void> {
     if (payload.ok && payload.text) await handleTranscript(payload.text);
   } catch (error) {
     console.warn("PCM transcription failed", error);
+  } finally {
+    transcriptionInFlight = false;
+    if (audioChunks.length) schedulePcmFlush();
   }
 }
 
@@ -634,6 +675,7 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 async function startVoice(): Promise<void> {
   voiceEnabled = true;
+  transcriptIntake.reset();
   advanceSession("START_LISTENING");
   toggleVoiceButton.textContent = "关闭语音";
   setVoice("开启中");
@@ -677,6 +719,7 @@ async function startVoice(): Promise<void> {
 
 async function stopVoice(): Promise<void> {
   voiceEnabled = false;
+  transcriptIntake.reset();
   advanceSession("END");
   toggleVoiceButton.textContent = "开启语音";
   speechRecognition?.stop();

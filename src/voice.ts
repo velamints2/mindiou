@@ -1,4 +1,9 @@
 export type VoiceAction = "repeat" | "ask" | "next" | "known";
+export type TranscriptIgnoreReason = "empty" | "duplicate";
+
+export type TranscriptIntakeResult =
+  | { accepted: true; text: string; normalized: string }
+  | { accepted: false; text: string; normalized: string; reason: TranscriptIgnoreReason };
 
 const chinesePrefixes = ["请帮我", "麻烦你", "请你", "帮我", "麻烦", "可以", "请"];
 const englishPrefixes = ["please ", "can you ", "could you ", "ok ", "okay "];
@@ -68,4 +73,28 @@ export function parseVoiceAction(text: string): VoiceAction | null {
   }
 
   return null;
+}
+
+export class TranscriptIntake {
+  private lastNormalized = "";
+  private lastAcceptedAt = 0;
+
+  constructor(private readonly duplicateWindowMs = 3500) {}
+
+  accept(text: string, now = Date.now()): TranscriptIntakeResult {
+    const normalized = normalizeVoiceText(text);
+    if (!normalized) return { accepted: false, text, normalized, reason: "empty" };
+
+    const isDuplicate = normalized === this.lastNormalized && now - this.lastAcceptedAt < this.duplicateWindowMs;
+    if (isDuplicate) return { accepted: false, text, normalized, reason: "duplicate" };
+
+    this.lastNormalized = normalized;
+    this.lastAcceptedAt = now;
+    return { accepted: true, text, normalized };
+  }
+
+  reset(): void {
+    this.lastNormalized = "";
+    this.lastAcceptedAt = 0;
+  }
 }

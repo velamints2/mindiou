@@ -84,6 +84,8 @@ The current command parser lives in `src/voice.ts`. It only treats short,
 explicit Chinese or English utterances as commands. Longer explanatory answers
 that contain words such as `next`, `repeat`, `下一个`, or `会了` must remain
 learner answers and should be covered by tests before changing this behavior.
+The same module owns transcript intake deduplication so repeated STT results do
+not trigger repeated navigation or repeated tutor submissions.
 
 For real-device testing, record:
 
@@ -97,6 +99,8 @@ For real-device testing, record:
 - AI request start and end time;
 - final response time;
 - parsed command or answer classification.
+- ignored transcript reason, if any;
+- skipped transcription reason, if any.
 
 ## Local Run
 
