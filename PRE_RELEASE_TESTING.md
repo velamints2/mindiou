@@ -34,6 +34,7 @@ Start the API and test fallback behavior:
 ```bash
 npm run api
 curl http://localhost:8793/health
+npm run test:voice
 ```
 
 Required:
@@ -41,6 +42,10 @@ Required:
 - health responds;
 - import, plan, and tutor fallback return structured data;
 - missing AI/STT configuration is explicit;
+- G2 PCM is treated as 16 kHz mono s16le and transcription telemetry records
+  byte count, estimated audio duration, and request latency;
+- `VOICE_TEST_PCM=/path/to/sample.pcm npm run test:voice` completes a real STT
+  request when an API key is configured;
 - network failure leaves the learning session recoverable.
 
 ## Gate 3: Official Simulator

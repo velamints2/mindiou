@@ -54,6 +54,7 @@ type TranscriptResponse = {
   ok: boolean;
   text?: string;
   confidence?: number;
+  latencyMs?: number;
   error?: string;
 };
 
@@ -125,6 +126,10 @@ let lastAudioSendAt = 0;
 let lastTranscribeSkipAt = 0;
 let pcmFlushScheduled = false;
 let transcriptionInFlight = false;
+let g2AudioActive = false;
+let audioCaptureStartedAt = 0;
+let audioEventCount = 0;
+let audioByteCount = 0;
 let sessionState: LearningSessionState = transitionSession("idle", "START");
 const transcriptIntake = new TranscriptIntake();
 const NAVIGATION_IMAGE_DELAY_MS = 420;
@@ -212,6 +217,7 @@ function advanceSession(event: LearningSessionEvent): void {
   sessionState = transitionSession(sessionState, event);
   sessionStateEl.textContent = sessionLabel(sessionState);
   void logEvent("session_state", { state: sessionState, event });
+  void requestFooterUpdate();
 }
 
 function setCoach(text: string): void {
@@ -258,10 +264,17 @@ function updateWebView(): void {
 }
 
 let glassesNotice = "";
+let voiceActivity = "";
 
 function glassesContent(card: LearningCard | null): string {
   if (glassesNotice) return `${glassesNotice}  ${progressText()}\nUpdating image...`;
+  if (voiceActivity) return `${voiceActivity}  ${progressText()}\nUp Previous  Down Next`;
   return `${sessionLabel(sessionState)}  ${progressText()}\nUp Previous  Down Next`;
+}
+
+function setVoiceActivity(text: string): void {
+  voiceActivity = fit(text, 28);
+  void requestFooterUpdate();
 }
 
 function displayText(card: LearningCard | null): TextContainerProperty {
@@ -684,6 +697,7 @@ async function askTutor(kind: TutorKind, transcript = ""): Promise<void> {
   if (kind === "answer") {
     if (sessionState !== "listening") advanceSession("START_LISTENING");
     advanceSession("SUBMIT_ANSWER");
+    setVoiceActivity("Evaluating");
   }
   setStatus("ai");
   const fallback = localTutorResponse(kind, card, transcript);
@@ -704,6 +718,7 @@ async function askTutor(kind: TutorKind, transcript = ""): Promise<void> {
     setCoach(tutorGlassesText(fallback, fallback));
   } finally {
     if (kind === "answer") answerTextEl.value = "";
+    if (kind === "answer" && voiceEnabled) setVoiceActivity("Listening");
     setStatus(bridgeReady ? "g2" : "mock");
   }
 }
@@ -751,6 +766,7 @@ async function handleTranscript(text: string): Promise<void> {
       text: fit(text, 42),
       normalized: intake.normalized
     });
+    if (voiceEnabled) setVoiceActivity("Listening");
     return;
   }
 
@@ -758,11 +774,18 @@ async function handleTranscript(text: string): Promise<void> {
   setVoice(fit(intake.text, 42));
   const action = parseVoiceAction(intake.text);
   void logEvent("voice_action", { action, text: intake.text });
-  if (action) await performAction(action, intake.text);
-  else await askTutor("answer", intake.text);
+  if (action) {
+    setVoiceActivity(`Voice: ${action}`);
+    await performAction(action, intake.text);
+    if (voiceEnabled) setVoiceActivity("Listening");
+  } else {
+    await askTutor("answer", intake.text);
+  }
 }
 
 async function handlePcmAudio(chunk: Uint8Array): Promise<void> {
+  audioEventCount += 1;
+  audioByteCount += chunk.length;
   audioChunks.push(chunk);
   const now = Date.now();
   if (now - lastAudioSendAt < 2200) return;
@@ -794,7 +817,17 @@ async function flushPcmAudio(): Promise<void> {
   const merged = mergeChunks(audioChunks.splice(0));
   if (!merged.length) return;
 
+  const audioDurationMs = Math.round(merged.length / 32);
+  const requestStartedAt = Date.now();
   transcriptionInFlight = true;
+  setVoice(`识别中 ${audioDurationMs}ms`);
+  setVoiceActivity("Transcribing");
+  void logEvent("transcribe_start", {
+    bytes: merged.length,
+    audioDurationMs,
+    sampleRate: 16000,
+    format: "pcm_s16le_mono"
+  });
   try {
     const payload = await apiPost<TranscriptResponse>("/api/learn/transcribe", {
       source: "even-g2",
@@ -802,8 +835,36 @@ async function flushPcmAudio(): Promise<void> {
       sampleRate: 16000,
       audioBase64: bytesToBase64(merged)
     });
-    if (payload.ok && payload.text) await handleTranscript(payload.text);
+    const latencyMs = Date.now() - requestStartedAt;
+    if (!payload.ok || !payload.text) {
+      const message = fit(payload.error || "没有识别到语音", 34);
+      setVoice(`转写失败：${message}`);
+      setVoiceActivity("STT unavailable");
+      void logEvent("transcribe_error", {
+        error: payload.error || "empty transcript",
+        latencyMs,
+        bytes: merged.length,
+        audioDurationMs
+      });
+      return;
+    }
+    void logEvent("transcribe_complete", {
+      latencyMs,
+      bytes: merged.length,
+      audioDurationMs,
+      text: fit(payload.text, 42)
+    });
+    await handleTranscript(payload.text);
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setVoice(`转写失败：${fit(message, 34)}`);
+    setVoiceActivity("STT unavailable");
+    void logEvent("transcribe_error", {
+      error: message,
+      latencyMs: Date.now() - requestStartedAt,
+      bytes: merged.length,
+      audioDurationMs
+    });
     console.warn("PCM transcription failed", error);
   } finally {
     transcriptionInFlight = false;
@@ -830,15 +891,27 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 async function startVoice(): Promise<void> {
   voiceEnabled = true;
+  g2AudioActive = false;
   transcriptIntake.reset();
+  audioChunks = [];
+  lastAudioSendAt = Date.now();
+  audioCaptureStartedAt = lastAudioSendAt;
+  audioEventCount = 0;
+  audioByteCount = 0;
   advanceSession("START_LISTENING");
   toggleVoiceButton.textContent = "关闭语音";
   setVoice("开启中");
+  setVoiceActivity("Listening");
 
   if (bridge) {
     const ok = await bridge.audioControl(true, AudioInputSource.Glasses);
+    g2AudioActive = ok;
     void logEvent("audio_control", { open: true, source: "glasses", ok });
     setVoice(ok ? "G2 MIC 已开启" : "G2 MIC 不可用，尝试手机语音");
+    if (ok) {
+      await renderGlasses(false);
+      return;
+    }
   }
 
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -851,7 +924,17 @@ async function startVoice(): Promise<void> {
       const latest = event.results[event.results.length - 1]?.[0]?.transcript || "";
       void handleTranscript(latest);
     };
-    speechRecognition.onerror = event => setVoice(`浏览器识别错误 ${event.error || ""}`.trim());
+    speechRecognition.onerror = event => {
+      const reason = event.error || "unknown";
+      setVoice(`浏览器识别错误 ${reason}`.trim());
+      if (reason === "not-allowed" || reason === "service-not-allowed") {
+        voiceEnabled = false;
+        speechRecognition = null;
+        toggleVoiceButton.textContent = "开启语音";
+        setVoiceActivity("Mic permission needed");
+        advanceSession("END");
+      }
+    };
     speechRecognition.onend = () => {
       if (voiceEnabled) {
         try {
@@ -863,10 +946,18 @@ async function startVoice(): Promise<void> {
     };
     try {
       speechRecognition.start();
-      setVoice(bridge ? "G2 MIC + 浏览器识别" : "浏览器识别");
+      if (speechRecognition && voiceEnabled) {
+        setVoice(bridge ? "手机语音识别" : "浏览器识别");
+      }
     } catch {
       setVoice("浏览器识别启动失败");
     }
+  } else {
+    voiceEnabled = false;
+    toggleVoiceButton.textContent = "开启语音";
+    setVoice("没有可用的语音输入");
+    setVoiceActivity("Voice unavailable");
+    advanceSession("END");
   }
 
   await renderGlasses(false);
@@ -880,7 +971,17 @@ async function stopVoice(): Promise<void> {
   speechRecognition?.stop();
   speechRecognition = null;
   if (bridge) await bridge.audioControl(false);
-  void logEvent("audio_control", { open: false });
+  const captureDurationMs = audioCaptureStartedAt ? Date.now() - audioCaptureStartedAt : 0;
+  void logEvent("audio_control", {
+    open: false,
+    source: g2AudioActive ? "glasses" : "browser",
+    audioEventCount,
+    audioByteCount,
+    captureDurationMs
+  });
+  g2AudioActive = false;
+  audioChunks = [];
+  setVoiceActivity("");
   setVoice("未开启");
   await renderGlasses(false);
 }

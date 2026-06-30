@@ -109,7 +109,7 @@ This gate is intentionally deferred until Gates 1 through 5 pass.
 |---|---|---|
 | Browser WebView | Partial pass | UI and fallback paths have been exercised |
 | Build and package | Pass | Type check, build, and EHPK package succeeded |
-| Real G2 display | Not verified | Requires private installation and telemetry |
+| Real G2 display | Pass on 0.1.7 | User verified layout, immediate navigation feedback, and rapid swipes settling on the latest card |
 | Real G2 microphone | Not verified | PCM assumptions require device evidence |
 | Real AI interaction | Not verified | No configured AI key in the last validation |
 | End-to-end latency | Not measured | Requires real network, STT, and AI |

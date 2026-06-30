@@ -33,6 +33,7 @@ flashcard interface. See:
 cd evenhub-g2-learning
 npm install
 npm run api
+npm run test:voice
 npm run dev
 ```
 
@@ -100,10 +101,18 @@ npm run pack:ehpk
 The current upload artifact is:
 
 ```text
-release/learn-coach-0.1.7.ehpk
+release/learn-coach-0.1.8.ehpk
 ```
 
-Version `0.1.7` is the current private-test candidate: it renders the concept
+Version `0.1.8` is the current voice-test candidate. It keeps the `0.1.7`
+navigation and image scheduler, but starts only one speech path at a time,
+shows `Listening`, `Transcribing`, `Evaluating`, and STT failure states on G2,
+and records PCM byte counts, estimated audio duration, and transcription
+latency. `npm run test:voice` checks the local speech API contract; set
+`VOICE_TEST_PCM` to a raw 16 kHz mono s16le file to exercise real
+transcription.
+
+Version `0.1.7` is the display/navigation candidate verified on real G2: it renders the concept
 and short coach prompt inside the same large image to avoid image/text mismatch,
 uses swipe up/down for previous/next, ignores tap, immediately acknowledges
 navigation in the footer, coalesces rapid swipes into the latest image target,

@@ -419,10 +419,11 @@ function wavFromPcm16(base64, sampleRate = 16000) {
 }
 
 async function transcribe(payload) {
-  if (!openAiApiKey) return { ok: false, text: "", error: "OPENAI_API_KEY is not set" };
   const audioBase64 = clean(payload.audioBase64);
   if (!audioBase64) return { ok: false, error: "Missing audioBase64" };
+  if (!openAiApiKey) return { ok: false, text: "", error: "OPENAI_API_KEY is not set" };
 
+  const startedAt = Date.now();
   const wav = wavFromPcm16(audioBase64, Number(payload.sampleRate || 16000));
   const form = new FormData();
   form.append("model", sttModel);
@@ -434,8 +435,11 @@ async function transcribe(payload) {
     body: form
   });
   const result = await response.json();
-  if (!response.ok) return { ok: false, error: result.error?.message || `STT HTTP ${response.status}` };
-  return { ok: true, text: clean(result.text), confidence: 0 };
+  const latencyMs = Date.now() - startedAt;
+  if (!response.ok) {
+    return { ok: false, error: result.error?.message || `STT HTTP ${response.status}`, latencyMs };
+  }
+  return { ok: true, text: clean(result.text), confidence: 0, latencyMs };
 }
 
 function recordEvent(payload) {
