@@ -113,4 +113,5 @@ This gate is intentionally deferred until Gates 1 through 5 pass.
 | End-to-end latency | Not measured | Requires real network, STT, and AI |
 | Learning state machine | Partial pass | `src/session.ts` and `src/tutor.ts` connect answer evaluation to feedback, follow-up, and summary states |
 | Feynman fallback loop | Partial pass | `/api/learn/tutor` returns structured fallback feedback without an AI key |
+| Voice classification | Partial pass | `src/voice.ts` conservatively parses short commands; real STT transcripts still require device evidence |
 | Daily reflection MVP | Deferred | Begins after hardware and latency gates |

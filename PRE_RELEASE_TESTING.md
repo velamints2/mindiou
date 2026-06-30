@@ -18,6 +18,8 @@ Required:
 
 - no type or syntax errors;
 - session-state transition tests pass;
+- voice command tests prove short explicit commands are recognized and long
+  explanatory answers containing command words remain learner answers;
 - manifest and package versions match;
 - the package filename uses the same version;
 - no unsupported container dimensions;

@@ -24,6 +24,7 @@ import {
   type TutorKind,
   type TutorResponse
 } from "./tutor";
+import { parseVoiceAction, type VoiceAction } from "./voice";
 import "./styles.css";
 
 type LearningCard = {
@@ -85,9 +86,7 @@ type SpeechRecognitionEventLike = {
 
 const DISPLAY_ID = 1;
 const CONCEPT_IMAGE_ID = 2;
-const LIST_ACTIONS = ["repeat", "ask", "next", "known"] as const;
-type ListAction = typeof LIST_ACTIONS[number];
-type StudyAction = ListAction | "previous";
+type StudyAction = VoiceAction | "previous";
 
 const cardFrontEl = document.querySelector<HTMLHeadingElement>("#card-front")!;
 const cardBackEl = document.querySelector<HTMLParagraphElement>("#card-back")!;
@@ -583,17 +582,6 @@ async function performAction(action: StudyAction, transcript = ""): Promise<void
   }
 
   await askTutor(action, transcript);
-}
-
-function parseVoiceAction(text: string): ListAction | null {
-  const value = text.toLowerCase().trim();
-  if (!value) return null;
-  if (/下一个|下一张|next|skip|过/.test(value)) return "next";
-  if (/会了|记住了|known|done|got it/.test(value)) return "known";
-  if (/提问|问我|quiz|ask/.test(value)) return "ask";
-  if (/跟读|再读|repeat|again/.test(value)) return "repeat";
-
-  return null;
 }
 
 async function handleTranscript(text: string): Promise<void> {

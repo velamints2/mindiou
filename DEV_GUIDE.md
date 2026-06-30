@@ -80,6 +80,11 @@ Supported command intentions should eventually include:
 Command matching must be conservative. A phrase is a command only when it is a
 clear command utterance; otherwise it is a learner answer.
 
+The current command parser lives in `src/voice.ts`. It only treats short,
+explicit Chinese or English utterances as commands. Longer explanatory answers
+that contain words such as `next`, `repeat`, `下一个`, or `会了` must remain
+learner answers and should be covered by tests before changing this behavior.
+
 For real-device testing, record:
 
 - source device;
