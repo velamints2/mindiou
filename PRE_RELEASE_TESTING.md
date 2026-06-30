@@ -56,7 +56,7 @@ Run the app and simulator:
 ```bash
 npm run dev
 evenhub-simulator \
-  "http://localhost:5175/?api=http%3A%2F%2Flocalhost%3A8793" \
+  "http://localhost:5175/?api=http%3A%2F%2Flocalhost%3A8793&imageHoldMs=900" \
   --automation-port 9898 --no-glow
 npm run test:simulator
 ```
@@ -68,6 +68,8 @@ The automated test must:
 - send every supported input;
 - assert that each input produces one intended action;
 - assert that navigation changes the visible concept;
+- assert that rapid repeated navigation settles on the latest visible concept,
+  even when image upload is artificially slowed;
 - save the simulator console;
 - fail on console errors.
 

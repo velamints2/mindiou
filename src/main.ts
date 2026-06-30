@@ -127,6 +127,9 @@ let pcmFlushScheduled = false;
 let transcriptionInFlight = false;
 let sessionState: LearningSessionState = transitionSession("idle", "START");
 const transcriptIntake = new TranscriptIntake();
+const NAVIGATION_IMAGE_DELAY_MS = 420;
+const GESTURE_DEBOUNCE_MS = 240;
+const debugImageHoldMs = Number(new URL(window.location.href).searchParams.get("imageHoldMs") || "0");
 
 apiBaseUrlEl.value = apiBaseUrl;
 apiTokenEl.value = apiToken;
@@ -254,7 +257,10 @@ function updateWebView(): void {
   coachLineEl.textContent = card.prompt;
 }
 
+let glassesNotice = "";
+
 function glassesContent(card: LearningCard | null): string {
+  if (glassesNotice) return `${glassesNotice}  ${progressText()}\nUpdating image...`;
   return `${sessionLabel(sessionState)}  ${progressText()}\nUp Previous  Down Next`;
 }
 
@@ -283,21 +289,35 @@ function conceptImage(): ImageContainerProperty {
   });
 }
 
-let imageRenderQueue: Promise<void> = Promise.resolve();
+type ConceptImageRequest = {
+  card: LearningCard | null;
+  force: boolean;
+  key: string;
+  prompt: string;
+  revision: number;
+};
+
+let footerInFlight = false;
+let footerNeedsRefresh = false;
+let latestFooterContent = "";
+let footerRenderPromise: Promise<void> = Promise.resolve();
+let conceptImageTimer: number | null = null;
+let conceptImageInFlight = false;
+let conceptImageDrainPromise: Promise<void> = Promise.resolve();
+let pendingConceptImage: ConceptImageRequest | null = null;
 let lastRenderedConcept = "";
 let imageRequestRevision = 0;
-let renderRevision = 0;
 let lastGestureAt = 0;
 
 function visualPrompt(card: LearningCard | null): string {
   return fit(coachLineEl.textContent || card?.prompt || "Explain aloud", 34);
 }
 
-function conceptVisualKey(card: LearningCard | null): string {
-  return [card?.id || "no-cards", visualPrompt(card)].join("|");
+function conceptVisualKey(card: LearningCard | null, prompt = visualPrompt(card)): string {
+  return [card?.id || "no-cards", prompt].join("|");
 }
 
-async function conceptPng(card: LearningCard | null): Promise<Uint8Array> {
+async function conceptPng(card: LearningCard | null, promptText = visualPrompt(card)): Promise<Uint8Array> {
   const canvas = document.createElement("canvas");
   canvas.width = 288;
   canvas.height = 144;
@@ -319,7 +339,7 @@ async function conceptPng(card: LearningCard | null): Promise<Uint8Array> {
   }
   context.fillText(text, 144, 56, 264);
 
-  const prompt = visualPrompt(card);
+  const prompt = promptText;
   context.fillStyle = "#cfeee7";
   let promptSize = 17;
   context.font = `500 ${promptSize}px -apple-system, BlinkMacSystemFont, "Noto Sans", sans-serif`;
@@ -333,32 +353,138 @@ async function conceptPng(card: LearningCard | null): Promise<Uint8Array> {
   return blob ? new Uint8Array(await blob.arrayBuffer()) : new Uint8Array();
 }
 
-async function updateConceptImage(card: LearningCard | null, force = false): Promise<void> {
-  if (!bridge || !bridgeReady) return;
-  const conceptKey = conceptVisualKey(card);
-  if (!force && conceptKey === lastRenderedConcept) return;
-  const requestRevision = ++imageRequestRevision;
-  const imageData = await conceptPng(card);
-  imageRenderQueue = imageRenderQueue.catch(() => undefined).then(async () => {
-    if (requestRevision !== imageRequestRevision) {
-      void logEvent("g2_concept_image_skipped", { reason: "stale", conceptKey });
-      return;
-    }
-    const result = await bridge!.updateImageRawData(new ImageRawDataUpdate({
-      containerID: CONCEPT_IMAGE_ID,
-      containerName: "concept-image",
-      imageData
-    }));
-    if (result === "success" && requestRevision === imageRequestRevision) lastRenderedConcept = conceptKey;
-    void logEvent("g2_concept_image", { bytes: imageData.length, result });
-  });
-  await imageRenderQueue;
+function makeConceptImageRequest(card: LearningCard | null, force = false): ConceptImageRequest {
+  const prompt = visualPrompt(card);
+  return {
+    card,
+    force,
+    key: conceptVisualKey(card, prompt),
+    prompt,
+    revision: ++imageRequestRevision
+  };
 }
 
-async function renderGlasses(rebuild = false): Promise<void> {
+function requestFooterUpdate(): Promise<void> {
+  if (!bridge || !bridgeReady) return Promise.resolve();
+  latestFooterContent = glassesContent(currentCard());
+  if (footerInFlight) {
+    footerNeedsRefresh = true;
+    return footerRenderPromise;
+  }
+
+  footerInFlight = true;
+  footerRenderPromise = (async () => {
+    try {
+      while (true) {
+        footerNeedsRefresh = false;
+        const content = latestFooterContent;
+        await bridge!.textContainerUpgrade(new TextContainerUpgrade({
+          containerID: DISPLAY_ID,
+          containerName: "learn-display",
+          content
+        }));
+        if (!footerNeedsRefresh || latestFooterContent === content) break;
+      }
+    } finally {
+      footerInFlight = false;
+    }
+  })();
+  return footerRenderPromise;
+}
+
+function clearGlassesNotice(): void {
+  if (!glassesNotice) return;
+  glassesNotice = "";
+  void requestFooterUpdate();
+}
+
+function setNavigationNotice(action: "next" | "previous"): void {
+  glassesNotice = action === "next" ? "Next accepted" : "Previous accepted";
+  void requestFooterUpdate();
+}
+
+function scheduleConceptImageUpdate(card: LearningCard | null, force = false, delayMs = 0): void {
+  if (!bridge || !bridgeReady) return;
+  const request = makeConceptImageRequest(card, force);
+  if (!force && request.key === lastRenderedConcept && !conceptImageInFlight) {
+    pendingConceptImage = null;
+    if (conceptImageTimer !== null) {
+      window.clearTimeout(conceptImageTimer);
+      conceptImageTimer = null;
+    }
+    clearGlassesNotice();
+    return;
+  }
+
+  pendingConceptImage = request.key === lastRenderedConcept && conceptImageInFlight
+    ? { ...request, force: true }
+    : request;
+
+  if (conceptImageTimer !== null) window.clearTimeout(conceptImageTimer);
+  conceptImageTimer = window.setTimeout(() => {
+    conceptImageTimer = null;
+    void drainConceptImageUpdates();
+  }, delayMs);
+}
+
+async function flushConceptImageUpdate(card: LearningCard | null, force = false): Promise<void> {
+  if (!bridge || !bridgeReady) return;
+  pendingConceptImage = makeConceptImageRequest(card, force);
+  if (conceptImageTimer !== null) {
+    window.clearTimeout(conceptImageTimer);
+    conceptImageTimer = null;
+  }
+  await drainConceptImageUpdates();
+}
+
+function drainConceptImageUpdates(): Promise<void> {
+  if (!bridge || !bridgeReady) return Promise.resolve();
+  if (conceptImageInFlight) return conceptImageDrainPromise;
+
+  conceptImageInFlight = true;
+  conceptImageDrainPromise = (async () => {
+    try {
+      while (pendingConceptImage) {
+        const request = pendingConceptImage;
+        pendingConceptImage = null;
+        if (!request.force && request.key === lastRenderedConcept) {
+          if (request.revision === imageRequestRevision) clearGlassesNotice();
+          continue;
+        }
+
+        const imageData = await conceptPng(request.card, request.prompt);
+        if (debugImageHoldMs > 0) await new Promise(resolve => window.setTimeout(resolve, debugImageHoldMs));
+        if (request.revision !== imageRequestRevision) {
+          void logEvent("g2_concept_image_skipped", { reason: "stale_before_upload", conceptKey: request.key });
+          continue;
+        }
+
+        const result = await bridge!.updateImageRawData(new ImageRawDataUpdate({
+          containerID: CONCEPT_IMAGE_ID,
+          containerName: "concept-image",
+          imageData
+        }));
+        if (result === "success" && request.revision === imageRequestRevision) {
+          lastRenderedConcept = request.key;
+        }
+        if (request.revision === imageRequestRevision) clearGlassesNotice();
+        void logEvent("g2_concept_image", {
+          bytes: imageData.length,
+          result,
+          latest: request.revision === imageRequestRevision
+        });
+      }
+    } finally {
+      conceptImageInFlight = false;
+      if (pendingConceptImage) void drainConceptImageUpdates();
+    }
+  })();
+  return conceptImageDrainPromise;
+}
+
+async function renderGlasses(rebuild = false, imageDelayMs = 0): Promise<void> {
   if (!bridge) return;
   const card = currentCard();
-  const currentRender = ++renderRevision;
   try {
     if (rebuild) {
       await bridge.rebuildPageContainer(new RebuildPageContainer({
@@ -367,18 +493,13 @@ async function renderGlasses(rebuild = false): Promise<void> {
         imageObject: [conceptImage()]
       }));
       await new Promise(resolve => window.setTimeout(resolve, 800));
-      await updateConceptImage(card, true);
-      if (currentRender !== renderRevision) return;
+      await flushConceptImageUpdate(card, true);
+      await requestFooterUpdate();
       return;
     }
 
-    await updateConceptImage(card);
-    if (currentRender !== renderRevision) return;
-    await bridge.textContainerUpgrade(new TextContainerUpgrade({
-      containerID: DISPLAY_ID,
-      containerName: "learn-display",
-      content: glassesContent(card)
-    }));
+    await requestFooterUpdate();
+    scheduleConceptImageUpdate(card, false, imageDelayMs);
   } catch (error) {
     setStatus("bridge error");
     console.warn("Failed to render glasses learning page", error);
@@ -412,14 +533,19 @@ async function initBridge(): Promise<void> {
       const now = Date.now();
       if (event.sysEvent && (sysType === undefined || sysType === OsEventTypeList.CLICK_EVENT)) {
         void logEvent("g2_ignored_input", { input: "click", sysType });
-      } else if (textType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastGestureAt > 500) {
+      } else if (textType === OsEventTypeList.SCROLL_TOP_EVENT && now - lastGestureAt > GESTURE_DEBOUNCE_MS) {
         lastGestureAt = now;
         void logEvent("g2_gesture", { action: "previous", textType });
         void performAction("previous");
-      } else if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastGestureAt > 500) {
+      } else if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT && now - lastGestureAt > GESTURE_DEBOUNCE_MS) {
         lastGestureAt = now;
         void logEvent("g2_gesture", { action: "next", textType });
         void performAction("next");
+      } else if (
+        textType === OsEventTypeList.SCROLL_TOP_EVENT ||
+        textType === OsEventTypeList.SCROLL_BOTTOM_EVENT
+      ) {
+        void logEvent("g2_gesture_ignored", { reason: "debounce", textType });
       }
 
       if (event.audioEvent && voiceEnabled) {
@@ -591,7 +717,8 @@ async function performAction(action: StudyAction, transcript = ""): Promise<void
     saveCards();
     updateWebView();
     advanceSession("NAVIGATE");
-    await renderGlasses(false);
+    setNavigationNotice("next");
+    await renderGlasses(false, NAVIGATION_IMAGE_DELAY_MS);
     return;
   }
 
@@ -600,7 +727,8 @@ async function performAction(action: StudyAction, transcript = ""): Promise<void
     saveCards();
     updateWebView();
     advanceSession("NAVIGATE");
-    await renderGlasses(false);
+    setNavigationNotice("previous");
+    await renderGlasses(false, NAVIGATION_IMAGE_DELAY_MS);
     return;
   }
 

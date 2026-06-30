@@ -30,13 +30,13 @@ async function screenshot(name) {
   };
 }
 
-async function input(action) {
+async function input(action, waitMs = 1700) {
   await request("/api/input", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action })
   });
-  await new Promise(resolve => setTimeout(resolve, 1200));
+  await new Promise(resolve => setTimeout(resolve, waitMs));
 }
 
 async function events() {
@@ -116,6 +116,19 @@ assert(
 );
 assert(afterDown.hash === boot.hash, "Down did not return to the original visible frame.");
 
+const beforeRapidDown = await events();
+await input("down", 300);
+await input("down", 300);
+await input("down", 300);
+await new Promise(resolve => setTimeout(resolve, 2000));
+const afterRapidDown = await screenshot("05-after-rapid-down");
+const rapidDownEvents = (await events()).slice(beforeRapidDown.length);
+const rapidDownAcceptedCount = rapidDownEvents.filter(
+  event => event.type === "g2_gesture" && event.data?.action === "next"
+).length;
+assert(rapidDownAcceptedCount === 3, "Rapid down gestures were not all acknowledged.");
+assert(afterRapidDown.hash === afterUp.hash, "Rapid down gestures did not settle on the latest visible frame.");
+
 const consolePayload = await (await request("/api/console")).json();
 await writeFile(`${outputDir}/console.json`, JSON.stringify(consolePayload, null, 2));
 assert(
@@ -132,6 +145,8 @@ const report = {
     ignoredClickKeptFrame: afterClick.hash === boot.hash,
     upChangedFrame: afterUp.hash !== boot.hash,
     downReturnedFrame: afterDown.hash === boot.hash,
+    rapidDownAcceptedCount,
+    rapidDownSettledOnLatestFrame: afterRapidDown.hash === afterUp.hash,
     tutorAssessment: tutorPayload.assessment,
     tutorG2Text: tutorPayload.g2Text
   }
