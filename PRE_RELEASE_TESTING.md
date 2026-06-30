@@ -97,7 +97,8 @@ should arise from the session state or explicit voice commands.
 Only after Gates 1 through 4 pass:
 
 ```bash
-npx evenhub pack app.json dist -o release/learn-coach-X.Y.Z.ehpk
+npm run check:release
+npm run pack:ehpk
 ```
 
 Retain the last known stable package. Experimental packages must be labeled and

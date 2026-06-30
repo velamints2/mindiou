@@ -93,22 +93,22 @@ Build and package the current version with:
 npm run check
 node -c server.js
 npm run build
-npx evenhub pack app.json dist -o release/learn-coach-0.1.4.ehpk
+npm run check:release
+npm run pack:ehpk
 ```
 
 The current upload artifact is:
 
 ```text
-release/learn-coach-0.1.4.ehpk
+release/learn-coach-0.1.5.ehpk
 ```
 
-Version `0.1.4` is a controlled real-device experiment: it uses one serialized
-`288x144` concept image for large text and replaces the clipped vertical list
-with the current safe contract: swipe up previous, swipe down next, tap ignored.
-It ignores ambiguous system events, debounces gestures, and skips unchanged image
-updates. Keep `release/learn-coach-0.1.2.ehpk` as the
-text-only stable fallback. Do not use `0.1.1`; its four startup image transfers
-caused a real G2 BLE disconnection.
+Version `0.1.5` is the current private-test candidate: it keeps the stable
+single-image G2 surface, uses swipe up/down for previous/next, ignores tap,
+returns structured tutor feedback, conservatively parses voice commands, dedupes
+repeated transcripts, and prevents concurrent STT requests. Keep
+`release/learn-coach-0.1.2.ehpk` as the text-only stable fallback. Do not use
+`0.1.1`; its four startup image transfers caused a real G2 BLE disconnection.
 
 Increase both the manifest version and package filename after changing a
 distributed build.

@@ -143,11 +143,12 @@ curl http://localhost:8793/health
 Package:
 
 ```bash
-npx evenhub pack app.json dist -o release/learn-coach-0.1.0.ehpk
+npm run check:release
+npm run pack:ehpk
 ```
 
-Increase the manifest version and output filename before distributing a changed
-build.
+`pack:ehpk` reads the manifest version and writes
+`release/learn-coach-X.Y.Z.ehpk`.
 
 ## Real-Device Validation Order
 
