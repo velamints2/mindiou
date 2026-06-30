@@ -43,13 +43,20 @@ Open:
 http://localhost:5175/?api=http://localhost:8793
 ```
 
-With AI:
+Put local API configuration in the ignored `.env.local` file:
 
-```bash
-export OPENAI_API_KEY="..."
-export LEARNING_API_TOKEN="..."
-npm run api
+```text
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_STT_MODEL=gpt-4o-mini-transcribe
+OPENAI_BASE_URL=https://api.openai.com/v1
+LEARNING_API_TOKEN=
 ```
+
+Never put the OpenAI key in the EHPK, phone Settings, Developer Portal, or
+committed source. `npm run api` automatically reads `.env.local`. For the
+current REST transcription and structured tutor implementation,
+`gpt-4o-mini-transcribe` and `gpt-4o-mini` are the conservative defaults.
 
 Then open:
 
