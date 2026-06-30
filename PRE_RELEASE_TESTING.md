@@ -44,6 +44,11 @@ Required:
 - missing AI/STT configuration is explicit;
 - G2 PCM is treated as 16 kHz mono s16le and transcription telemetry records
   byte count, estimated audio duration, and request latency;
+- fatal STT configuration errors stop capture after one request; transient
+  failures back off for at least five seconds and never create a rapid retry
+  loop;
+- audio telemetry is aggregated rather than posting one API event per 50 ms PCM
+  chunk;
 - `VOICE_TEST_PCM=/path/to/sample.pcm npm run test:voice` completes a real STT
   request when an API key is configured;
 - network failure leaves the learning session recoverable.

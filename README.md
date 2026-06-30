@@ -101,16 +101,23 @@ npm run pack:ehpk
 The current upload artifact is:
 
 ```text
-release/learn-coach-0.1.8.ehpk
+release/learn-coach-0.1.9.ehpk
 ```
 
-Version `0.1.8` is the current voice-test candidate. It keeps the `0.1.7`
+Version `0.1.9` is the current voice-test candidate. Real G2 telemetry from
+`0.1.8` confirmed 1,600-byte PCM chunks at roughly 50 ms each, but also exposed
+a retry loop when STT configuration was missing. `0.1.9` stops the microphone
+after one fatal configuration error, applies a five-second backoff to transient
+errors, preserves the minimum 2.2-second batch interval after in-flight
+requests, caps buffered PCM at 15 seconds, and aggregates audio telemetry once
+per second instead of posting one network event for every 50 ms chunk.
+
+Version `0.1.8` introduced observable voice testing. It keeps the `0.1.7`
 navigation and image scheduler, but starts only one speech path at a time,
 shows `Listening`, `Transcribing`, `Evaluating`, and STT failure states on G2,
 and records PCM byte counts, estimated audio duration, and transcription
 latency. `npm run test:voice` checks the local speech API contract; set
-`VOICE_TEST_PCM` to a raw 16 kHz mono s16le file to exercise real
-transcription.
+`VOICE_TEST_PCM` to a raw 16 kHz mono s16le file to exercise real transcription.
 
 Version `0.1.7` is the display/navigation candidate verified on real G2: it renders the concept
 and short coach prompt inside the same large image to avoid image/text mismatch,

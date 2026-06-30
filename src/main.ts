@@ -25,6 +25,15 @@ import {
   type TutorResponse
 } from "./tutor";
 import { parseVoiceAction, TranscriptIntake, type VoiceAction } from "./voice";
+import {
+  MAX_PCM_BUFFER_BYTES,
+  PCM_BATCH_MS,
+  PCM_SAMPLE_RATE,
+  STT_RETRY_BACKOFF_MS,
+  isFatalSttError,
+  nextPcmFlushDelayMs,
+  pcmDurationMs
+} from "./audio";
 import "./styles.css";
 
 type LearningCard = {
@@ -124,12 +133,17 @@ let apiToken = readSetting("g2LearningApiToken", "token", "");
 let audioChunks: Uint8Array[] = [];
 let lastAudioSendAt = 0;
 let lastTranscribeSkipAt = 0;
-let pcmFlushScheduled = false;
+let pcmFlushTimer: number | null = null;
 let transcriptionInFlight = false;
+let transcriptionBlocked = false;
+let transcribeRetryAt = 0;
 let g2AudioActive = false;
 let audioCaptureStartedAt = 0;
 let audioEventCount = 0;
 let audioByteCount = 0;
+let audioTelemetryAt = 0;
+let audioTelemetryEventCount = 0;
+let audioTelemetryByteCount = 0;
 let sessionState: LearningSessionState = transitionSession("idle", "START");
 const transcriptIntake = new TranscriptIntake();
 const NAVIGATION_IMAGE_DELAY_MS = 420;
@@ -562,11 +576,7 @@ async function initBridge(): Promise<void> {
       }
 
       if (event.audioEvent && voiceEnabled) {
-        void logEvent("g2_audio_event", {
-          source: event.audioEvent.source,
-          bytes: event.audioEvent.audioPcm.length
-        });
-        void handlePcmAudio(event.audioEvent.audioPcm);
+        void handlePcmAudio(event.audioEvent.audioPcm, event.audioEvent.source);
       }
     });
 
@@ -783,26 +793,56 @@ async function handleTranscript(text: string): Promise<void> {
   }
 }
 
-async function handlePcmAudio(chunk: Uint8Array): Promise<void> {
+async function handlePcmAudio(chunk: Uint8Array, source: AudioInputSource): Promise<void> {
   audioEventCount += 1;
   audioByteCount += chunk.length;
-  audioChunks.push(chunk);
+  audioTelemetryEventCount += 1;
+  audioTelemetryByteCount += chunk.length;
   const now = Date.now();
-  if (now - lastAudioSendAt < 2200) return;
+  if (now - audioTelemetryAt >= 1000) {
+    void logEvent("g2_audio_event", {
+      source,
+      events: audioTelemetryEventCount,
+      bytes: audioTelemetryByteCount,
+      latestChunkBytes: chunk.length,
+      windowMs: now - audioTelemetryAt
+    });
+    audioTelemetryAt = now;
+    audioTelemetryEventCount = 0;
+    audioTelemetryByteCount = 0;
+  }
+  if (transcriptionBlocked) return;
+  audioChunks.push(chunk);
+  trimAudioBuffer();
+  if (now - lastAudioSendAt < PCM_BATCH_MS || now < transcribeRetryAt) return;
 
   await flushPcmAudio();
 }
 
-function schedulePcmFlush(delayMs = 250): void {
-  if (pcmFlushScheduled) return;
-  pcmFlushScheduled = true;
-  window.setTimeout(() => {
-    pcmFlushScheduled = false;
+function trimAudioBuffer(): void {
+  let total = audioChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  while (audioChunks.length > 1 && total > MAX_PCM_BUFFER_BYTES) {
+    total -= audioChunks.shift()?.length || 0;
+  }
+}
+
+function schedulePcmFlush(minimumDelayMs = 250): void {
+  if (transcriptionBlocked) return;
+  if (pcmFlushTimer !== null) return;
+  const delayMs = nextPcmFlushDelayMs(
+    Date.now(),
+    lastAudioSendAt,
+    transcribeRetryAt,
+    minimumDelayMs
+  );
+  pcmFlushTimer = window.setTimeout(() => {
+    pcmFlushTimer = null;
     void flushPcmAudio();
   }, delayMs);
 }
 
 async function flushPcmAudio(): Promise<void> {
+  if (transcriptionBlocked) return;
   if (transcriptionInFlight) {
     const now = Date.now();
     if (now - lastTranscribeSkipAt > 1000) {
@@ -817,7 +857,7 @@ async function flushPcmAudio(): Promise<void> {
   const merged = mergeChunks(audioChunks.splice(0));
   if (!merged.length) return;
 
-  const audioDurationMs = Math.round(merged.length / 32);
+  const audioDurationMs = pcmDurationMs(merged.length);
   const requestStartedAt = Date.now();
   transcriptionInFlight = true;
   setVoice(`识别中 ${audioDurationMs}ms`);
@@ -825,27 +865,32 @@ async function flushPcmAudio(): Promise<void> {
   void logEvent("transcribe_start", {
     bytes: merged.length,
     audioDurationMs,
-    sampleRate: 16000,
+    sampleRate: PCM_SAMPLE_RATE,
     format: "pcm_s16le_mono"
   });
   try {
     const payload = await apiPost<TranscriptResponse>("/api/learn/transcribe", {
       source: "even-g2",
       format: "pcm16",
-      sampleRate: 16000,
+      sampleRate: PCM_SAMPLE_RATE,
       audioBase64: bytesToBase64(merged)
     });
     const latencyMs = Date.now() - requestStartedAt;
     if (!payload.ok || !payload.text) {
       const message = fit(payload.error || "没有识别到语音", 34);
       setVoice(`转写失败：${message}`);
-      setVoiceActivity("STT unavailable");
       void logEvent("transcribe_error", {
         error: payload.error || "empty transcript",
         latencyMs,
         bytes: merged.length,
         audioDurationMs
       });
+      if (isFatalSttError(message)) {
+        await blockVoiceAfterFatalSttError(message);
+      } else {
+        transcribeRetryAt = Date.now() + STT_RETRY_BACKOFF_MS;
+        setVoiceActivity("STT retry in 5s");
+      }
       return;
     }
     void logEvent("transcribe_complete", {
@@ -858,18 +903,47 @@ async function flushPcmAudio(): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setVoice(`转写失败：${fit(message, 34)}`);
-    setVoiceActivity("STT unavailable");
     void logEvent("transcribe_error", {
       error: message,
       latencyMs: Date.now() - requestStartedAt,
       bytes: merged.length,
       audioDurationMs
     });
+    if (isFatalSttError(message)) {
+      await blockVoiceAfterFatalSttError(message);
+    } else {
+      transcribeRetryAt = Date.now() + STT_RETRY_BACKOFF_MS;
+      setVoiceActivity("STT retry in 5s");
+    }
     console.warn("PCM transcription failed", error);
   } finally {
     transcriptionInFlight = false;
-    if (audioChunks.length) schedulePcmFlush();
+    if (audioChunks.length && !transcriptionBlocked) schedulePcmFlush();
   }
+}
+
+async function blockVoiceAfterFatalSttError(message: string): Promise<void> {
+  transcriptionBlocked = true;
+  voiceEnabled = false;
+  audioChunks = [];
+  if (pcmFlushTimer !== null) {
+    window.clearTimeout(pcmFlushTimer);
+    pcmFlushTimer = null;
+  }
+  toggleVoiceButton.textContent = "开启语音";
+  if (bridge && g2AudioActive) await bridge.audioControl(false);
+  g2AudioActive = false;
+  advanceSession("END");
+  setVoice(`转写不可用：${fit(message, 30)}`);
+  setVoiceActivity("STT setup required");
+  void logEvent("audio_control", {
+    open: false,
+    source: "glasses",
+    reason: "fatal_stt_error",
+    audioEventCount,
+    audioByteCount,
+    captureDurationMs: audioCaptureStartedAt ? Date.now() - audioCaptureStartedAt : 0
+  });
 }
 
 function mergeChunks(chunks: Uint8Array[]): Uint8Array {
@@ -892,12 +966,21 @@ function bytesToBase64(bytes: Uint8Array): string {
 async function startVoice(): Promise<void> {
   voiceEnabled = true;
   g2AudioActive = false;
+  transcriptionBlocked = false;
+  transcribeRetryAt = 0;
   transcriptIntake.reset();
   audioChunks = [];
   lastAudioSendAt = Date.now();
   audioCaptureStartedAt = lastAudioSendAt;
   audioEventCount = 0;
   audioByteCount = 0;
+  audioTelemetryAt = lastAudioSendAt;
+  audioTelemetryEventCount = 0;
+  audioTelemetryByteCount = 0;
+  if (pcmFlushTimer !== null) {
+    window.clearTimeout(pcmFlushTimer);
+    pcmFlushTimer = null;
+  }
   advanceSession("START_LISTENING");
   toggleVoiceButton.textContent = "关闭语音";
   setVoice("开启中");
@@ -980,7 +1063,13 @@ async function stopVoice(): Promise<void> {
     captureDurationMs
   });
   g2AudioActive = false;
+  transcriptionBlocked = false;
+  transcribeRetryAt = 0;
   audioChunks = [];
+  if (pcmFlushTimer !== null) {
+    window.clearTimeout(pcmFlushTimer);
+    pcmFlushTimer = null;
+  }
   setVoiceActivity("");
   setVoice("未开启");
   await renderGlasses(false);

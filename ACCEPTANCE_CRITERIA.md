@@ -110,9 +110,9 @@ This gate is intentionally deferred until Gates 1 through 5 pass.
 | Browser WebView | Partial pass | UI and fallback paths have been exercised |
 | Build and package | Pass | Type check, build, and EHPK package succeeded |
 | Real G2 display | Pass on 0.1.7 | User verified layout, immediate navigation feedback, and rapid swipes settling on the latest card |
-| Real G2 microphone | Not verified | PCM assumptions require device evidence |
+| Real G2 microphone | Partial pass on 0.1.8 | 735 events and 1,176,000 bytes captured over 37.5 seconds; each event carried 1,600 bytes, matching about 50 ms of 16 kHz mono s16le PCM |
 | Real AI interaction | Not verified | No configured AI key in the last validation |
-| End-to-end latency | Not measured | Requires real network, STT, and AI |
+| End-to-end latency | Blocked on STT key | G2 PCM transport is verified; real transcription and AI timing still require a configured provider key |
 | Learning state machine | Partial pass | `src/session.ts` and `src/tutor.ts` connect answer evaluation to feedback, follow-up, and summary states |
 | Feynman fallback loop | Partial pass | `/api/learn/tutor` returns structured fallback feedback without an AI key |
 | Voice classification | Partial pass | `src/voice.ts` conservatively parses short commands; real STT transcripts still require device evidence |

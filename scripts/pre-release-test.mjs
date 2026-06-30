@@ -39,8 +39,9 @@ async function input(action, waitMs = 1700) {
   await new Promise(resolve => setTimeout(resolve, waitMs));
 }
 
-async function events() {
-  const response = await fetch(`${apiUrl}/api/learn/events`);
+async function events(since = "") {
+  const query = since ? `?since=${encodeURIComponent(since)}` : "";
+  const response = await fetch(`${apiUrl}/api/learn/events${query}`);
   if (!response.ok) throw new Error(`events returned ${response.status}`);
   return (await response.json()).events || [];
 }
@@ -86,43 +87,43 @@ const boot = await screenshot("01-boot");
 assert(boot.litPixels > 500, "Boot framebuffer is blank.");
 assert(boot.litPixels / boot.totalPixels < 0.35, "Boot framebuffer is overfilled.");
 
-const beforeEvents = await events();
+const beforeClickAt = new Date().toISOString();
 await input("click");
 const afterClick = await screenshot("02-after-click");
-const clickEvents = (await events()).slice(beforeEvents.length);
+const clickEvents = await events(beforeClickAt);
 assert(
   !clickEvents.some(event => event.type === "g2_gesture"),
   "Click unexpectedly triggered a navigation or coaching action."
 );
 assert(afterClick.hash === boot.hash, "Ignored click changed the visible concept.");
 
-const beforeUp = await events();
+const beforeUpAt = new Date().toISOString();
 await input("up");
 const afterUp = await screenshot("03-after-up");
-const upEvents = (await events()).slice(beforeUp.length);
+const upEvents = await events(beforeUpAt);
 assert(
   upEvents.some(event => event.type === "g2_gesture" && event.data?.action === "previous"),
   "Up did not produce the intended previous action."
 );
 assert(afterUp.hash !== boot.hash, "Up did not change the visible frame.");
 
-const beforeDown = await events();
+const beforeDownAt = new Date().toISOString();
 await input("down");
 const afterDown = await screenshot("04-after-down");
-const downEvents = (await events()).slice(beforeDown.length);
+const downEvents = await events(beforeDownAt);
 assert(
   downEvents.some(event => event.type === "g2_gesture" && event.data?.action === "next"),
   "Down did not produce the intended next action."
 );
 assert(afterDown.hash === boot.hash, "Down did not return to the original visible frame.");
 
-const beforeRapidDown = await events();
+const beforeRapidDownAt = new Date().toISOString();
 await input("down", 300);
 await input("down", 300);
 await input("down", 300);
 await new Promise(resolve => setTimeout(resolve, 2000));
 const afterRapidDown = await screenshot("05-after-rapid-down");
-const rapidDownEvents = (await events()).slice(beforeRapidDown.length);
+const rapidDownEvents = await events(beforeRapidDownAt);
 const rapidDownAcceptedCount = rapidDownEvents.filter(
   event => event.type === "g2_gesture" && event.data?.action === "next"
 ).length;
