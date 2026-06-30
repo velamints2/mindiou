@@ -100,13 +100,16 @@ npm run pack:ehpk
 The current upload artifact is:
 
 ```text
-release/learn-coach-0.1.5.ehpk
+release/learn-coach-0.1.6.ehpk
 ```
 
-Version `0.1.5` is the current private-test candidate: it keeps the stable
-single-image G2 surface, uses swipe up/down for previous/next, ignores tap,
+Version `0.1.6` is the current private-test candidate: it renders the concept
+and short coach prompt inside the same large image to avoid image/text mismatch,
+uses swipe up/down for previous/next, ignores tap, drops stale image updates,
 returns structured tutor feedback, conservatively parses voice commands, dedupes
-repeated transcripts, and prevents concurrent STT requests. Keep
+repeated transcripts, and prevents concurrent STT requests. Do not publish
+`0.1.5`; real-device feedback showed image/prompt mismatch and delayed stale
+image updates. Keep
 `release/learn-coach-0.1.2.ehpk` as the text-only stable fallback. Do not use
 `0.1.1`; its four startup image transfers caused a real G2 BLE disconnection.
 

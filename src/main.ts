@@ -255,8 +255,7 @@ function updateWebView(): void {
 }
 
 function glassesContent(card: LearningCard | null): string {
-  const prompt = fit(coachLineEl.textContent || card?.prompt || "Explain aloud", 42);
-  return `${prompt}\n${sessionLabel(sessionState)}  Up Previous  Down Next  ${progressText()}`;
+  return `${sessionLabel(sessionState)}  ${progressText()}\nUp Previous  Down Next`;
 }
 
 function displayText(card: LearningCard | null): TextContainerProperty {
@@ -286,7 +285,17 @@ function conceptImage(): ImageContainerProperty {
 
 let imageRenderQueue: Promise<void> = Promise.resolve();
 let lastRenderedConcept = "";
+let imageRequestRevision = 0;
+let renderRevision = 0;
 let lastGestureAt = 0;
+
+function visualPrompt(card: LearningCard | null): string {
+  return fit(coachLineEl.textContent || card?.prompt || "Explain aloud", 34);
+}
+
+function conceptVisualKey(card: LearningCard | null): string {
+  return [card?.id || "no-cards", visualPrompt(card)].join("|");
+}
 
 async function conceptPng(card: LearningCard | null): Promise<Uint8Array> {
   const canvas = document.createElement("canvas");
@@ -302,13 +311,23 @@ async function conceptPng(card: LearningCard | null): Promise<Uint8Array> {
   context.textBaseline = "middle";
 
   const text = fit(card?.front || "No cards", 20);
-  let fontSize = 68;
+  let fontSize = 58;
   context.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Noto Sans", sans-serif`;
   while (fontSize > 32 && context.measureText(text).width > 264) {
     fontSize -= 2;
     context.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Noto Sans", sans-serif`;
   }
-  context.fillText(text, 144, 72, 264);
+  context.fillText(text, 144, 56, 264);
+
+  const prompt = visualPrompt(card);
+  context.fillStyle = "#cfeee7";
+  let promptSize = 17;
+  context.font = `500 ${promptSize}px -apple-system, BlinkMacSystemFont, "Noto Sans", sans-serif`;
+  while (promptSize > 12 && context.measureText(prompt).width > 264) {
+    promptSize -= 1;
+    context.font = `500 ${promptSize}px -apple-system, BlinkMacSystemFont, "Noto Sans", sans-serif`;
+  }
+  context.fillText(prompt, 144, 118, 264);
 
   const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/png"));
   return blob ? new Uint8Array(await blob.arrayBuffer()) : new Uint8Array();
@@ -316,16 +335,21 @@ async function conceptPng(card: LearningCard | null): Promise<Uint8Array> {
 
 async function updateConceptImage(card: LearningCard | null, force = false): Promise<void> {
   if (!bridge || !bridgeReady) return;
-  const conceptKey = card?.id || "no-cards";
+  const conceptKey = conceptVisualKey(card);
   if (!force && conceptKey === lastRenderedConcept) return;
+  const requestRevision = ++imageRequestRevision;
   const imageData = await conceptPng(card);
   imageRenderQueue = imageRenderQueue.catch(() => undefined).then(async () => {
+    if (requestRevision !== imageRequestRevision) {
+      void logEvent("g2_concept_image_skipped", { reason: "stale", conceptKey });
+      return;
+    }
     const result = await bridge!.updateImageRawData(new ImageRawDataUpdate({
       containerID: CONCEPT_IMAGE_ID,
       containerName: "concept-image",
       imageData
     }));
-    if (result === "success") lastRenderedConcept = conceptKey;
+    if (result === "success" && requestRevision === imageRequestRevision) lastRenderedConcept = conceptKey;
     void logEvent("g2_concept_image", { bytes: imageData.length, result });
   });
   await imageRenderQueue;
@@ -334,6 +358,7 @@ async function updateConceptImage(card: LearningCard | null, force = false): Pro
 async function renderGlasses(rebuild = false): Promise<void> {
   if (!bridge) return;
   const card = currentCard();
+  const currentRender = ++renderRevision;
   try {
     if (rebuild) {
       await bridge.rebuildPageContainer(new RebuildPageContainer({
@@ -343,15 +368,17 @@ async function renderGlasses(rebuild = false): Promise<void> {
       }));
       await new Promise(resolve => window.setTimeout(resolve, 800));
       await updateConceptImage(card, true);
+      if (currentRender !== renderRevision) return;
       return;
     }
 
+    await updateConceptImage(card);
+    if (currentRender !== renderRevision) return;
     await bridge.textContainerUpgrade(new TextContainerUpgrade({
       containerID: DISPLAY_ID,
       containerName: "learn-display",
       content: glassesContent(card)
     }));
-    await updateConceptImage(card);
   } catch (error) {
     setStatus("bridge error");
     console.warn("Failed to render glasses learning page", error);

@@ -36,7 +36,7 @@ async function input(action) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action })
   });
-  await new Promise(resolve => setTimeout(resolve, 800));
+  await new Promise(resolve => setTimeout(resolve, 1200));
 }
 
 async function events() {
@@ -98,21 +98,23 @@ assert(afterClick.hash === boot.hash, "Ignored click changed the visible concept
 
 const beforeUp = await events();
 await input("up");
-await screenshot("03-after-up");
+const afterUp = await screenshot("03-after-up");
 const upEvents = (await events()).slice(beforeUp.length);
 assert(
   upEvents.some(event => event.type === "g2_gesture" && event.data?.action === "previous"),
   "Up did not produce the intended previous action."
 );
+assert(afterUp.hash !== boot.hash, "Up did not change the visible frame.");
 
 const beforeDown = await events();
 await input("down");
-await screenshot("04-after-down");
+const afterDown = await screenshot("04-after-down");
 const downEvents = (await events()).slice(beforeDown.length);
 assert(
   downEvents.some(event => event.type === "g2_gesture" && event.data?.action === "next"),
   "Down did not produce the intended next action."
 );
+assert(afterDown.hash === boot.hash, "Down did not return to the original visible frame.");
 
 const consolePayload = await (await request("/api/console")).json();
 await writeFile(`${outputDir}/console.json`, JSON.stringify(consolePayload, null, 2));
@@ -128,6 +130,8 @@ const report = {
     bootLitPixels: boot.litPixels,
     bootLitRatio: boot.litPixels / boot.totalPixels,
     ignoredClickKeptFrame: afterClick.hash === boot.hash,
+    upChangedFrame: afterUp.hash !== boot.hash,
+    downReturnedFrame: afterDown.hash === boot.hash,
     tutorAssessment: tutorPayload.assessment,
     tutorG2Text: tutorPayload.g2Text
   }
