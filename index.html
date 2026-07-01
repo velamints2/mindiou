@@ -28,7 +28,7 @@
           <div class="metrics" aria-label="Today summary">
             <div class="metric">
               <span id="metric-debts">0</span>
-              <small>new atoms</small>
+              <small>new debts</small>
             </div>
             <div class="metric">
               <span id="metric-clearable">0</span>
@@ -38,6 +38,13 @@
               <span id="metric-reviewed">0</span>
               <small>reviewed</small>
             </div>
+          </div>
+
+          <div class="session-picker" aria-label="Session duration">
+            <span>Session</span>
+            <button type="button" data-session-duration="15">15 sec</button>
+            <button type="button" data-session-duration="60">1 min</button>
+            <button type="button" data-session-duration="180">3 min</button>
           </div>
 
           <div class="section-heading">
@@ -144,6 +151,14 @@
             <div>
               <dt>Next action</dt>
               <dd id="review-next-action">Capture today's AI work</dd>
+            </div>
+            <div>
+              <dt>Recall accuracy</dt>
+              <dd id="review-accuracy">0%</dd>
+            </div>
+            <div>
+              <dt>No-AI practice</dt>
+              <dd id="review-practice-rate">0%</dd>
             </div>
           </dl>
           <div id="theme-list" class="theme-list"></div>

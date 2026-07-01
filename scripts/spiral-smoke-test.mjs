@@ -63,9 +63,20 @@ try {
   if (ingest.atoms.length < 1 || ingest.atoms.length > 3) {
     throw new Error(`Expected 1-3 atoms, received ${ingest.atoms.length}`);
   }
+  if (ingest.debts.length !== ingest.atoms.length) {
+    throw new Error("Each new atom must create one learning debt");
+  }
+  if (!ingest.debts.every(debt => debt.debtScore >= 0 && debt.debtScore <= 100 && debt.microExercise)) {
+    throw new Error("Learning debt is missing score or no-AI exercise");
+  }
   if (!ingest.cards.every(card => card.sourceEventId === "smoke-event-1" && card.projectId === "/tmp/spiral-g2")) {
     throw new Error("Generated cards lost source traceability");
   }
+
+  const shortSession = await json("/api/g2/session?duration=15");
+  if (shortSession.session.cardCount !== 1) throw new Error("15-second session must contain one due card");
+  const longSession = await json("/api/g2/session?duration=180");
+  if (longSession.session.cardCount > 5) throw new Error("3-minute session exceeded five cards");
 
   const next = await json("/v1/review/next?mode=learn");
   if (!next.card?.id) throw new Error("Review scheduler did not return a card");
@@ -76,10 +87,13 @@ try {
     body: JSON.stringify({
       cardId: next.card.id,
       result: "mastered",
+      responseText: "Whitelist permits sending; CORS permits reading the browser response.",
       source: "smoke-test"
     })
   });
   if (reviewed.review.result !== "mastered") throw new Error("Review event was not recorded");
+  if (reviewed.debt?.status !== "cleared") throw new Error("Mastered review did not clear its debt");
+  if (reviewed.today.metrics.noAiPracticeRate !== 100) throw new Error("No-AI practice metric was not updated");
 
   const after = await json("/v1/review/next?mode=learn");
   if (after.card?.id === next.card.id) throw new Error("Reviewed card remained immediately due");
@@ -87,7 +101,10 @@ try {
   console.log(JSON.stringify({
     ok: true,
     atoms: ingest.atoms.length,
+    debts: ingest.debts.length,
     cards: ingest.cards.length,
+    shortSessionCards: shortSession.session.cardCount,
+    longSessionCards: longSession.session.cardCount,
     reviewedCardId: next.card.id,
     nextCardId: after.card?.id || null
   }, null, 2));

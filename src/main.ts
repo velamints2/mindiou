@@ -64,14 +64,22 @@ type KnowledgeAtom = {
   confidence: number;
   occurrences: number;
   sourceEventIds: string[];
+  debtScore?: number;
+  debtLevel?: string;
+  debtStatus?: string;
+  microExercise?: string;
+  aiTask?: string;
 };
 
 type SpiralDashboard = {
   ok: boolean;
   metrics: {
     atomsToday: number;
+    debtsToday: number;
     clearable: number;
     reviewedToday: number;
+    recallAccuracy: number;
+    noAiPracticeRate: number;
   };
   cards: LearningCard[];
   atoms: KnowledgeAtom[];
@@ -180,6 +188,8 @@ const reviewSummaryEl = document.querySelector<HTMLParagraphElement>("#review-su
 const reviewConceptEl = document.querySelector<HTMLElement>("#review-blindspot")!;
 const reviewNextActionEl = document.querySelector<HTMLElement>("#review-next-action")!;
 const reviewListEl = document.querySelector<HTMLDivElement>("#review-list")!;
+const reviewAccuracyEl = document.querySelector<HTMLElement>("#review-accuracy")!;
+const reviewPracticeRateEl = document.querySelector<HTMLElement>("#review-practice-rate")!;
 
 let bridge: EvenBridge | null = null;
 let bridgeReady = false;
@@ -732,7 +742,8 @@ function renderAtomList(atoms: KnowledgeAtom[]): void {
     item.className = "debt-item";
     const meta = document.createElement("p");
     meta.className = "item-meta";
-    meta.textContent = `${atom.projectId} · ${Math.round(atom.confidence * 100)}% confidence · ${atom.sourceEventIds.length} source`;
+    const debtLabel = atom.debtLevel ? ` · ${atom.debtLevel} debt ${Math.round(atom.debtScore || 0)}` : "";
+    meta.textContent = `${atom.projectId}${debtLabel} · ${Math.round(atom.confidence * 100)}% confidence · ${atom.sourceEventIds.length} source`;
     const title = document.createElement("h3");
     title.textContent = atom.concept;
     const explanation = document.createElement("p");
@@ -741,6 +752,12 @@ function renderAtomList(atoms: KnowledgeAtom[]): void {
     context.className = "item-context";
     context.textContent = atom.personalContext;
     item.append(meta, title, explanation, context);
+    if (atom.microExercise) {
+      const exercise = document.createElement("p");
+      exercise.className = "item-exercise";
+      exercise.textContent = `No-AI exercise: ${atom.microExercise}`;
+      item.append(exercise);
+    }
     atomListEl.append(item);
   }
 }
@@ -767,12 +784,14 @@ function renderReviewList(reviews: SpiralDashboard["reviews"]): void {
 }
 
 function applyDashboard(payload: SpiralDashboard, replaceCards = false): void {
-  metricAtomsEl.textContent = String(payload.metrics.atomsToday);
+  metricAtomsEl.textContent = String(payload.metrics.debtsToday ?? payload.metrics.atomsToday);
   metricClearableEl.textContent = String(payload.metrics.clearable);
   metricReviewedEl.textContent = String(payload.metrics.reviewedToday);
   reviewSummaryEl.textContent = payload.report.summary;
   reviewConceptEl.textContent = payload.report.repeatedConcept || "None";
   reviewNextActionEl.textContent = payload.report.nextAction;
+  reviewAccuracyEl.textContent = `${payload.metrics.recallAccuracy || 0}%`;
+  reviewPracticeRateEl.textContent = `${payload.metrics.noAiPracticeRate || 0}%`;
   renderAtomList(payload.atoms);
   renderReviewList(payload.reviews);
   if (replaceCards && payload.cards.length) {
@@ -780,6 +799,27 @@ function applyDashboard(payload: SpiralDashboard, replaceCards = false): void {
     cardIndex = 0;
     saveCards();
     updateWebView();
+  }
+}
+
+async function startTimedSession(duration: number): Promise<void> {
+  try {
+    const payload = await apiGet<{
+      ok: boolean;
+      session: { duration: number; cardCount: number; cards: LearningCard[] };
+    }>(`/api/g2/session?duration=${duration}`);
+    if (!payload.session.cards.length) {
+      setCoach("当前没有到期卡片。");
+      return;
+    }
+    cards = payload.session.cards.map(normalizeCard);
+    cardIndex = 0;
+    saveCards();
+    updateWebView();
+    setCoach(`${payload.session.duration} 秒 session · ${payload.session.cardCount} 张卡`);
+    await renderGlasses(true);
+  } catch (error) {
+    setCoach(error instanceof Error ? error.message : "Session 创建失败");
   }
 }
 
@@ -1378,6 +1418,12 @@ document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(button => {
     document.querySelectorAll<HTMLElement>("[data-panel]").forEach(panel => {
       panel.hidden = panel.dataset.panel !== target;
     });
+  });
+});
+
+document.querySelectorAll<HTMLButtonElement>("[data-session-duration]").forEach(button => {
+  button.addEventListener("click", () => {
+    void startTimedSession(Number(button.dataset.sessionDuration || 60));
   });
 });
 

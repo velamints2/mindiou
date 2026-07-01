@@ -322,10 +322,32 @@ function fallbackKnowledgeExtraction(text) {
       common_mistake: `只检查 ${candidate.concept} 的单一环节。`,
       recall_question: candidate.question,
       answer: candidate.explanation,
+      ai_task: "AI assisted with diagnosis and implementation.",
+      skill_gap: candidate.concept,
+      micro_exercise: `不使用 AI，用 30 秒回答：${candidate.question}`,
+      card_type: index === 2 ? "exercise" : "recall",
       confidence: 0.62,
       debt_score: Math.min(80, 55 + index * 8)
     }))
   };
+}
+
+function computedDebtScore(atom) {
+  if (atom.debt_score !== undefined || atom.debtScore !== undefined) {
+    return Math.max(0, Math.min(100, Number(atom.debt_score ?? atom.debtScore)));
+  }
+  const delegation = Number(atom.ai_delegation ?? atom.aiDelegation ?? 50);
+  const frequency = Number(atom.repetition_frequency ?? atom.repetitionFrequency ?? 50);
+  const relevance = Number(atom.project_relevance ?? atom.projectRelevance ?? 50);
+  const risk = Number(atom.error_risk ?? atom.errorRisk ?? 50);
+  const mastery = Number(atom.mastery_evidence ?? atom.masteryEvidence ?? 0);
+  return Math.max(0, Math.min(100, Math.round(
+    delegation * 0.35
+    + frequency * 0.2
+    + relevance * 0.2
+    + risk * 0.15
+    - mastery * 0.1
+  )));
 }
 
 function normalizeKnowledgeExtraction(input, text) {
@@ -343,8 +365,12 @@ function normalizeKnowledgeExtraction(input, text) {
         common_mistake: clean(atom.common_mistake || atom.commonMistake).slice(0, 180),
         recall_question: clean(atom.recall_question || atom.recallQuestion).slice(0, 120),
         answer: clean(atom.answer || explanation).slice(0, 220),
+        ai_task: clean(atom.ai_task || atom.aiTask).slice(0, 180),
+        skill_gap: clean(atom.skill_gap || atom.skillGap || atom.concept).slice(0, 120),
+        micro_exercise: clean(atom.micro_exercise || atom.microExercise).slice(0, 180),
+        card_type: clean(atom.card_type || atom.cardType || "recall").slice(0, 30),
         confidence: Math.max(0, Math.min(1, Number(atom.confidence ?? 0.7))),
-        debt_score: Math.max(0, Math.min(100, Number(atom.debt_score ?? atom.debtScore ?? 50)))
+        debt_score: computedDebtScore(atom)
       };
     }).filter(atom => atom.concept && atom.recall_question && atom.answer)
   };
@@ -360,10 +386,13 @@ async function extractKnowledgeAtoms(text, context = {}) {
           learningCoachSystemPrompt,
           "You are the Spiral cognitive compiler. Compute learning increment, not a session summary.",
           "Answer internally: the original goal, the exposed knowledge gap, reusable knowledge, personal project context, and a question that verifies understanding.",
+          "Identify the cognitive task delegated to AI and the capability the user may not yet reproduce without AI.",
           "Create zero to three knowledge atoms. Return zero when there is no genuinely reusable new knowledge.",
           "Each atom covers one concept, uses the user's project context, tests application rather than definition, and never copies a long source passage.",
+          "Score cognitive debt from 0 to 100 using AI delegation, repetition, project relevance, error risk, and evidence of mastery. Do not treat every AI action as debt.",
+          "Choose card_type concept|recall|exercise|reflection and provide one concrete no-AI micro exercise.",
           "Return JSON only:",
-          "{\"summary\":\"\",\"atoms\":[{\"concept\":\"\",\"plain_explanation\":\"\",\"personal_context\":\"\",\"example\":\"\",\"common_mistake\":\"\",\"recall_question\":\"\",\"answer\":\"\",\"confidence\":0.0,\"debt_score\":0}]}.",
+          "{\"summary\":\"\",\"atoms\":[{\"concept\":\"\",\"plain_explanation\":\"\",\"personal_context\":\"\",\"example\":\"\",\"common_mistake\":\"\",\"recall_question\":\"\",\"answer\":\"\",\"ai_task\":\"\",\"skill_gap\":\"\",\"micro_exercise\":\"\",\"card_type\":\"concept|recall|exercise|reflection\",\"confidence\":0.0,\"debt_score\":0}]}.",
           "recall_question max 120 chars; answer max 220; personal_context max 220. Prefer Chinese when the source is Chinese."
         ].join(" ")
       },
@@ -406,6 +435,7 @@ async function ingestSpiralEvent(payload) {
     event,
     summary: extraction.summary,
     atoms: saved.atoms,
+    debts: saved.debts,
     cards: saved.cards,
     fallback: Boolean(extraction.fallback),
     error: extraction.error,
@@ -632,7 +662,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && ["/api/spiral/atoms", "/api/spiral/debts"].includes(url.pathname)) {
       const dashboard = spiralStore.dashboard();
-      jsonResponse(res, 200, { ok: true, atoms: dashboard.atoms });
+      jsonResponse(res, 200, { ok: true, atoms: dashboard.atoms, debts: dashboard.debts });
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/spiral/reviews") {
@@ -647,6 +677,11 @@ const server = createServer(async (req, res) => {
         return;
       }
       jsonResponse(res, 200, { ok: true, mode, card: spiralStore.nextReview() });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/g2/session") {
+      const session = spiralStore.buildSession(url.searchParams.get("duration"));
+      jsonResponse(res, 200, { ok: true, session });
       return;
     }
 

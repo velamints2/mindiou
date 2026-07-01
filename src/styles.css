@@ -111,6 +111,21 @@ select {
   border: 1px solid #28584e;
 }
 
+.session-picker {
+  display: grid;
+  grid-template-columns: 1fr repeat(3, minmax(74px, auto));
+  align-items: center;
+  gap: 8px;
+  margin: -8px 0 24px;
+  color: #78a79c;
+  font-size: 12px;
+}
+
+.session-picker button {
+  min-height: 34px;
+  background: transparent;
+}
+
 .metric {
   min-width: 0;
   padding: 13px;
@@ -322,6 +337,11 @@ select {
   font-size: 13px;
 }
 
+.debt-item .item-exercise {
+  color: #e7be63;
+  font-size: 13px;
+}
+
 .review-facts {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -336,6 +356,14 @@ select {
 
 .review-facts div:last-child {
   border-right: 0;
+}
+
+.review-facts div:nth-child(even) {
+  border-right: 0;
+}
+
+.review-facts div:nth-child(n + 3) {
+  border-top: 1px solid #28584e;
 }
 
 .review-facts dt {
@@ -396,6 +424,14 @@ select {
   .field-grid,
   .review-facts {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .session-picker {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .session-picker span {
+    grid-column: 1 / -1;
   }
 
   .inline-controls {

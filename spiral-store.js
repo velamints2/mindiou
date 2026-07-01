@@ -6,9 +6,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function emptyState() {
   return {
-    version: 2,
+    version: 3,
     sourceEvents: [],
     knowledgeAtoms: [],
+    learningDebts: [],
     knowledgeCards: [],
     reviewLogs: []
   };
@@ -30,6 +31,13 @@ function conceptKey(projectId, concept) {
   return `${clean(projectId).toLowerCase()}::${clean(concept).toLowerCase()}`;
 }
 
+function debtLevel(score) {
+  if (score >= 81) return "critical";
+  if (score >= 61) return "high";
+  if (score >= 31) return "medium";
+  return "light";
+}
+
 function priorityScore(card, now) {
   const overdue = card.due <= now ? 1 : 0;
   const masteryGap = 1 - clamp(card.mastery || 0, 0, 1);
@@ -49,18 +57,63 @@ export function createSpiralStore(filePath) {
       state = {
         ...emptyState(),
         ...parsed,
-        version: 2,
+        version: 3,
         sourceEvents: Array.isArray(parsed.sourceEvents) ? parsed.sourceEvents : [],
         knowledgeAtoms: Array.isArray(parsed.knowledgeAtoms) ? parsed.knowledgeAtoms : [],
+        learningDebts: Array.isArray(parsed.learningDebts) ? parsed.learningDebts : [],
         knowledgeCards: Array.isArray(parsed.knowledgeCards) ? parsed.knowledgeCards : [],
         reviewLogs: Array.isArray(parsed.reviewLogs) ? parsed.reviewLogs : []
       };
+      if (backfillLearningDebts() > 0) await persist();
     } catch (error) {
       if (error.code !== "ENOENT") {
         console.warn(`Spiral store could not be loaded: ${error.message}`);
       }
     }
     return state;
+  }
+
+  function backfillLearningDebts() {
+    let migrated = 0;
+    for (const atom of state.knowledgeAtoms) {
+      if (state.learningDebts.some(debt => debt.knowledgeAtomId === atom.id)) continue;
+      const card = state.knowledgeCards.find(item => item.knowledgeAtomId === atom.id);
+      const latestReview = card
+        ? state.reviewLogs.find(review => review.cardId === card.id)
+        : null;
+      const score = clamp(card?.debtScore ?? 50, 0, 100);
+      const debt = {
+        id: crypto.randomUUID(),
+        knowledgeAtomId: atom.id,
+        projectId: atom.projectId,
+        sourceEventIds: atom.sourceEventIds || (card?.sourceEventId ? [card.sourceEventId] : []),
+        title: atom.concept,
+        skill: atom.concept,
+        aiTask: "Created before AI debt tracking was enabled.",
+        evidence: atom.personalContext || "",
+        microExercise: atom.recallQuestion || card?.front || "",
+        cardType: card?.cardType || "recall",
+        debtScore: score,
+        level: debtLevel(score),
+        status: latestReview?.result === "mastered"
+          ? "cleared"
+          : latestReview && latestReview.result !== "skip"
+            ? "training"
+            : "open",
+        occurrences: atom.occurrences || 1,
+        createdAt: atom.createdAt || card?.createdAt || new Date().toISOString(),
+        updatedAt: latestReview?.reviewedAt || atom.updatedAt || atom.createdAt,
+        clearedAt: latestReview?.result === "mastered" ? latestReview.reviewedAt : null,
+        migrated: true
+      };
+      state.learningDebts.push(debt);
+      if (card) card.debtId = debt.id;
+      for (const review of state.reviewLogs.filter(item => item.cardId === card?.id)) {
+        review.debtId = debt.id;
+      }
+      migrated += 1;
+    }
+    return migrated;
   }
 
   function persist() {
@@ -104,6 +157,7 @@ export function createSpiralStore(filePath) {
 
     const createdAt = new Date().toISOString();
     const atoms = [];
+    const debts = [];
     const cards = [];
 
     for (const input of (extraction.atoms || []).slice(0, 3)) {
@@ -118,6 +172,19 @@ export function createSpiralStore(filePath) {
         existingAtom.occurrences = (existingAtom.occurrences || 1) + 1;
         existingAtom.confidence = Math.max(existingAtom.confidence, clamp(input.confidence, 0, 1));
         existingAtom.updatedAt = createdAt;
+        const existingDebt = state.learningDebts.find(debt => debt.knowledgeAtomId === existingAtom.id);
+        if (existingDebt) {
+          existingDebt.sourceEventIds = [...new Set([...existingDebt.sourceEventIds, eventId])].slice(-20);
+          existingDebt.occurrences = (existingDebt.occurrences || 1) + 1;
+          existingDebt.debtScore = Math.max(existingDebt.debtScore, clamp(input.debt_score, 0, 100));
+          existingDebt.level = debtLevel(existingDebt.debtScore);
+          existingDebt.updatedAt = createdAt;
+          if (existingDebt.status === "cleared") {
+            existingDebt.status = "open";
+            existingDebt.clearedAt = null;
+          }
+          debts.push(existingDebt);
+        }
         atoms.push(existingAtom);
         continue;
       }
@@ -139,9 +206,30 @@ export function createSpiralStore(filePath) {
         createdAt,
         updatedAt: createdAt
       };
+      const score = clamp(input.debt_score ?? input.debtScore ?? 50, 0, 100);
+      const debt = {
+        id: crypto.randomUUID(),
+        knowledgeAtomId: atom.id,
+        projectId: sourceEvent.projectId,
+        sourceEventIds: [eventId],
+        title: clean(input.skill_gap || input.skillGap || concept).slice(0, 120),
+        skill: concept,
+        aiTask: clean(input.ai_task || input.aiTask).slice(0, 180),
+        evidence: clean(input.personal_context || input.personalContext || sourceEvent.excerpt).slice(0, 240),
+        microExercise: clean(input.micro_exercise || input.microExercise || recallQuestion).slice(0, 180),
+        cardType: clean(input.card_type || input.cardType || "recall").slice(0, 30),
+        debtScore: score,
+        level: debtLevel(score),
+        status: "open",
+        occurrences: 1,
+        createdAt,
+        updatedAt: createdAt,
+        clearedAt: null
+      };
       const card = {
         id: crypto.randomUUID(),
         knowledgeAtomId: atom.id,
+        debtId: debt.id,
         sourceEventId: eventId,
         sourceEventIds: [eventId],
         projectId: sourceEvent.projectId,
@@ -150,7 +238,7 @@ export function createSpiralStore(filePath) {
         prompt: atom.personalContext.slice(0, 150),
         tags: ["spiral", "active-recall"].filter(Boolean),
         cardType: "application",
-        debtScore: clamp(input.debt_score ?? input.debtScore ?? 50, 0, 100),
+        debtScore: score,
         due: Date.now(),
         mastery: 0,
         repetitions: 0,
@@ -160,15 +248,17 @@ export function createSpiralStore(filePath) {
         createdAt
       };
       atoms.push(atom);
+      debts.push(debt);
       cards.push(card);
       state.knowledgeAtoms.unshift(atom);
+      state.learningDebts.unshift(debt);
       state.knowledgeCards.unshift(card);
     }
 
     sourceEvent.processedAt = createdAt;
     sourceEvent.summary = clean(extraction.summary || "").slice(0, 300);
     await persist();
-    return { atoms, cards };
+    return { atoms, debts, cards };
   }
 
   async function recordReview(input) {
@@ -195,11 +285,20 @@ export function createSpiralStore(filePath) {
         : Math.max(0, (card.mastery || 0) - 0.15);
     card.due = now + interval;
     card.status = "scheduled";
+    const debt = state.learningDebts.find(item => item.id === card.debtId);
+    if (debt) {
+      debt.status = result === "mastered" ? "cleared"
+        : result === "skip" ? debt.status
+          : "training";
+      debt.clearedAt = result === "mastered" ? new Date(now).toISOString() : null;
+      debt.updatedAt = new Date(now).toISOString();
+    }
 
     const review = {
       id: crypto.randomUUID(),
       cardId: card.id,
       knowledgeAtomId: card.knowledgeAtomId,
+      debtId: card.debtId,
       projectId: card.projectId,
       result,
       confidence: clamp(input.confidence, 0, 5),
@@ -210,7 +309,7 @@ export function createSpiralStore(filePath) {
     };
     state.reviewLogs.unshift(review);
     await persist();
-    return { review, card };
+    return { review, card, debt };
   }
 
   function nextReview() {
@@ -220,11 +319,33 @@ export function createSpiralStore(filePath) {
       .sort((left, right) => priorityScore(right, now) - priorityScore(left, now))[0] || null;
   }
 
+  function buildSession(durationInput) {
+    const duration = [15, 60, 180].includes(Number(durationInput)) ? Number(durationInput) : 60;
+    const limit = duration === 15 ? 1 : duration === 60 ? 3 : 5;
+    const now = Date.now();
+    const cards = [...state.knowledgeCards]
+      .filter(card => card.due <= now)
+      .sort((left, right) => priorityScore(right, now) - priorityScore(left, now))
+      .slice(0, limit);
+    return {
+      id: crypto.randomUUID(),
+      mode: "learn",
+      duration,
+      estimatedSeconds: Math.min(duration, cards.length * 30),
+      cardCount: cards.length,
+      cards
+    };
+  }
+
   function dashboard() {
     const now = Date.now();
     const dailyEvents = recent(state.sourceEvents, now);
     const dailyAtoms = recent(state.knowledgeAtoms, now);
+    const dailyDebts = recent(state.learningDebts, now);
     const dailyReviews = recent(state.reviewLogs, now);
+    const answeredReviews = dailyReviews.filter(review => review.result !== "skip");
+    const practicedReviews = answeredReviews.filter(review => review.responseText);
+    const clearedDebtReviews = dailyReviews.filter(review => review.result === "mastered" && review.debtId);
     const cards = [...state.knowledgeCards]
       .filter(card => card.due <= now)
       .sort((left, right) => priorityScore(right, now) - priorityScore(left, now))
@@ -236,19 +357,40 @@ export function createSpiralStore(filePath) {
       metrics: {
         eventsToday: dailyEvents.length,
         atomsToday: dailyAtoms.length,
+        debtsToday: dailyDebts.length,
+        openDebts: state.learningDebts.filter(debt => debt.status !== "cleared").length,
         clearable: cards.length,
         reviewedToday: dailyReviews.length,
-        masteredToday: dailyReviews.filter(review => review.result === "mastered").length
+        masteredToday: dailyReviews.filter(review => review.result === "mastered").length,
+        debtsClearedToday: clearedDebtReviews.length,
+        recallAccuracy: answeredReviews.length
+          ? Math.round(answeredReviews.filter(review => review.result === "mastered").length / answeredReviews.length * 100)
+          : 0,
+        noAiPracticeRate: answeredReviews.length
+          ? Math.round(practicedReviews.length / answeredReviews.length * 100)
+          : 0
       },
       cards,
-      atoms: state.knowledgeAtoms.slice(0, 100),
+      atoms: state.knowledgeAtoms.slice(0, 100).map(atom => {
+        const debt = state.learningDebts.find(item => item.knowledgeAtomId === atom.id);
+        return debt ? {
+          ...atom,
+          debtId: debt.id,
+          debtScore: debt.debtScore,
+          debtLevel: debt.level,
+          debtStatus: debt.status,
+          microExercise: debt.microExercise,
+          aiTask: debt.aiTask
+        } : atom;
+      }),
+      debts: state.learningDebts.slice(0, 100),
       reviews: state.reviewLogs.slice(0, 40),
       report: {
         repeatedConcept: [...state.knowledgeAtoms]
           .sort((left, right) => (right.occurrences || 1) - (left.occurrences || 1))[0]?.concept || "",
         nextAction: cards[0]?.front || "等待下一次 Codex 学习增量",
-        summary: dailyAtoms.length
-          ? `今天编译了 ${dailyAtoms.length} 个知识原子，完成 ${dailyReviews.length} 次主动回忆。`
+        summary: dailyDebts.length
+          ? `今天识别 ${dailyDebts.length} 笔 AI 债务，清偿 ${clearedDebtReviews.length} 笔，完成 ${dailyReviews.length} 次主动回忆。`
           : "今天尚未发现值得制卡的新知识。"
       }
     };
@@ -260,6 +402,7 @@ export function createSpiralStore(filePath) {
     saveExtraction,
     recordReview,
     nextReview,
+    buildSession,
     dashboard,
     getState: () => state
   };

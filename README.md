@@ -13,8 +13,10 @@ queue. See [SPIRAL_ARCHITECTURE.md](./SPIRAL_ARCHITECTURE.md).
 - Uses Even Hub SDK startup containers, text upgrades, list events, and MIC events.
 - Accepts allowlisted, locally redacted Codex events.
 - Compiles each event into zero to three deduplicated knowledge atoms.
+- Creates a scored AI learning debt and no-AI micro exercise for each new atom.
 - Preserves project context and source event IDs on every generated card.
 - Records understood, partial, incorrect, and skipped review outcomes.
+- Builds deterministic 15-second, 1-minute, and 3-minute G2 review sessions.
 - Converts pasted text or files into direct flashcards with an optional AI API.
 - Plans learning units from a subject and the learner's current level.
 - Evaluates answers using Feynman-style questions and Socratic follow-up.
@@ -93,6 +95,7 @@ In a normal browser, it uses Web Speech API when available and keeps the G2 brid
 - `GET /v1/review/next?mode=learn`: returns the highest-priority due card.
 - `POST /v1/reviews`: records a review outcome and schedules the card.
 - `GET /api/spiral/today`: returns today's cards, atoms, metrics, and review report.
+- `GET /api/g2/session?duration=15|60|180`: returns a time-bounded due-card queue.
 - `POST /api/learn/import`: turns raw text into cards.
 - `POST /api/learn/plan`: creates learning units from a subject and learner level.
 - `POST /api/learn/tutor`: returns structured coaching feedback:
@@ -119,8 +122,12 @@ npm run pack:ehpk
 The current upload artifact is:
 
 ```text
-release/learn-coach-0.2.1.ehpk
+release/learn-coach-0.3.0.ehpk
 ```
+
+Version `0.3.0` adds durable AI learning debts, debt severity and lifecycle,
+no-AI micro exercises, daily debt/recall/practice metrics, and time-bounded
+15-second, 1-minute, and 3-minute review sessions.
 
 Version `0.2.1` is the current voice-test candidate. It starts buffering only
 after local PCM speech detection, waits for trailing silence before sending one
