@@ -1,6 +1,6 @@
 {
   "name": "evenhub-g2-learning",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:voice": "node scripts/voice-smoke-test.mjs",
+    "test:spiral": "node scripts/spiral-smoke-test.mjs",
     "test:simulator": "node scripts/pre-release-test.mjs",
     "check:release": "node scripts/check-release.mjs",
     "pack:ehpk": "node scripts/pack-ehpk.mjs",

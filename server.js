@@ -1,10 +1,12 @@
 import { createServer } from "node:http";
 import crypto from "node:crypto";
+import { createSpiralStore } from "./spiral-store.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
 const apiToken = process.env.LEARNING_API_TOKEN || "";
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
+const disableAi = process.env.SPIRAL_DISABLE_AI === "1";
 const openAiBaseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
 const chatModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const sttModel = process.env.OPENAI_STT_MODEL || "gpt-4o-mini-transcribe";
@@ -13,7 +15,10 @@ const sttPrompt = process.env.OPENAI_STT_PROMPT || [
   "Likely commands: 下一张, 下一个, 重复, 再说一遍, 提问, 问我, 会了, next, repeat, ask me, got it.",
   "Preserve English vocabulary terms exactly when possible."
 ].join(" ");
+const learningStorePath = process.env.LEARNING_STORE_PATH || "tmp/spiral-store.json";
 const eventLog = [];
+const spiralStore = createSpiralStore(learningStorePath);
+await spiralStore.load();
 
 const learningCoachSystemPrompt = [
   "You are Learn Coach, a rigorous but patient AI teacher for Even G2 smart glasses.",
@@ -253,7 +258,7 @@ function fallbackPlan(subject, level, maxUnits = 8) {
 }
 
 async function chatJson(messages, fallback) {
-  if (!openAiApiKey) return fallback();
+  if (!openAiApiKey || disableAi) return fallback();
   const response = await fetch(`${openAiBaseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -273,6 +278,139 @@ async function chatJson(messages, fallback) {
   if (!response.ok) throw new Error(payload.error?.message || `OpenAI HTTP ${response.status}`);
   const content = payload.choices?.[0]?.message?.content || "{}";
   return parseJsonObject(content);
+}
+
+function fallbackKnowledgeExtraction(text) {
+  const normalized = clean(text);
+  const candidates = [
+    {
+      pattern: /audio|microphone|mic|pcm|语音|音频/i,
+      concept: "G2 音频流生命周期",
+      explanation: "音频采集、缓冲、上传和转写是四个独立状态，任何一层停止都会中断语音闭环。",
+      question: "为什么 G2 已开启麦克风，转写仍可能没有结果？"
+    },
+    {
+      pattern: /state|webview|localstorage|状态|持久化/i,
+      concept: "WebView 状态恢复",
+      explanation: "运行时状态会随 WebView 回收而丢失，关键学习进度必须写入持久化存储并在启动时恢复。",
+      question: "应用被系统回收后，哪些学习状态必须重新恢复？"
+    },
+    {
+      pattern: /cors|whitelist|sdk|api|bridge|container|白名单|插件/i,
+      concept: "Even Hub 网络白名单与 CORS",
+      explanation: "白名单决定插件能否发出请求，CORS 决定 WebView 是否能读取服务端响应，两者缺一不可。",
+      question: "为什么接口在 curl 中可用，在 G2 插件里仍可能失败？"
+    },
+    {
+      pattern: /test|bug|error|失败|故障|修复/i,
+      concept: "从故障建立回归测试",
+      explanation: "修复只有被转化为可重复的输入、预期结果和失败条件，才不会在后续版本中悄悄复发。",
+      question: "怎样把一次真机故障转化成可自动执行的回归测试？"
+    }
+  ];
+  const selected = normalized.length < 80
+    ? []
+    : candidates.filter(candidate => candidate.pattern.test(normalized)).slice(0, 3);
+
+  return {
+    summary: fit(normalized, 220),
+    atoms: selected.map((candidate, index) => ({
+      concept: candidate.concept,
+      plain_explanation: candidate.explanation,
+      personal_context: fit(normalized, 180),
+      example: fit(normalized, 180),
+      common_mistake: `只检查 ${candidate.concept} 的单一环节。`,
+      recall_question: candidate.question,
+      answer: candidate.explanation,
+      confidence: 0.62,
+      debt_score: Math.min(80, 55 + index * 8)
+    }))
+  };
+}
+
+function normalizeKnowledgeExtraction(input, text) {
+  const fallback = fallbackKnowledgeExtraction(text);
+  const rawAtoms = Array.isArray(input.atoms) ? input.atoms : fallback.atoms;
+  return {
+    summary: clean(input.summary || fallback.summary).slice(0, 300),
+    atoms: rawAtoms.slice(0, 3).map(atom => {
+      const explanation = clean(atom.plain_explanation || atom.plainExplanation).slice(0, 220);
+      return {
+        concept: clean(atom.concept).slice(0, 100),
+        plain_explanation: explanation,
+        personal_context: clean(atom.personal_context || atom.personalContext).slice(0, 220),
+        example: clean(atom.example).slice(0, 220),
+        common_mistake: clean(atom.common_mistake || atom.commonMistake).slice(0, 180),
+        recall_question: clean(atom.recall_question || atom.recallQuestion).slice(0, 120),
+        answer: clean(atom.answer || explanation).slice(0, 220),
+        confidence: Math.max(0, Math.min(1, Number(atom.confidence ?? 0.7))),
+        debt_score: Math.max(0, Math.min(100, Number(atom.debt_score ?? atom.debtScore ?? 50)))
+      };
+    }).filter(atom => atom.concept && atom.recall_question && atom.answer)
+  };
+}
+
+async function extractKnowledgeAtoms(text, context = {}) {
+  const fallback = () => fallbackKnowledgeExtraction(text);
+  try {
+    const result = await chatJson([
+      {
+        role: "system",
+        content: [
+          learningCoachSystemPrompt,
+          "You are the Spiral cognitive compiler. Compute learning increment, not a session summary.",
+          "Answer internally: the original goal, the exposed knowledge gap, reusable knowledge, personal project context, and a question that verifies understanding.",
+          "Create zero to three knowledge atoms. Return zero when there is no genuinely reusable new knowledge.",
+          "Each atom covers one concept, uses the user's project context, tests application rather than definition, and never copies a long source passage.",
+          "Return JSON only:",
+          "{\"summary\":\"\",\"atoms\":[{\"concept\":\"\",\"plain_explanation\":\"\",\"personal_context\":\"\",\"example\":\"\",\"common_mistake\":\"\",\"recall_question\":\"\",\"answer\":\"\",\"confidence\":0.0,\"debt_score\":0}]}.",
+          "recall_question max 120 chars; answer max 220; personal_context max 220. Prefer Chinese when the source is Chinese."
+        ].join(" ")
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          source: context.source || "manual",
+          projectId: context.projectId || "general",
+          interaction: String(text).slice(0, 30000)
+        })
+      }
+    ], fallback);
+    return normalizeKnowledgeExtraction(result, text);
+  } catch (error) {
+    return { ...fallback(), fallback: true, error: error.message };
+  }
+}
+
+async function ingestSpiralEvent(payload) {
+  const rawText = String(payload.rawText || payload.text || "").trim();
+  if (!rawText) return { ok: false, error: "Missing rawText" };
+  const source = clean(payload.source || "manual");
+  const projectId = clean(payload.projectId || "general");
+  const event = await spiralStore.createEvent({
+    id: payload.event_id || payload.id,
+    sessionId: payload.session_id,
+    turnId: payload.turn_id,
+    source,
+    eventType: payload.event_type || payload.eventType || payload.sourceType || "Stop",
+    projectId,
+    title: payload.title,
+    rawText,
+    retainRaw: payload.retainRaw !== false,
+    privacyTags: payload.privacyTags
+  });
+  const extraction = await extractKnowledgeAtoms(rawText, { source, projectId });
+  const saved = await spiralStore.saveExtraction(event.id, extraction);
+  return {
+    ok: true,
+    event,
+    summary: extraction.summary,
+    atoms: saved.atoms,
+    cards: saved.cards,
+    fallback: Boolean(extraction.fallback),
+    error: extraction.error,
+    today: spiralStore.dashboard()
+  };
 }
 
 async function importCards(payload) {
@@ -488,6 +626,29 @@ const server = createServer(async (req, res) => {
       jsonResponse(res, 200, { ok: true, events });
       return;
     }
+    if (req.method === "GET" && ["/api/spiral/today", "/api/g2/today"].includes(url.pathname)) {
+      jsonResponse(res, 200, spiralStore.dashboard());
+      return;
+    }
+    if (req.method === "GET" && ["/api/spiral/atoms", "/api/spiral/debts"].includes(url.pathname)) {
+      const dashboard = spiralStore.dashboard();
+      jsonResponse(res, 200, { ok: true, atoms: dashboard.atoms });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/spiral/reviews") {
+      const dashboard = spiralStore.dashboard();
+      jsonResponse(res, 200, { ok: true, reviews: dashboard.reviews, report: dashboard.report });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/v1/review/next") {
+      const mode = url.searchParams.get("mode") || "learn";
+      if (mode !== "learn") {
+        jsonResponse(res, 501, { ok: false, error: "Thought mode starts in Spiral v0.2" });
+        return;
+      }
+      jsonResponse(res, 200, { ok: true, mode, card: spiralStore.nextReview() });
+      return;
+    }
 
     if (req.method !== "POST") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
@@ -515,6 +676,26 @@ const server = createServer(async (req, res) => {
       jsonResponse(res, 200, await transcribe(payload));
       return;
     }
+    if (["/v1/events/codex", "/api/spiral/ingest", "/api/spiral/capture"].includes(url.pathname)) {
+      const result = await ingestSpiralEvent(payload);
+      jsonResponse(res, result.ok ? 200 : 400, result);
+      return;
+    }
+    if (["/v1/reviews", "/api/spiral/review"].includes(url.pathname)) {
+      const result = await spiralStore.recordReview(payload);
+      jsonResponse(res, 200, { ok: true, ...result, today: spiralStore.dashboard() });
+      return;
+    }
+    const g2AnswerMatch = url.pathname.match(/^\/api\/g2\/card\/([^/]+)\/answer$/);
+    if (g2AnswerMatch) {
+      const result = await spiralStore.recordReview({
+        ...payload,
+        cardId: decodeURIComponent(g2AnswerMatch[1]),
+        source: payload.source || "g2"
+      });
+      jsonResponse(res, 200, { ok: true, ...result, today: spiralStore.dashboard() });
+      return;
+    }
 
     jsonResponse(res, 404, { ok: false, error: "Not found" });
   } catch (error) {
@@ -523,5 +704,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`G2 learning API listening on http://${host}:${port}`);
+  console.log(`G2 learning API listening on http://${host}:${port} using ${learningStorePath}`);
 });

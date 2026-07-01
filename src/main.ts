@@ -38,12 +38,52 @@ import "./styles.css";
 
 type LearningCard = {
   id: string;
+  knowledgeAtomId?: string;
+  sourceEventId?: string;
+  sourceEventIds?: string[];
+  projectId?: string;
   front: string;
   back: string;
   prompt: string;
   tags: string[];
+  debtScore?: number;
+  mastery?: number;
   due: number;
   repetitions: number;
+};
+
+type KnowledgeAtom = {
+  id: string;
+  projectId: string;
+  concept: string;
+  plainExplanation: string;
+  personalContext: string;
+  recallQuestion: string;
+  confidence: number;
+  occurrences: number;
+  sourceEventIds: string[];
+};
+
+type SpiralDashboard = {
+  ok: boolean;
+  metrics: {
+    atomsToday: number;
+    clearable: number;
+    reviewedToday: number;
+  };
+  cards: LearningCard[];
+  atoms: KnowledgeAtom[];
+  reviews: Array<{
+    id: string;
+    result: string;
+    projectId: string;
+    reviewedAt: string;
+  }>;
+  report: {
+    repeatedConcept: string;
+    nextAction: string;
+    summary: string;
+  };
 };
 
 type ImportResponse = {
@@ -121,6 +161,21 @@ const knownButton = document.querySelector<HTMLButtonElement>("#known-card")!;
 const toggleVoiceButton = document.querySelector<HTMLButtonElement>("#toggle-voice")!;
 const mockRepeatButton = document.querySelector<HTMLButtonElement>("#mock-repeat")!;
 const saveSettingsButton = document.querySelector<HTMLButtonElement>("#save-settings")!;
+const ingestButton = document.querySelector<HTMLButtonElement>("#ingest-debt")!;
+const syncTodayButton = document.querySelector<HTMLButtonElement>("#sync-today")!;
+const captureSourceEl = document.querySelector<HTMLSelectElement>("#capture-source")!;
+const captureProjectEl = document.querySelector<HTMLInputElement>("#capture-project")!;
+const retainSourceEl = document.querySelector<HTMLInputElement>("#retain-source")!;
+const captureStatusEl = document.querySelector<HTMLParagraphElement>("#capture-status")!;
+const metricAtomsEl = document.querySelector<HTMLSpanElement>("#metric-debts")!;
+const metricClearableEl = document.querySelector<HTMLSpanElement>("#metric-clearable")!;
+const metricReviewedEl = document.querySelector<HTMLSpanElement>("#metric-reviewed")!;
+const currentScoreEl = document.querySelector<HTMLSpanElement>("#current-debt-score")!;
+const atomListEl = document.querySelector<HTMLDivElement>("#debt-list")!;
+const reviewSummaryEl = document.querySelector<HTMLParagraphElement>("#review-summary")!;
+const reviewConceptEl = document.querySelector<HTMLElement>("#review-blindspot")!;
+const reviewNextActionEl = document.querySelector<HTMLElement>("#review-next-action")!;
+const reviewListEl = document.querySelector<HTMLDivElement>("#review-list")!;
 
 let bridge: EvenBridge | null = null;
 let bridgeReady = false;
@@ -193,10 +248,16 @@ function makeCard(front: string, back: string, prompt = "跟读后说出答案�
 function normalizeCard(input: Partial<LearningCard>): LearningCard {
   return {
     id: String(input.id || crypto.randomUUID()),
+    knowledgeAtomId: input.knowledgeAtomId ? String(input.knowledgeAtomId) : undefined,
+    sourceEventId: input.sourceEventId ? String(input.sourceEventId) : undefined,
+    sourceEventIds: Array.isArray(input.sourceEventIds) ? input.sourceEventIds.map(String) : undefined,
+    projectId: input.projectId ? String(input.projectId) : undefined,
     front: clean(input.front || "Untitled").slice(0, 64),
     back: clean(input.back || "").slice(0, 120),
     prompt: clean(input.prompt || "跟读后说出答案。").slice(0, 120),
     tags: Array.isArray(input.tags) ? input.tags.map(String).slice(0, 4) : [],
+    debtScore: Number(input.debtScore || 0),
+    mastery: Number(input.mastery || 0),
     due: Number(input.due || Date.now()),
     repetitions: Number(input.repetitions || 0)
   };
@@ -275,6 +336,8 @@ function updateWebView(): void {
   cardFrontEl.textContent = card.front;
   cardBackEl.textContent = card.back;
   coachLineEl.textContent = card.prompt;
+  currentScoreEl.hidden = !card.debtScore;
+  currentScoreEl.textContent = card.debtScore ? `priority ${Math.round(card.debtScore)}` : "";
 }
 
 let glassesNotice = "";
@@ -636,6 +699,144 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return payload;
 }
 
+async function apiGet<T>(path: string): Promise<T> {
+  const response = await fetch(apiUrl(path), {
+    headers: {
+      "accept": "application/json",
+      ...(apiToken ? { "authorization": `Bearer ${apiToken}` } : {})
+    }
+  });
+  const payload = await response.json() as T;
+  if (!response.ok) throw new Error((payload as { error?: string }).error || `HTTP ${response.status}`);
+  return payload;
+}
+
+function renderAtomList(atoms: KnowledgeAtom[]): void {
+  atomListEl.replaceChildren();
+  if (!atoms.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "No knowledge atoms yet.";
+    atomListEl.append(empty);
+    return;
+  }
+  for (const atom of atoms) {
+    const item = document.createElement("article");
+    item.className = "debt-item";
+    const meta = document.createElement("p");
+    meta.className = "item-meta";
+    meta.textContent = `${atom.projectId} · ${Math.round(atom.confidence * 100)}% confidence · ${atom.sourceEventIds.length} source`;
+    const title = document.createElement("h3");
+    title.textContent = atom.concept;
+    const explanation = document.createElement("p");
+    explanation.textContent = atom.plainExplanation;
+    const context = document.createElement("p");
+    context.className = "item-context";
+    context.textContent = atom.personalContext;
+    item.append(meta, title, explanation, context);
+    atomListEl.append(item);
+  }
+}
+
+function renderReviewList(reviews: SpiralDashboard["reviews"]): void {
+  reviewListEl.replaceChildren();
+  if (!reviews.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "No reviews yet.";
+    reviewListEl.append(empty);
+    return;
+  }
+  for (const review of reviews.slice(0, 12)) {
+    const row = document.createElement("div");
+    row.className = "review-row";
+    const result = document.createElement("strong");
+    result.textContent = review.result;
+    const detail = document.createElement("span");
+    detail.textContent = `${review.projectId} · ${new Date(review.reviewedAt).toLocaleString()}`;
+    row.append(result, detail);
+    reviewListEl.append(row);
+  }
+}
+
+function applyDashboard(payload: SpiralDashboard, replaceCards = false): void {
+  metricAtomsEl.textContent = String(payload.metrics.atomsToday);
+  metricClearableEl.textContent = String(payload.metrics.clearable);
+  metricReviewedEl.textContent = String(payload.metrics.reviewedToday);
+  reviewSummaryEl.textContent = payload.report.summary;
+  reviewConceptEl.textContent = payload.report.repeatedConcept || "None";
+  reviewNextActionEl.textContent = payload.report.nextAction;
+  renderAtomList(payload.atoms);
+  renderReviewList(payload.reviews);
+  if (replaceCards && payload.cards.length) {
+    cards = payload.cards.map(normalizeCard);
+    cardIndex = 0;
+    saveCards();
+    updateWebView();
+  }
+}
+
+async function syncSpiralToday(replaceCards = true): Promise<void> {
+  syncTodayButton.disabled = true;
+  try {
+    const payload = await apiGet<SpiralDashboard>("/api/spiral/today");
+    applyDashboard(payload, replaceCards);
+    if (replaceCards && payload.cards.length) await renderGlasses(true);
+  } catch (error) {
+    setCoach(error instanceof Error ? error.message : "同步失败");
+  } finally {
+    syncTodayButton.disabled = false;
+  }
+}
+
+async function ingestLearningIncrement(): Promise<void> {
+  const rawText = importTextEl.value.trim();
+  if (!rawText) {
+    captureStatusEl.textContent = "Add a Codex goal, failure, decision, and result first.";
+    return;
+  }
+  ingestButton.disabled = true;
+  captureStatusEl.textContent = "Compiling learning increment...";
+  try {
+    const payload = await apiPost<{
+      ok: boolean;
+      atoms: KnowledgeAtom[];
+      cards: LearningCard[];
+      today: SpiralDashboard;
+    }>("/v1/events/codex", {
+      source: captureSourceEl.value,
+      projectId: captureProjectEl.value.trim() || "general",
+      event_type: "ManualImport",
+      rawText,
+      retainRaw: retainSourceEl.checked
+    });
+    applyDashboard(payload.today, true);
+    captureStatusEl.textContent = payload.atoms.length
+      ? `Created ${payload.atoms.length} knowledge atom${payload.atoms.length === 1 ? "" : "s"}.`
+      : "No reusable learning increment found. No card was created.";
+    if (payload.cards.length) await renderGlasses(true);
+  } catch (error) {
+    captureStatusEl.textContent = error instanceof Error ? error.message : "Compile failed";
+  } finally {
+    ingestButton.disabled = false;
+  }
+}
+
+async function persistReview(card: LearningCard, result: "mastered" | "partial" | "incorrect" | "skip", responseText = ""): Promise<void> {
+  if (!card.knowledgeAtomId) return;
+  try {
+    const payload = await apiPost<{ ok: boolean; today: SpiralDashboard }>("/v1/reviews", {
+      cardId: card.id,
+      result,
+      responseText,
+      source: bridgeReady ? "g2" : "phone"
+    });
+    applyDashboard(payload.today);
+  } catch (error) {
+    console.warn("Spiral review persistence failed", error);
+  }
+}
+
 async function importWithAi(): Promise<void> {
   importAiButton.disabled = true;
   setStatus("importing");
@@ -702,6 +903,7 @@ async function planCourse(): Promise<void> {
 async function askTutor(kind: TutorKind, transcript = ""): Promise<void> {
   const card = currentCard();
   if (!card) return;
+  let reviewResult: "mastered" | "partial" | "incorrect" | null = null;
   if (kind === "ask") advanceSession("ASK");
   if (kind === "repeat") advanceSession("EXPLAIN");
   if (kind === "answer") {
@@ -722,11 +924,18 @@ async function askTutor(kind: TutorKind, transcript = ""): Promise<void> {
     for (const event of tutorStateEvents(kind, response)) advanceSession(event);
     cardBackEl.textContent = tutorPhoneText(response, fallback);
     setCoach(tutorGlassesText(response, fallback));
+    if (kind === "answer") {
+      reviewResult = response.assessment === "correct" ? "mastered"
+        : response.assessment === "incorrect" ? "incorrect"
+          : "partial";
+    }
   } catch {
     for (const event of tutorStateEvents(kind, fallback)) advanceSession(event);
     cardBackEl.textContent = tutorPhoneText(fallback, fallback);
     setCoach(tutorGlassesText(fallback, fallback));
+    if (kind === "answer") reviewResult = "partial";
   } finally {
+    if (reviewResult) await persistReview(card, reviewResult, transcript);
     if (kind === "answer") answerTextEl.value = "";
     if (kind === "answer" && voiceEnabled) setVoiceActivity("Listening");
     setStatus(bridgeReady ? "g2" : "mock");
@@ -738,6 +947,7 @@ async function performAction(action: StudyAction, transcript = ""): Promise<void
   if (!card) return;
 
   if (action === "next") {
+    if (transcript !== "__reviewed__") await persistReview(card, "skip");
     cardIndex = cards.length ? (cardIndex + 1) % cards.length : 0;
     saveCards();
     updateWebView();
@@ -760,8 +970,9 @@ async function performAction(action: StudyAction, transcript = ""): Promise<void
   if (action === "known") {
     card.repetitions += 1;
     card.due = Date.now() + Math.min(7, card.repetitions + 1) * 24 * 60 * 60 * 1000;
+    await persistReview(card, "mastered", transcript);
     await askTutor("known", transcript);
-    await performAction("next");
+    await performAction("next", "__reviewed__");
     return;
   }
 
@@ -1082,6 +1293,8 @@ importFileEl.addEventListener("change", async () => {
 });
 
 importAiButton.addEventListener("click", () => void importWithAi());
+ingestButton.addEventListener("click", () => void ingestLearningIncrement());
+syncTodayButton.addEventListener("click", () => void syncSpiralToday());
 planCourseButton.addEventListener("click", () => void planCourse());
 submitAnswerButton.addEventListener("click", () => void askTutor("answer", clean(answerTextEl.value)));
 repeatButton.addEventListener("click", () => void performAction("repeat"));
@@ -1125,3 +1338,4 @@ void initBridge().catch(error => {
   setStatus("error");
   setCoach(error.message);
 });
+void syncSpiralToday(true);

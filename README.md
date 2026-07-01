@@ -1,12 +1,9 @@
 # Learn Coach
 
-Learn Coach is an AI-native reflection and knowledge-internalization coach for
-Even G2. It uses the glasses for minimal prompts and uses voice for explanation,
-Feynman questions, learner answers, feedback, and follow-up.
-
-The current build is a prototype. Its immediate goal is to validate reliable G2
-display, usable G2 microphone audio, and acceptable speech-to-AI latency on real
-hardware. It is not yet a production learning system.
+Learn Coach is the Even G2 learning surface for Spiral, a local-first cognitive
+compiler. Spiral turns useful learning increments from Codex work into
+source-linked knowledge atoms, active-recall cards, and a persisted review
+queue. See [SPIRAL_ARCHITECTURE.md](./SPIRAL_ARCHITECTURE.md).
 
 ## What it does
 
@@ -14,7 +11,11 @@ hardware. It is not yet a production learning system.
 - Keeps the phone WebView focused on import, settings, and short controls.
 - Switches cards from voice commands such as `next`, `下一个`, `会了`, `跟读`, and `提问`.
 - Uses Even Hub SDK startup containers, text upgrades, list events, and MIC events.
-- Converts pasted text or files into flashcards with an optional AI API.
+- Accepts allowlisted, locally redacted Codex events.
+- Compiles each event into zero to three deduplicated knowledge atoms.
+- Preserves project context and source event IDs on every generated card.
+- Records understood, partial, incorrect, and skipped review outcomes.
+- Converts pasted text or files into direct flashcards with an optional AI API.
 - Plans learning units from a subject and the learner's current level.
 - Evaluates answers using Feynman-style questions and Socratic follow-up.
 - Runs without AI keys using local fallback parsing and coaching.
@@ -33,6 +34,7 @@ flashcard interface. See:
 cd evenhub-g2-learning
 npm install
 npm run api
+npm run test:spiral
 npm run test:voice
 npm run dev
 ```
@@ -52,6 +54,8 @@ OPENAI_STT_MODEL=gpt-4o-mini-transcribe
 OPENAI_STT_PROMPT=Learn Coach vocabulary study. Commands include 下一张, 下一个, 重复, 提问, 会了, next, repeat, ask me, got it.
 OPENAI_BASE_URL=https://api.openai.com/v1
 LEARNING_API_TOKEN=
+LEARNING_STORE_PATH=tmp/spiral-store.json
+SPIRAL_PROJECT_ALLOWLIST=/absolute/path/to/allowed/project
 ```
 
 Never put the OpenAI key in the EHPK, phone Settings, Developer Portal, or
@@ -85,6 +89,10 @@ In a normal browser, it uses Web Speech API when available and keeps the G2 brid
 
 ## API
 
+- `POST /v1/events/codex`: compiles a filtered Codex event into zero to three atoms.
+- `GET /v1/review/next?mode=learn`: returns the highest-priority due card.
+- `POST /v1/reviews`: records a review outcome and schedules the card.
+- `GET /api/spiral/today`: returns today's cards, atoms, metrics, and review report.
 - `POST /api/learn/import`: turns raw text into cards.
 - `POST /api/learn/plan`: creates learning units from a subject and learner level.
 - `POST /api/learn/tutor`: returns structured coaching feedback:

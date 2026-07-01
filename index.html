@@ -10,20 +10,43 @@
       <section class="learn-surface">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Learn Coach</p>
-            <h1 id="card-front">Loading</h1>
+            <p class="eyebrow">LEARN COACH</p>
+            <h1 class="product-title">Spiral</h1>
           </div>
           <span id="status-pill" class="pill">mock</span>
         </header>
 
         <nav class="tabs" aria-label="Learn Coach sections">
-          <button class="tab is-active" type="button" data-tab="session">Session</button>
-          <button class="tab" type="button" data-tab="sources">Sources</button>
+          <button class="tab is-active" type="button" data-tab="today">Today</button>
+          <button class="tab" type="button" data-tab="capture">Capture</button>
+          <button class="tab" type="button" data-tab="debts">Knowledge</button>
+          <button class="tab" type="button" data-tab="review">Review</button>
           <button class="tab" type="button" data-tab="settings">Settings</button>
         </nav>
 
-        <section class="tab-panel" data-panel="session">
-          <p id="session-state" class="session-state">CONCEPT</p>
+        <section class="tab-panel" data-panel="today">
+          <div class="metrics" aria-label="Today summary">
+            <div class="metric">
+              <span id="metric-debts">0</span>
+              <small>new atoms</small>
+            </div>
+            <div class="metric">
+              <span id="metric-clearable">0</span>
+              <small>ready</small>
+            </div>
+            <div class="metric">
+              <span id="metric-reviewed">0</span>
+              <small>reviewed</small>
+            </div>
+          </div>
+
+          <div class="section-heading">
+            <div>
+              <p id="session-state" class="session-state">CONCEPT</p>
+              <h2 id="card-front" class="card-title">Loading</h2>
+            </div>
+            <span id="current-debt-score" class="score-badge" hidden></span>
+          </div>
           <p id="card-back" class="answer">Import content to start.</p>
           <p id="coach-line" class="coach">AI coach is standing by.</p>
           <div class="study-actions" aria-label="Study controls">
@@ -36,19 +59,50 @@
             <textarea id="answer-text" spellcheck="false" placeholder="Explain it in your own words..."></textarea>
           </label>
           <button id="submit-answer" class="primary-action" type="button">提交回答</button>
+          <button id="sync-today" class="quiet-action" type="button">同步今日队列</button>
         </section>
 
-        <section class="tab-panel" data-panel="sources" hidden>
-          <h2>Learning sources</h2>
-          <textarea id="import-text" spellcheck="false">apple 苹果
-resilient 有韧性的
-context 上下文
-iterate 迭代</textarea>
+        <section class="tab-panel" data-panel="capture" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">COGNITIVE COMPILER</p>
+              <h2>Compile learning increment</h2>
+            </div>
+          </div>
+          <div class="field-grid">
+            <label>Source
+              <select id="capture-source">
+                <option value="codex">Codex session</option>
+                <option value="manual">Manual import</option>
+              </select>
+            </label>
+            <label>Project
+              <input id="capture-project" value="even-g2-learning" autocomplete="off" spellcheck="false" />
+            </label>
+          </div>
+          <label>Source text
+            <textarea id="import-text" class="capture-text" spellcheck="false" placeholder="Paste the goal, key failure, final decision, and verified result from a Codex turn..."></textarea>
+          </label>
+          <label class="check-row">
+            <input id="retain-source" type="checkbox" checked />
+            <span>Store source text locally</span>
+          </label>
           <div class="inline-controls">
             <input id="import-file" type="file" accept=".txt,.md,.csv,.json" />
+            <button id="ingest-debt" class="primary-action" type="button">编译知识增量</button>
+          </div>
+          <p id="capture-status" class="status-line">Ready</p>
+
+          <div class="secondary-tool">
+            <p class="section-kicker">DIRECT CARDS</p>
+            <h2>Learning material</h2>
             <button id="import-ai" type="button">AI 转卡片</button>
           </div>
-          <h2>Course plan</h2>
+
+          <div class="secondary-tool">
+            <p class="section-kicker">COURSE PLAN</p>
+            <h2>Build a subject path</h2>
+          </div>
           <label>
             Subject
             <input id="subject-input" autocomplete="off" spellcheck="false" placeholder="psychology, economics, AI, history..." />
@@ -62,8 +116,52 @@ iterate 迭代</textarea>
           </div>
         </section>
 
+        <section class="tab-panel" data-panel="debts" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">KNOWLEDGE ATOMS</p>
+              <h2>Source-linked knowledge</h2>
+            </div>
+          </div>
+          <div id="debt-list" class="debt-list">
+            <p class="empty-state">No knowledge atoms yet.</p>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="review" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">DAILY REVIEW</p>
+              <h2>What became yours</h2>
+            </div>
+          </div>
+          <p id="review-summary" class="review-summary">No review data yet.</p>
+          <dl class="review-facts">
+            <div>
+              <dt>Repeated concept</dt>
+              <dd id="review-blindspot">None</dd>
+            </div>
+            <div>
+              <dt>Next action</dt>
+              <dd id="review-next-action">Capture today's AI work</dd>
+            </div>
+          </dl>
+          <div id="theme-list" class="theme-list"></div>
+          <div class="section-heading history-heading">
+            <h2>Recent reviews</h2>
+          </div>
+          <div id="review-list" class="review-list">
+            <p class="empty-state">No reviews yet.</p>
+          </div>
+        </section>
+
         <section class="tab-panel" data-panel="settings" hidden>
-          <h2>AI and voice</h2>
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">RUNTIME</p>
+              <h2>AI and voice</h2>
+            </div>
+          </div>
           <label>
             Learning API
             <input id="api-base-url" autocomplete="off" spellcheck="false" placeholder="http://localhost:8793" />
@@ -78,6 +176,19 @@ iterate 迭代</textarea>
             <button id="mock-repeat" type="button">模拟跟读</button>
           </div>
           <p id="voice-line" class="voice">语音：未开启</p>
+
+          <div class="secondary-tool">
+            <p class="section-kicker">PRIVACY</p>
+            <h2>Capture controls</h2>
+            <label class="check-row">
+              <input id="allow-codex-capture" type="checkbox" checked />
+              <span>Allow Codex text import</span>
+            </label>
+            <label class="check-row">
+              <input id="allow-voice-capture" type="checkbox" checked />
+              <span>Allow session microphone</span>
+            </label>
+          </div>
         </section>
       </section>
     </main>
