@@ -119,13 +119,16 @@ npm run pack:ehpk
 The current upload artifact is:
 
 ```text
-release/learn-coach-0.1.10.ehpk
+release/learn-coach-0.2.1.ehpk
 ```
 
-Version `0.1.10` is the current voice-test candidate. It adds STT vocabulary
-prompting and accepts the observed Mandarin homophone `下一章` plus traditional
-`下一張` as `next`, after a real `gpt-4o-mini-transcribe` check converted
-`下一张` to `下一章`.
+Version `0.2.1` is the current voice-test candidate. It starts buffering only
+after local PCM speech detection, waits for trailing silence before sending one
+utterance to STT, and treats an empty transcript as a recoverable no-speech
+result instead of starting a five-second retry loop. Audio longer than 3.5
+seconds cannot become a navigation command. After `ask` or an AI follow-up, the
+next utterance is forced into learner-answer evaluation and G2 shows
+`Answer now` or `Answer follow-up`.
 
 Version `0.1.9` fixed the retry loop. Real G2 telemetry from
 `0.1.8` confirmed 1,600-byte PCM chunks at roughly 50 ms each, but also exposed
@@ -165,6 +168,6 @@ feature set:
 
 1. Install the private package and verify stable G2 container rendering.
 2. Verify list input and real G2 microphone events.
-3. Confirm PCM format and capture complete Mandarin and English utterances.
+3. Confirm silence produces no STT loop and capture complete Mandarin and English utterances.
 4. Measure speech-to-transcript and transcript-to-feedback latency.
-5. Verify conservative command-versus-learning-answer classification.
+5. Verify long answers cannot become commands and `ask` enters answer mode.

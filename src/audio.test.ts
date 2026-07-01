@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  PCM_END_SILENCE_MS,
   MAX_PCM_BUFFER_BYTES,
+  isSpeechPcm,
   isFatalSttError,
   nextPcmFlushDelayMs,
-  pcmDurationMs
+  pcmRms,
+  pcmDurationMs,
+  shouldFlushUtterance
 } from "./audio";
 
 describe("G2 PCM scheduling", () => {
@@ -27,5 +31,22 @@ describe("G2 PCM scheduling", () => {
     expect(isFatalSttError("HTTP 401 Unauthorized")).toBe(true);
     expect(isFatalSttError("Failed to fetch")).toBe(false);
     expect(isFatalSttError("STT HTTP 500")).toBe(false);
+  });
+
+  it("distinguishes silence from speech-level PCM", () => {
+    const silence = new Uint8Array(1600);
+    const speech = new Uint8Array(1600);
+    const view = new DataView(speech.buffer);
+    for (let offset = 0; offset < speech.byteLength; offset += 2) {
+      view.setInt16(offset, offset % 4 ? 1600 : -1600, true);
+    }
+    expect(pcmRms(silence)).toBe(0);
+    expect(isSpeechPcm(silence)).toBe(false);
+    expect(isSpeechPcm(speech)).toBe(true);
+  });
+
+  it("flushes an utterance after trailing silence", () => {
+    expect(shouldFlushUtterance(1000 + PCM_END_SILENCE_MS - 1, 500, 1000)).toBe(false);
+    expect(shouldFlushUtterance(1000 + PCM_END_SILENCE_MS, 500, 1000)).toBe(true);
   });
 });

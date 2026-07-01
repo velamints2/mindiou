@@ -24,15 +24,17 @@ import {
   type TutorKind,
   type TutorResponse
 } from "./tutor";
-import { parseVoiceAction, TranscriptIntake, type VoiceAction } from "./voice";
+import { TranscriptIntake, voiceActionForContext, type VoiceAction } from "./voice";
 import {
   MAX_PCM_BUFFER_BYTES,
   PCM_BATCH_MS,
   PCM_SAMPLE_RATE,
   STT_RETRY_BACKOFF_MS,
+  isSpeechPcm,
   isFatalSttError,
   nextPcmFlushDelayMs,
-  pcmDurationMs
+  pcmDurationMs,
+  shouldFlushUtterance
 } from "./audio";
 import "./styles.css";
 
@@ -137,6 +139,8 @@ type SpeechRecognitionEventLike = {
 const DISPLAY_ID = 1;
 const CONCEPT_IMAGE_ID = 2;
 type StudyAction = VoiceAction | "previous";
+const runtimeParams = new URL(window.location.href).searchParams;
+const simulatorTestMode = runtimeParams.get("testMode") === "1";
 
 const cardFrontEl = document.querySelector<HTMLHeadingElement>("#card-front")!;
 const cardBackEl = document.querySelector<HTMLParagraphElement>("#card-back")!;
@@ -181,8 +185,8 @@ let bridge: EvenBridge | null = null;
 let bridgeReady = false;
 let voiceEnabled = false;
 let speechRecognition: SpeechRecognitionLike | null = null;
-let cards: LearningCard[] = loadCards();
-let cardIndex = Number(localStorage.getItem("g2LearningIndex") || "0");
+let cards: LearningCard[] = simulatorTestMode ? sampleCards() : loadCards();
+let cardIndex = simulatorTestMode ? 0 : Number(localStorage.getItem("g2LearningIndex") || "0");
 let apiBaseUrl = readSetting("g2LearningApiBaseUrl", "api", "http://localhost:8793");
 let apiToken = readSetting("g2LearningApiToken", "token", "");
 let audioChunks: Uint8Array[] = [];
@@ -192,6 +196,9 @@ let pcmFlushTimer: number | null = null;
 let transcriptionInFlight = false;
 let transcriptionBlocked = false;
 let transcribeRetryAt = 0;
+let utteranceStartedAt = 0;
+let lastSpeechAt = 0;
+let utteranceHasSpeech = false;
 let g2AudioActive = false;
 let audioCaptureStartedAt = 0;
 let audioEventCount = 0;
@@ -203,7 +210,7 @@ let sessionState: LearningSessionState = transitionSession("idle", "START");
 const transcriptIntake = new TranscriptIntake();
 const NAVIGATION_IMAGE_DELAY_MS = 420;
 const GESTURE_DEBOUNCE_MS = 240;
-const debugImageHoldMs = Number(new URL(window.location.href).searchParams.get("imageHoldMs") || "0");
+const debugImageHoldMs = Number(runtimeParams.get("imageHoldMs") || "0");
 
 apiBaseUrlEl.value = apiBaseUrl;
 apiTokenEl.value = apiToken;
@@ -924,6 +931,10 @@ async function askTutor(kind: TutorKind, transcript = ""): Promise<void> {
     for (const event of tutorStateEvents(kind, response)) advanceSession(event);
     cardBackEl.textContent = tutorPhoneText(response, fallback);
     setCoach(tutorGlassesText(response, fallback));
+    if (kind === "ask") {
+      setVoice("问题已显示，请直接回答");
+      setVoiceActivity("Answer now");
+    }
     if (kind === "answer") {
       reviewResult = response.assessment === "correct" ? "mastered"
         : response.assessment === "incorrect" ? "incorrect"
@@ -937,7 +948,9 @@ async function askTutor(kind: TutorKind, transcript = ""): Promise<void> {
   } finally {
     if (reviewResult) await persistReview(card, reviewResult, transcript);
     if (kind === "answer") answerTextEl.value = "";
-    if (kind === "answer" && voiceEnabled) setVoiceActivity("Listening");
+    if (kind === "answer" && voiceEnabled) {
+      setVoiceActivity(sessionState === "follow_up" ? "Answer follow-up" : "Listening");
+    }
     setStatus(bridgeReady ? "g2" : "mock");
   }
 }
@@ -979,7 +992,7 @@ async function performAction(action: StudyAction, transcript = ""): Promise<void
   await askTutor(action, transcript);
 }
 
-async function handleTranscript(text: string): Promise<void> {
+async function handleTranscript(text: string, audioDurationMs = 0): Promise<void> {
   const intake = transcriptIntake.accept(text);
   if (!intake.accepted) {
     void logEvent("transcript_ignored", {
@@ -993,12 +1006,13 @@ async function handleTranscript(text: string): Promise<void> {
 
   void logEvent("transcript", { text: intake.text, normalized: intake.normalized });
   setVoice(fit(intake.text, 42));
-  const action = parseVoiceAction(intake.text);
-  void logEvent("voice_action", { action, text: intake.text });
+  const answerExpected = sessionState === "feynman_question" || sessionState === "follow_up";
+  const action = voiceActionForContext(intake.text, { answerExpected, audioDurationMs });
+  void logEvent("voice_action", { action, answerExpected, audioDurationMs, text: intake.text });
   if (action) {
     setVoiceActivity(`Voice: ${action}`);
     await performAction(action, intake.text);
-    if (voiceEnabled) setVoiceActivity("Listening");
+    if (voiceEnabled && action !== "ask") setVoiceActivity("Listening");
   } else {
     await askTutor("answer", intake.text);
   }
@@ -1022,12 +1036,18 @@ async function handlePcmAudio(chunk: Uint8Array, source: AudioInputSource): Prom
     audioTelemetryEventCount = 0;
     audioTelemetryByteCount = 0;
   }
-  if (transcriptionBlocked) return;
+  if (transcriptionBlocked || now < transcribeRetryAt) return;
+  const containsSpeech = isSpeechPcm(chunk);
+  if (!utteranceHasSpeech && !containsSpeech) return;
+  if (!utteranceHasSpeech) {
+    utteranceHasSpeech = true;
+    utteranceStartedAt = now;
+    setVoiceActivity("Listening");
+  }
+  if (containsSpeech) lastSpeechAt = now;
   audioChunks.push(chunk);
   trimAudioBuffer();
-  if (now - lastAudioSendAt < PCM_BATCH_MS || now < transcribeRetryAt) return;
-
-  await flushPcmAudio();
+  if (shouldFlushUtterance(now, utteranceStartedAt, lastSpeechAt)) await flushPcmAudio();
 }
 
 function trimAudioBuffer(): void {
@@ -1067,6 +1087,7 @@ async function flushPcmAudio(): Promise<void> {
 
   const merged = mergeChunks(audioChunks.splice(0));
   if (!merged.length) return;
+  resetUtterance();
 
   const audioDurationMs = pcmDurationMs(merged.length);
   const requestStartedAt = Date.now();
@@ -1087,7 +1108,18 @@ async function flushPcmAudio(): Promise<void> {
       audioBase64: bytesToBase64(merged)
     });
     const latencyMs = Date.now() - requestStartedAt;
-    if (!payload.ok || !payload.text) {
+    if (payload.ok && !payload.text) {
+      transcribeRetryAt = 0;
+      setVoice("没有识别到语音，请再说一次");
+      setVoiceActivity("Listening");
+      void logEvent("transcribe_empty", {
+        latencyMs,
+        bytes: merged.length,
+        audioDurationMs
+      });
+      return;
+    }
+    if (!payload.ok) {
       const message = fit(payload.error || "没有识别到语音", 34);
       setVoice(`转写失败：${message}`);
       void logEvent("transcribe_error", {
@@ -1099,18 +1131,22 @@ async function flushPcmAudio(): Promise<void> {
       if (isFatalSttError(message)) {
         await blockVoiceAfterFatalSttError(message);
       } else {
+        audioChunks = [];
+        resetUtterance();
         transcribeRetryAt = Date.now() + STT_RETRY_BACKOFF_MS;
-        setVoiceActivity("STT retry in 5s");
+        setVoiceActivity("STT paused 5s");
       }
       return;
     }
+    transcribeRetryAt = 0;
+    const transcript = payload.text || "";
     void logEvent("transcribe_complete", {
       latencyMs,
       bytes: merged.length,
       audioDurationMs,
-      text: fit(payload.text, 42)
+      text: fit(transcript, 42)
     });
-    await handleTranscript(payload.text);
+    await handleTranscript(transcript, audioDurationMs);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setVoice(`转写失败：${fit(message, 34)}`);
@@ -1123,20 +1159,36 @@ async function flushPcmAudio(): Promise<void> {
     if (isFatalSttError(message)) {
       await blockVoiceAfterFatalSttError(message);
     } else {
+      audioChunks = [];
+      resetUtterance();
       transcribeRetryAt = Date.now() + STT_RETRY_BACKOFF_MS;
-      setVoiceActivity("STT retry in 5s");
+      setVoiceActivity("STT paused 5s");
     }
     console.warn("PCM transcription failed", error);
   } finally {
     transcriptionInFlight = false;
-    if (audioChunks.length && !transcriptionBlocked) schedulePcmFlush();
+    if (
+      audioChunks.length
+      && utteranceHasSpeech
+      && shouldFlushUtterance(Date.now(), utteranceStartedAt, lastSpeechAt)
+      && !transcriptionBlocked
+    ) {
+      schedulePcmFlush();
+    }
   }
+}
+
+function resetUtterance(): void {
+  utteranceStartedAt = 0;
+  lastSpeechAt = 0;
+  utteranceHasSpeech = false;
 }
 
 async function blockVoiceAfterFatalSttError(message: string): Promise<void> {
   transcriptionBlocked = true;
   voiceEnabled = false;
   audioChunks = [];
+  resetUtterance();
   if (pcmFlushTimer !== null) {
     window.clearTimeout(pcmFlushTimer);
     pcmFlushTimer = null;
@@ -1181,6 +1233,7 @@ async function startVoice(): Promise<void> {
   transcribeRetryAt = 0;
   transcriptIntake.reset();
   audioChunks = [];
+  resetUtterance();
   lastAudioSendAt = Date.now();
   audioCaptureStartedAt = lastAudioSendAt;
   audioEventCount = 0;
@@ -1277,6 +1330,7 @@ async function stopVoice(): Promise<void> {
   transcriptionBlocked = false;
   transcribeRetryAt = 0;
   audioChunks = [];
+  resetUtterance();
   if (pcmFlushTimer !== null) {
     window.clearTimeout(pcmFlushTimer);
     pcmFlushTimer = null;
@@ -1338,4 +1392,4 @@ void initBridge().catch(error => {
   setStatus("error");
   setCoach(error.message);
 });
-void syncSpiralToday(true);
+if (!simulatorTestMode) void syncSpiralToday(true);

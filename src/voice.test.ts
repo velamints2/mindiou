@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseVoiceAction, TranscriptIntake } from "./voice";
+import { parseVoiceAction, TranscriptIntake, voiceActionForContext } from "./voice";
 
 describe("voice action parser", () => {
   it("recognizes short explicit Chinese commands", () => {
@@ -26,6 +26,12 @@ describe("voice action parser", () => {
     expect(parseVoiceAction("I think next means the following item in a sequence")).toBeNull();
     expect(parseVoiceAction("I got it wrong because I forgot the example")).toBeNull();
     expect(parseVoiceAction("repeat means to say something one more time")).toBeNull();
+  });
+
+  it("disables commands while an answer is expected or an utterance is long", () => {
+    expect(voiceActionForContext("下一张", { answerExpected: true })).toBeNull();
+    expect(voiceActionForContext("下一张", { audioDurationMs: 8000 })).toBeNull();
+    expect(voiceActionForContext("下一张", { audioDurationMs: 1200 })).toBe("next");
   });
 
   it("deduplicates repeated transcripts inside a short window", () => {

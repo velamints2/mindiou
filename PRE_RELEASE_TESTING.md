@@ -22,6 +22,8 @@ Required:
   explanatory answers containing command words remain learner answers;
 - transcript intake tests prove empty and duplicate transcripts are ignored
   without blocking later utterances;
+- PCM speech detection prevents continuous silence from reaching STT;
+- long utterances and explicit ask/follow-up states cannot be parsed as commands;
 - manifest and package versions match;
 - the package filename uses the same version;
 - no unsupported container dimensions;
@@ -44,9 +46,9 @@ Required:
 - missing AI/STT configuration is explicit;
 - G2 PCM is treated as 16 kHz mono s16le and transcription telemetry records
   byte count, estimated audio duration, and request latency;
-- fatal STT configuration errors stop capture after one request; transient
-  failures back off for at least five seconds and never create a rapid retry
-  loop;
+- empty transcripts return to Listening without retry; fatal STT configuration
+  errors stop capture after one request; transient failures discard stale audio,
+  back off for at least five seconds, and wait for new speech;
 - audio telemetry is aggregated rather than posting one API event per 50 ms PCM
   chunk;
 - `VOICE_TEST_PCM=/path/to/sample.pcm npm run test:voice` completes a real STT
@@ -66,7 +68,7 @@ Run the app and simulator:
 ```bash
 npm run dev
 evenhub-simulator \
-  "http://localhost:5175/?api=http%3A%2F%2Flocalhost%3A8793&imageHoldMs=900" \
+  "http://localhost:5175/?api=http%3A%2F%2Flocalhost%3A8793&imageHoldMs=900&testMode=1" \
   --automation-port 9898 --no-glow
 npm run test:simulator
 ```

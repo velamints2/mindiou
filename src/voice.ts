@@ -75,6 +75,15 @@ export function parseVoiceAction(text: string): VoiceAction | null {
   return null;
 }
 
+export function voiceActionForContext(
+  text: string,
+  options: { answerExpected?: boolean; audioDurationMs?: number } = {}
+): VoiceAction | null {
+  if (options.answerExpected) return null;
+  if ((options.audioDurationMs || 0) > 3500) return null;
+  return parseVoiceAction(text);
+}
+
 export class TranscriptIntake {
   private lastNormalized = "";
   private lastAcceptedAt = 0;
