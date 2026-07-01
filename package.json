@@ -1,11 +1,11 @@
 {
   "name": "evenhub-g2-learning",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5175",
-    "api": "node --env-file-if-exists=.env.local server.js",
+    "api": "node --use-env-proxy --env-file-if-exists=.env.local server.js",
     "build": "tsc && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4175",
     "check": "tsc --noEmit",

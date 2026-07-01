@@ -2,14 +2,14 @@
   "passed": true,
   "failures": [],
   "checks": {
-    "bootLitPixels": 6169,
-    "bootLitRatio": 0.03718774112654321,
+    "bootLitPixels": 6538,
+    "bootLitRatio": 0.03941213348765432,
     "ignoredClickKeptFrame": true,
     "upChangedFrame": true,
     "downReturnedFrame": true,
     "rapidDownAcceptedCount": 3,
     "rapidDownSettledOnLatestFrame": true,
     "tutorAssessment": "partial",
-    "tutorG2Text": "Add one example"
+    "tutorG2Text": "认知失调是想法与行为冲突。"
   }
 }

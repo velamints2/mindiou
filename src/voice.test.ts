@@ -4,6 +4,8 @@ import { parseVoiceAction, TranscriptIntake } from "./voice";
 describe("voice action parser", () => {
   it("recognizes short explicit Chinese commands", () => {
     expect(parseVoiceAction("下一张")).toBe("next");
+    expect(parseVoiceAction("下一章")).toBe("next");
+    expect(parseVoiceAction("下一張")).toBe("next");
     expect(parseVoiceAction("帮我下一张")).toBe("next");
     expect(parseVoiceAction("我会了")).toBe("known");
     expect(parseVoiceAction("问我")).toBe("ask");

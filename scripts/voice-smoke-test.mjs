@@ -6,7 +6,9 @@ const audioPath = process.env.VOICE_TEST_PCM || "";
 async function request(path, options = {}) {
   const response = await fetch(new URL(path, `${apiBaseUrl}/`), options);
   const payload = await response.json();
-  if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new Error(`${path} returned HTTP ${response.status}: ${payload.error || "unknown error"}`);
+  }
   return payload;
 }
 

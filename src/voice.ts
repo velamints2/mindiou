@@ -9,7 +9,7 @@ const chinesePrefixes = ["请帮我", "麻烦你", "请你", "帮我", "麻烦",
 const englishPrefixes = ["please ", "can you ", "could you ", "ok ", "okay "];
 
 const chineseCommands: Record<VoiceAction, string[]> = {
-  next: ["下一个", "下一张", "下一项", "下一题", "跳过", "略过", "过"],
+  next: ["下一个", "下一张", "下一張", "下一章", "下一项", "下一题", "跳过", "略过", "过"],
   known: ["会了", "我会了", "记住了", "懂了", "明白了"],
   ask: ["提问", "问我", "考我", "考我一下", "问一个", "问一下"],
   repeat: ["跟读", "再读", "重复", "再来一次", "再说一遍", "重来"]

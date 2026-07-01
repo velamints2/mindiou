@@ -49,12 +49,15 @@ Put local API configuration in the ignored `.env.local` file:
 OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_STT_MODEL=gpt-4o-mini-transcribe
+OPENAI_STT_PROMPT=Learn Coach vocabulary study. Commands include 下一张, 下一个, 重复, 提问, 会了, next, repeat, ask me, got it.
 OPENAI_BASE_URL=https://api.openai.com/v1
 LEARNING_API_TOKEN=
 ```
 
 Never put the OpenAI key in the EHPK, phone Settings, Developer Portal, or
-committed source. `npm run api` automatically reads `.env.local`. For the
+committed source. `npm run api` automatically reads `.env.local` and enables
+Node's environment-proxy support for networks that require `HTTP_PROXY` or
+`HTTPS_PROXY`. For the
 current REST transcription and structured tutor implementation,
 `gpt-4o-mini-transcribe` and `gpt-4o-mini` are the conservative defaults.
 
@@ -108,10 +111,15 @@ npm run pack:ehpk
 The current upload artifact is:
 
 ```text
-release/learn-coach-0.1.9.ehpk
+release/learn-coach-0.1.10.ehpk
 ```
 
-Version `0.1.9` is the current voice-test candidate. Real G2 telemetry from
+Version `0.1.10` is the current voice-test candidate. It adds STT vocabulary
+prompting and accepts the observed Mandarin homophone `下一章` plus traditional
+`下一張` as `next`, after a real `gpt-4o-mini-transcribe` check converted
+`下一张` to `下一章`.
+
+Version `0.1.9` fixed the retry loop. Real G2 telemetry from
 `0.1.8` confirmed 1,600-byte PCM chunks at roughly 50 ms each, but also exposed
 a retry loop when STT configuration was missing. `0.1.9` stops the microphone
 after one fatal configuration error, applies a five-second backoff to transient

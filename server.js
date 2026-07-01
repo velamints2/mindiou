@@ -8,6 +8,11 @@ const openAiApiKey = process.env.OPENAI_API_KEY || "";
 const openAiBaseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
 const chatModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const sttModel = process.env.OPENAI_STT_MODEL || "gpt-4o-mini-transcribe";
+const sttPrompt = process.env.OPENAI_STT_PROMPT || [
+  "Learn Coach vocabulary study in Mandarin and English.",
+  "Likely commands: 下一张, 下一个, 重复, 再说一遍, 提问, 问我, 会了, next, repeat, ask me, got it.",
+  "Preserve English vocabulary terms exactly when possible."
+].join(" ");
 const eventLog = [];
 
 const learningCoachSystemPrompt = [
@@ -174,12 +179,21 @@ function baseTutorResult(kind, card, transcript) {
 function normalizeTutorResult(input, context) {
   const base = baseTutorResult(context.kind, context.card, context.transcript);
   const assessment = normalizeAssessment(input.assessment, base.assessment);
-  const missingPoints = textArray(input.missingPoints).length ? textArray(input.missingPoints) : base.missingPoints;
-  const nextQuestion = clean(input.nextQuestion || input.followUpQuestion || base.nextQuestion).slice(0, 180);
+  const missingPoints = Array.isArray(input.missingPoints)
+    ? textArray(input.missingPoints)
+    : base.missingPoints;
+  let nextQuestion = clean(
+    typeof input.nextQuestion === "string"
+      ? input.nextQuestion
+      : typeof input.followUpQuestion === "string"
+        ? input.followUpQuestion
+        : base.nextQuestion
+  ).slice(0, 180);
   const summary = clean(input.summary || base.summary).slice(0, 220);
   const shouldFollowUp = typeof input.shouldFollowUp === "boolean"
     ? input.shouldFollowUp
     : Boolean(nextQuestion) && context.kind !== "known";
+  if (!shouldFollowUp) nextQuestion = "";
 
   return {
     ok: true,
@@ -427,6 +441,7 @@ async function transcribe(payload) {
   const wav = wavFromPcm16(audioBase64, Number(payload.sampleRate || 16000));
   const form = new FormData();
   form.append("model", sttModel);
+  form.append("prompt", clean(sttPrompt).slice(0, 500));
   form.append("file", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "g2-audio.wav");
 
   const response = await fetch(`${openAiBaseUrl}/audio/transcriptions`, {
