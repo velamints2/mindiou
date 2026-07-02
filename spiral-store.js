@@ -6,7 +6,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function emptyState() {
   return {
-    version: 3,
+    version: 4,
     sourceEvents: [],
     knowledgeAtoms: [],
     learningDebts: [],
@@ -57,14 +57,16 @@ export function createSpiralStore(filePath) {
       state = {
         ...emptyState(),
         ...parsed,
-        version: 3,
+        version: 4,
         sourceEvents: Array.isArray(parsed.sourceEvents) ? parsed.sourceEvents : [],
         knowledgeAtoms: Array.isArray(parsed.knowledgeAtoms) ? parsed.knowledgeAtoms : [],
         learningDebts: Array.isArray(parsed.learningDebts) ? parsed.learningDebts : [],
         knowledgeCards: Array.isArray(parsed.knowledgeCards) ? parsed.knowledgeCards : [],
         reviewLogs: Array.isArray(parsed.reviewLogs) ? parsed.reviewLogs : []
       };
-      if (backfillLearningDebts() > 0) await persist();
+      const migratedDebts = backfillLearningDebts();
+      const migratedCards = normalizeKnowledgeCards();
+      if (migratedDebts > 0 || migratedCards > 0) await persist();
     } catch (error) {
       if (error.code !== "ENOENT") {
         console.warn(`Spiral store could not be loaded: ${error.message}`);
@@ -111,6 +113,23 @@ export function createSpiralStore(filePath) {
       for (const review of state.reviewLogs.filter(item => item.cardId === card?.id)) {
         review.debtId = debt.id;
       }
+      migrated += 1;
+    }
+    return migrated;
+  }
+
+  function normalizeKnowledgeCards() {
+    let migrated = 0;
+    for (const card of state.knowledgeCards) {
+      const atom = state.knowledgeAtoms.find(item => item.id === card.knowledgeAtomId);
+      if (!atom) continue;
+      const front = clean(atom.concept).slice(0, 64);
+      const back = clean(atom.answer || atom.plainExplanation).slice(0, 180);
+      const prompt = clean(atom.recallQuestion).slice(0, 140);
+      if (card.front === front && card.back === back && card.prompt === prompt) continue;
+      card.front = front;
+      card.back = back;
+      card.prompt = prompt;
       migrated += 1;
     }
     return migrated;
@@ -233,9 +252,9 @@ export function createSpiralStore(filePath) {
         sourceEventId: eventId,
         sourceEventIds: [eventId],
         projectId: sourceEvent.projectId,
-        front: recallQuestion.slice(0, 96),
+        front: concept.slice(0, 64),
         back: atom.answer.slice(0, 180),
-        prompt: atom.personalContext.slice(0, 150),
+        prompt: recallQuestion.slice(0, 140),
         tags: ["spiral", "active-recall"].filter(Boolean),
         cardType: "application",
         debtScore: score,

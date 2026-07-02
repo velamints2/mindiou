@@ -127,8 +127,15 @@ npm run pack:ehpk
 The current upload artifact is:
 
 ```text
-release/learn-coach-0.3.2.ehpk
+release/learn-coach-0.3.3.ehpk
 ```
+
+Version `0.3.3` repairs the G2 runtime after the desktop workbench was added.
+The EHPK entrypoint is again isolated from `desktop.html`; legacy `apple`
+sample cards are migrated to active-recall examples; phone network errors can
+no longer become text inside the G2 concept image; image upload has a 6.5-second
+timeout with a visible retry state; and persisted Spiral cards are migrated
+from raw source-context prompts to `concept + recall question + answer`.
 
 Version `0.3.2` makes the AI import result explicit. A successful import opens
 the first generated card instead of leaving it behind the Capture panel,

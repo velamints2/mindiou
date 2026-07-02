@@ -476,3 +476,199 @@ select {
     border-right: 0;
   }
 }
+
+/* Desktop MVP */
+.desktop-shell {
+  min-height: 100vh;
+  padding: 24px;
+  background: radial-gradient(circle at top, #12342e 0%, #06100e 48%, #030706 100%);
+}
+
+.desktop-topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+
+.subtitle {
+  margin: 8px 0 0;
+  color: #84bdb0;
+  max-width: 72ch;
+}
+
+.topbar-actions,
+.controls,
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.desktop-status {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid #2d5f54;
+  background: rgba(10, 24, 21, 0.8);
+  color: #d7f6ef;
+}
+
+.desktop-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.panel {
+  min-height: 70vh;
+  padding: 16px;
+  border: 1px solid #274b43;
+  background: rgba(6, 17, 14, 0.9);
+}
+
+.hidden {
+  display: none;
+}
+
+.panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-meta,
+.muted,
+.excerpt,
+.kicker,
+.prompt,
+.glasses {
+  color: #90bdb1;
+}
+
+.field {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.field input,
+.field textarea,
+.controls select,
+.controls button,
+.row input,
+.row button,
+.tab {
+  width: 100%;
+  border: 1px solid #2d5f54;
+  border-radius: 10px;
+  background: #0b1715;
+  color: #edf9f5;
+  padding: 10px 12px;
+}
+
+.tab {
+  width: auto;
+}
+
+.tab.is-active,
+.primary {
+  border-color: #65cdb4;
+  background: #103a31;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.info-grid div {
+  padding: 12px;
+  border: 1px solid #24453e;
+  background: rgba(13, 30, 27, 0.85);
+}
+
+.info-grid span {
+  display: block;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.excerpt-list,
+.card-list {
+  display: grid;
+  gap: 12px;
+}
+
+.excerpt,
+.card-item,
+.session-card {
+  padding: 14px;
+  border: 1px solid #24453e;
+  background: rgba(9, 22, 19, 0.95);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.score {
+  padding: 3px 8px;
+  border: 1px solid #4d8c7b;
+  border-radius: 999px;
+}
+
+.card-item textarea,
+.session-card h3,
+.session-card p {
+  width: 100%;
+}
+
+.card-item label {
+  display: block;
+  margin: 8px 0;
+}
+
+.card-item textarea {
+  min-height: 64px;
+}
+
+.warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.warnings span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(152, 82, 80, 0.18);
+  color: #f0b4af;
+  font-size: 12px;
+}
+
+.session-card h3 {
+  margin: 8px 0 12px;
+  font-size: 34px;
+  line-height: 1.15;
+}
+
+.session-card .answer,
+.session-card .glasses,
+.session-card .prompt {
+  margin: 10px 0 0;
+}
+
+@media (max-width: 1100px) {
+  .desktop-grid {
+    grid-template-columns: 1fr;
+  }
+}

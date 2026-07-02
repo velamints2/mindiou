@@ -72,6 +72,15 @@ try {
   if (!ingest.cards.every(card => card.sourceEventId === "smoke-event-1" && card.projectId === "/tmp/spiral-g2")) {
     throw new Error("Generated cards lost source traceability");
   }
+  if (!ingest.cards.every(card => {
+    const atom = ingest.atoms.find(item => item.id === card.knowledgeAtomId);
+    return atom && card.front === atom.concept && card.prompt === atom.recallQuestion;
+  })) {
+    throw new Error("Generated cards must use concept as front and recall question as prompt");
+  }
+  if (ingest.cards.some(card => /Goal:|request worked|Access-Control-Allow-Origin/i.test(card.prompt))) {
+    throw new Error("Raw source context leaked into a learning-card prompt");
+  }
 
   const shortSession = await json("/api/g2/session?duration=15");
   if (shortSession.session.cardCount !== 1) throw new Error("15-second session must contain one due card");

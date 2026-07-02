@@ -236,7 +236,9 @@ let sessionState: LearningSessionState = transitionSession("idle", "START");
 const transcriptIntake = new TranscriptIntake();
 const NAVIGATION_IMAGE_DELAY_MS = 420;
 const GESTURE_DEBOUNCE_MS = 240;
+const IMAGE_UPLOAD_TIMEOUT_MS = 6500;
 const debugImageHoldMs = Number(runtimeParams.get("imageHoldMs") || "0");
+const debugImageUploadFailure = runtimeParams.get("imageFail") === "1";
 
 apiBaseUrlEl.value = apiBaseUrl;
 apiTokenEl.value = apiToken;
@@ -251,7 +253,12 @@ function loadCards(): LearningCard[] {
   if (!raw) return sampleCards();
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length ? parsed.map(normalizeCard) : sampleCards();
+    if (!Array.isArray(parsed) || !parsed.length) return sampleCards();
+    const fronts = parsed.map(card => clean(String(card?.front || "")).toLowerCase());
+    const legacyDemo = ["apple", "resilient", "context", "iterate"].every(
+      (front, index) => fronts[index] === front
+    );
+    return legacyDemo ? sampleCards() : parsed.map(normalizeCard);
   } catch {
     return sampleCards();
   }
@@ -259,10 +266,10 @@ function loadCards(): LearningCard[] {
 
 function sampleCards(): LearningCard[] {
   return [
-    makeCard("apple", "苹果", "跟读：apple。然后说出中文意思。", ["word"]),
-    makeCard("resilient", "有韧性的", "造一个短句。", ["word"]),
-    makeCard("context", "上下文", "解释它在 AI 对话里的含义。", ["word"]),
-    makeCard("iterate", "迭代", "说出一个你今天可以迭代的东西。", ["word"])
+    makeCard("Active Recall", "主动从记忆中提取答案。", "为什么主动回忆比重复阅读更有效？", ["demo"]),
+    makeCard("Feynman Method", "用简单语言解释，暴露理解缺口。", "请用自己的话解释费曼学习法。", ["demo"]),
+    makeCard("CORS", "控制浏览器能否读取跨域响应。", "CORS 和网络白名单有什么区别？", ["demo"]),
+    makeCard("Backpressure", "消费者跟不上时让生产者减速。", "没有 backpressure 会发生什么？", ["demo"])
   ];
 }
 
@@ -489,7 +496,10 @@ let glassesNotice = "";
 let voiceActivity = "";
 
 function glassesContent(card: LearningCard | null): string {
-  if (glassesNotice) return `${glassesNotice}  ${progressText()}\nUpdating image...`;
+  if (glassesNotice) {
+    const detail = glassesNotice === "Image failed" ? "Swipe to retry" : "Updating image...";
+    return `${glassesNotice}  ${progressText()}\n${detail}`;
+  }
   if (voiceActivity) return `${voiceActivity}  ${progressText()}\nUp Previous  Down Next`;
   return `${sessionLabel(sessionState)}  ${progressText()}\nUp Previous  Down Next`;
 }
@@ -545,7 +555,7 @@ let imageRequestRevision = 0;
 let lastGestureAt = 0;
 
 function visualPrompt(card: LearningCard | null): string {
-  return fit(coachLineEl.textContent || card?.prompt || "Explain aloud", 34);
+  return fit(card?.prompt || "Explain aloud", 34);
 }
 
 function conceptVisualKey(card: LearningCard | null, prompt = visualPrompt(card)): string {
@@ -697,15 +707,37 @@ function drainConceptImageUpdates(): Promise<void> {
           continue;
         }
 
-        const result = await bridge!.updateImageRawData(new ImageRawDataUpdate({
-          containerID: CONCEPT_IMAGE_ID,
-          containerName: "concept-image",
-          imageData
-        }));
+        let result: string;
+        try {
+          if (debugImageUploadFailure) throw new Error("Simulated image upload failure");
+          result = await Promise.race([
+            bridge!.updateImageRawData(new ImageRawDataUpdate({
+              containerID: CONCEPT_IMAGE_ID,
+              containerName: "concept-image",
+              imageData
+            })),
+            new Promise<never>((_, reject) => {
+              window.setTimeout(() => reject(new Error("Image upload timed out")), IMAGE_UPLOAD_TIMEOUT_MS);
+            })
+          ]);
+        } catch (error) {
+          if (request.revision === imageRequestRevision) {
+            glassesNotice = "Image failed";
+            void requestFooterUpdate();
+          }
+          void logEvent("g2_concept_image_failed", {
+            message: error instanceof Error ? error.message : String(error),
+            latest: request.revision === imageRequestRevision
+          });
+          continue;
+        }
         if (result === "success" && request.revision === imageRequestRevision) {
           lastRenderedConcept = request.key;
+          clearGlassesNotice();
+        } else if (request.revision === imageRequestRevision) {
+          glassesNotice = "Image failed";
+          void requestFooterUpdate();
         }
-        if (request.revision === imageRequestRevision) clearGlassesNotice();
         void logEvent("g2_concept_image", {
           bytes: imageData.length,
           result,
@@ -950,7 +982,11 @@ async function startTimedSession(duration: number): Promise<void> {
     setCoach(`${payload.session.duration} 秒 session · ${payload.session.cardCount} 张卡`);
     await renderGlasses(true);
   } catch (error) {
-    setCoach(error instanceof Error ? error.message : "Session 创建失败");
+    showStudyNotice(
+      `Session 创建失败：${error instanceof Error ? error.message : "API unavailable"}`,
+      "error"
+    );
+    setStatus(bridgeReady ? "g2 offline" : "phone offline");
   }
 }
 
@@ -961,7 +997,11 @@ async function syncSpiralToday(replaceCards = true): Promise<void> {
     applyDashboard(payload, replaceCards);
     if (replaceCards && payload.cards.length) await renderGlasses(true);
   } catch (error) {
-    setCoach(error instanceof Error ? error.message : "同步失败");
+    showStudyNotice(
+      `学习队列同步失败：${error instanceof Error ? error.message : "API unavailable"}`,
+      "error"
+    );
+    setStatus(bridgeReady ? "g2 offline" : "phone offline");
   } finally {
     syncTodayButton.disabled = false;
   }
