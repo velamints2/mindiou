@@ -5,6 +5,11 @@ compiler. Spiral turns useful learning increments from Codex work into
 source-linked knowledge atoms, active-recall cards, and a persisted review
 queue. See [SPIRAL_ARCHITECTURE.md](./SPIRAL_ARCHITECTURE.md).
 
+The repository also contains a Rokid AIUI client under
+`platforms/rokid-aiui/`. Both glasses clients use the same Spiral knowledge
+atoms, learning debts, AI tutor, and review scheduler while keeping device
+rendering and input adapters separate.
+
 ## What it does
 
 - Shows one concept, question, status, or next step at a time on G2.

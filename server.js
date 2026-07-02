@@ -21,7 +21,7 @@ const spiralStore = createSpiralStore(learningStorePath);
 await spiralStore.load();
 
 const learningCoachSystemPrompt = [
-  "You are Learn Coach, a rigorous but patient AI teacher for Even G2 smart glasses.",
+  "You are Learn Coach, a rigorous but patient AI teacher for smart glasses including Even G2 and Rokid AIUI devices.",
   "You can teach any subject to learners at any level.",
   "Use active recall, Feynman questioning, Socratic guidance, concrete examples, analogies, and short feedback loops.",
   "When planning a subject, organize the modern-citizen core knowledge into a reasonable sequence of teaching units.",
@@ -31,6 +31,45 @@ const learningCoachSystemPrompt = [
   "For glasses output, be brief and structured. Avoid long lectures unless explicitly asked.",
   "Use Chinese primarily when the learner writes Chinese, but naturally include key English terms in parentheses when useful."
 ].join(" ");
+
+const rokidDemoCards = [
+  {
+    id: "demo-rokid-cors",
+    projectId: "learn-coach-demo",
+    front: "CORS",
+    back: "浏览器读取跨域响应的规则。",
+    prompt: "用自己的话解释：CORS 和网络白名单有什么区别？",
+    tags: ["demo", "web"],
+    debtScore: 72,
+    mastery: 0,
+    due: 0,
+    repetitions: 0
+  },
+  {
+    id: "demo-rokid-backpressure",
+    projectId: "learn-coach-demo",
+    front: "Backpressure",
+    back: "消费者跟不上时，生产者必须减速。",
+    prompt: "如果没有 backpressure，系统可能出现什么问题？",
+    tags: ["demo", "systems"],
+    debtScore: 66,
+    mastery: 0,
+    due: 0,
+    repetitions: 0
+  },
+  {
+    id: "demo-rokid-active-recall",
+    projectId: "learn-coach-demo",
+    front: "Active Recall",
+    back: "主动从记忆中提取答案，而不是重复阅读。",
+    prompt: "为什么主动回忆通常比重读更能暴露理解缺口？",
+    tags: ["demo", "learning"],
+    debtScore: 58,
+    mastery: 0,
+    due: 0,
+    repetitions: 0
+  }
+];
 
 function jsonResponse(res, statusCode, payload) {
   const body = JSON.stringify(payload);
@@ -258,7 +297,13 @@ function fallbackPlan(subject, level, maxUnits = 8) {
 }
 
 async function chatJson(messages, fallback) {
-  if (!openAiApiKey || disableAi) return fallback();
+  if (!openAiApiKey || disableAi) {
+    return {
+      ...fallback(),
+      __fallback: true,
+      __fallbackError: disableAi ? "SPIRAL_DISABLE_AI=1" : "OPENAI_API_KEY is not set"
+    };
+  }
   const response = await fetch(`${openAiBaseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -438,7 +483,12 @@ async function extractKnowledgeAtoms(text, context = {}) {
         })
       }
     ], fallback);
-    return normalizeKnowledgeExtraction(result, text);
+    return {
+      ...normalizeKnowledgeExtraction(result, text),
+      ...(result.__fallback
+        ? { fallback: true, error: result.__fallbackError || "AI unavailable" }
+        : {})
+    };
   } catch (error) {
     return { ...fallback(), fallback: true, error: error.message };
   }
@@ -511,7 +561,10 @@ async function importCards(payload) {
         tags: Array.isArray(card.tags) ? card.tags.map(String).slice(0, 4) : ["ai-import"],
         due: Date.now(),
         repetitions: 0
-      })).filter(card => card.front)
+      })).filter(card => card.front),
+      ...(result.__fallback
+        ? { fallback: true, error: result.__fallbackError || "AI unavailable" }
+        : {})
     };
   } catch (error) {
     return { ok: true, cards: fallbackCards(text, maxCards), fallback: true, error: error.message };
@@ -557,7 +610,10 @@ async function planCourse(payload) {
         tags: Array.isArray(card.tags) ? card.tags.map(String).slice(0, 4) : ["unit"],
         due: Date.now(),
         repetitions: 0
-      })).filter(card => card.front)
+      })).filter(card => card.front),
+      ...(result.__fallback
+        ? { fallback: true, error: result.__fallbackError || "AI unavailable" }
+        : {})
     };
   } catch (error) {
     return {
@@ -609,10 +665,92 @@ async function tutor(payload) {
         })
       }
     ], fallback);
-    return normalizeTutorResult(result, context);
+    return {
+      ...normalizeTutorResult(result, context),
+      ...(result.__fallback
+        ? { fallback: true, error: result.__fallbackError || "AI unavailable" }
+        : {})
+    };
   } catch (error) {
     return { ...fallback(), fallback: true, error: error.message };
   }
+}
+
+function rokidCard(card) {
+  if (!card) return null;
+  return {
+    id: String(card.id),
+    knowledgeAtomId: card.knowledgeAtomId,
+    projectId: clean(card.projectId || "general").slice(0, 80),
+    front: fit(card.front, 28),
+    back: clean(card.back).slice(0, 120),
+    prompt: clean(card.prompt).slice(0, 140),
+    tags: Array.isArray(card.tags) ? card.tags.map(String).slice(0, 4) : [],
+    debtScore: Math.max(0, Math.min(100, Number(card.debtScore || 0))),
+    mastery: Math.max(0, Math.min(1, Number(card.mastery || 0))),
+    due: Number(card.due || Date.now()),
+    repetitions: Number(card.repetitions || 0)
+  };
+}
+
+function rokidSession(duration, demo = false) {
+  const session = spiralStore.buildSession(duration);
+  const sourceCards = demo ? rokidDemoCards : session.cards;
+  const cards = sourceCards.map(rokidCard);
+  return {
+    ok: true,
+    platform: "rokid-aiui",
+    session: {
+      ...session,
+      cardCount: cards.length,
+      estimatedSeconds: Math.min(session.duration, cards.length * 30),
+      cards
+    },
+    display: {
+      mode: demo ? "demo" : "live",
+      currentCard: cards[0] || null,
+      progress: cards.length ? `1 / ${cards.length}` : "0 / 0",
+      voiceHint: "直接解释，或说下一题、会了、提问"
+    },
+    commands: ["next", "previous", "repeat", "ask", "known", "skip", "answer"]
+  };
+}
+
+async function rokidTutor(payload) {
+  const action = clean(payload.action || payload.kind || "answer");
+  const result = await tutor({
+    ...payload,
+    kind: action,
+    transcript: payload.transcript || payload.utterance || ""
+  });
+  return {
+    ok: true,
+    platform: "rokid-aiui",
+    tutor: result,
+    display: {
+      state: result.shouldFollowUp ? "follow_up" : "complete",
+      assessment: result.assessment,
+      feedback: fit(result.g2Text || result.message, 72),
+      nextQuestion: clean(result.nextQuestion).slice(0, 120)
+    }
+  };
+}
+
+async function rokidReview(payload) {
+  const result = await spiralStore.recordReview({
+    cardId: payload.cardId,
+    result: payload.result,
+    responseText: payload.responseText,
+    confidence: payload.confidence,
+    source: "rokid"
+  });
+  return {
+    ok: true,
+    platform: "rokid-aiui",
+    review: result.review,
+    debt: result.debt,
+    next: rokidSession(payload.duration || 60)
+  };
 }
 
 function wavFromPcm16(base64, sampleRate = 16000) {
@@ -726,6 +864,14 @@ const server = createServer(async (req, res) => {
       jsonResponse(res, 200, { ok: true, session });
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/rokid/session") {
+      jsonResponse(
+        res,
+        200,
+        rokidSession(url.searchParams.get("duration"), url.searchParams.get("demo") === "1")
+      );
+      return;
+    }
 
     if (req.method !== "POST") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
@@ -741,12 +887,25 @@ const server = createServer(async (req, res) => {
       jsonResponse(res, 200, await importCards(payload));
       return;
     }
+    if (url.pathname === "/api/rokid/import") {
+      const result = await importCards(payload);
+      jsonResponse(res, 200, {
+        ...result,
+        platform: "rokid-aiui",
+        cards: Array.isArray(result.cards) ? result.cards.map(rokidCard) : []
+      });
+      return;
+    }
     if (url.pathname === "/api/learn/plan") {
       jsonResponse(res, 200, await planCourse(payload));
       return;
     }
     if (url.pathname === "/api/learn/tutor") {
       jsonResponse(res, 200, await tutor(payload));
+      return;
+    }
+    if (url.pathname === "/api/rokid/tutor") {
+      jsonResponse(res, 200, await rokidTutor(payload));
       return;
     }
     if (url.pathname === "/api/learn/transcribe") {
@@ -761,6 +920,10 @@ const server = createServer(async (req, res) => {
     if (["/v1/reviews", "/api/spiral/review"].includes(url.pathname)) {
       const result = await spiralStore.recordReview(payload);
       jsonResponse(res, 200, { ok: true, ...result, today: spiralStore.dashboard() });
+      return;
+    }
+    if (url.pathname === "/api/rokid/review") {
+      jsonResponse(res, 200, await rokidReview(payload));
       return;
     }
     const g2AnswerMatch = url.pathname.match(/^\/api\/g2\/card\/([^/]+)\/answer$/);

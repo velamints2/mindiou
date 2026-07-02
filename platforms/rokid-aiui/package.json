@@ -1,0 +1,14 @@
+{
+  "name": "learn-coach-rokid-aiui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Rokid AIUI client for Learn Coach and Spiral",
+  "main": "app.js",
+  "scripts": {
+    "check": "node scripts/check-agent.mjs",
+    "test": "node --test tests/*.node.mjs",
+    "pack": "node scripts/pack-agent.mjs"
+  },
+  "dependencies": {}
+}

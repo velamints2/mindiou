@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:voice": "node scripts/voice-smoke-test.mjs",
     "test:spiral": "node scripts/spiral-smoke-test.mjs",
+    "test:rokid": "node scripts/rokid-smoke-test.mjs",
     "test:simulator": "node scripts/pre-release-test.mjs",
     "check:release": "node scripts/check-release.mjs",
     "pack:ehpk": "node scripts/pack-ehpk.mjs",

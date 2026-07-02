@@ -1,0 +1,12 @@
+page {
+  width: 100%;
+  min-height: 100vh;
+  background: #000000;
+  color: #ffffff;
+  font-family: sans-serif;
+}
+
+button {
+  border-radius: 6px;
+  box-sizing: border-box;
+}

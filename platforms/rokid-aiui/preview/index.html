@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Learn Coach Rokid Preview</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="device">
+      <section class="display" aria-label="Rokid Learn Coach preview">
+        <header>
+          <strong>LEARN COACH</strong>
+          <span id="progress">1 / 1</span>
+        </header>
+        <div class="meta">
+          <span id="priority">ACTIVE RECALL</span>
+          <span id="status">同步学习队列</span>
+        </div>
+        <article>
+          <h1 id="concept">CORS</h1>
+          <p id="question">用自己的话解释：CORS 和网络白名单有什么区别？</p>
+          <p id="feedback" hidden></p>
+        </article>
+        <nav aria-label="Study controls">
+          <button id="hint" type="button">提示</button>
+          <button id="known" type="button">会了</button>
+          <button id="next" class="primary" type="button">下一题</button>
+        </nav>
+        <form id="answer-form">
+          <label for="answer">语音回答模拟</label>
+          <div>
+            <input id="answer" placeholder="用自己的话解释当前概念" />
+            <button class="primary" type="submit">提交</button>
+          </div>
+        </form>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
