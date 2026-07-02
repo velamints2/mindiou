@@ -1,6 +1,6 @@
 {
   "name": "evenhub-g2-learning",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "scripts": {

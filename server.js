@@ -280,6 +280,39 @@ async function chatJson(messages, fallback) {
   return parseJsonObject(content);
 }
 
+async function checkOpenAiConnectivity() {
+  if (!openAiApiKey || disableAi) {
+    return {
+      reachable: false,
+      error: disableAi ? "SPIRAL_DISABLE_AI=1" : "OPENAI_API_KEY is not set"
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(`${openAiBaseUrl}/models`, {
+      headers: {
+        "authorization": `Bearer ${openAiApiKey}`,
+        "accept": "application/json"
+      },
+      signal: controller.signal
+    });
+    return {
+      reachable: response.ok,
+      status: response.status,
+      error: response.ok ? "" : fit(await response.text(), 180)
+    };
+  } catch (error) {
+    return {
+      reachable: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function fallbackKnowledgeExtraction(text) {
   const normalized = clean(text);
   const candidates = [
@@ -457,7 +490,9 @@ async function importCards(payload) {
           "Convert user learning material into concise Even G2 flashcards.",
           "Return JSON only: {\"cards\":[{\"front\":\"\",\"back\":\"\",\"prompt\":\"\",\"tags\":[\"\"]}]}",
           "Front must be glanceable, usually one word or short phrase. Back is short.",
-          "Prompt must be a Feynman-style active recall question that asks the learner to explain, compare, give an example, or apply the idea."
+          "Prompt must be a Feynman-style active recall question that asks the learner to explain, compare, give an example, or apply the idea.",
+          "Create one card per genuinely distinct concept. Do not pad the result to the maximum, repeat a concept, or invent details beyond the source.",
+          "If the material is code or logs, extract the underlying concept or failure mode. Never copy raw code, stack traces, or long source passages into front."
         ].join(" ")
       },
       {
@@ -470,7 +505,7 @@ async function importCards(payload) {
       ok: true,
       cards: cards.map(card => ({
         id: crypto.randomUUID(),
-        front: clean(card.front).slice(0, 64),
+        front: fit(card.front, 36),
         back: clean(card.back).slice(0, 120),
         prompt: clean(card.prompt || `Explain ${card.front}`).slice(0, 120),
         tags: Array.isArray(card.tags) ? card.tags.map(String).slice(0, 4) : ["ai-import"],
@@ -645,7 +680,14 @@ const server = createServer(async (req, res) => {
 
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     if (url.pathname === "/health") {
-      jsonResponse(res, 200, { ok: true, ai: Boolean(openAiApiKey), model: chatModel, sttModel });
+      const live = url.searchParams.get("live") === "1";
+      jsonResponse(res, 200, {
+        ok: true,
+        ai: Boolean(openAiApiKey) && !disableAi,
+        model: chatModel,
+        sttModel,
+        ...(live ? { openai: await checkOpenAiConnectivity() } : {})
+      });
       return;
     }
 

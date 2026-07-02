@@ -13,7 +13,7 @@
             <p class="eyebrow">LEARN COACH</p>
             <h1 class="product-title">Spiral</h1>
           </div>
-          <span id="status-pill" class="pill">mock</span>
+          <span id="status-pill" class="pill">phone</span>
         </header>
 
         <nav class="tabs" aria-label="Learn Coach sections">
@@ -25,6 +25,7 @@
         </nav>
 
         <section class="tab-panel" data-panel="today">
+          <p id="study-notice" class="result-notice" hidden></p>
           <div class="metrics" aria-label="Today summary">
             <div class="metric">
               <span id="metric-debts">0</span>
@@ -187,9 +188,11 @@
           </label>
           <div class="inline-controls">
             <button id="save-settings" type="button">保存</button>
+            <button id="test-ai-connection" type="button">测试 AI 连接</button>
             <button id="toggle-voice" type="button">开启语音</button>
             <button id="mock-repeat" type="button">模拟跟读</button>
           </div>
+          <p id="ai-connection-status" class="connection-status">尚未测试 AI 连接。</p>
           <p id="voice-line" class="voice">语音：未开启</p>
 
           <div class="secondary-tool">

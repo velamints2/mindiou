@@ -190,6 +190,40 @@ select {
   white-space: pre-wrap;
 }
 
+.result-notice,
+.connection-status {
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border: 1px solid #397567;
+  background: #0d211c;
+  color: #d9f6ef;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.result-notice[data-kind="fallback"],
+.connection-status[data-state="warning"] {
+  border-color: #9a7a37;
+  background: #211b0e;
+  color: #f1d78e;
+}
+
+.result-notice[data-kind="error"],
+.connection-status[data-state="error"] {
+  border-color: #985250;
+  background: #251110;
+  color: #f3b4b0;
+}
+
+.connection-status[data-state="success"] {
+  border-color: #4c9a85;
+  color: #bcebdd;
+}
+
+.connection-status[data-state="checking"] {
+  color: #8fc9bb;
+}
+
 .study-actions,
 .inline-controls,
 .field-grid {
@@ -200,7 +234,7 @@ select {
 }
 
 .inline-controls {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
 }
 
 .field-grid {

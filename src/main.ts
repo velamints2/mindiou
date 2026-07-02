@@ -99,6 +99,7 @@ type SpiralDashboard = {
 type ImportResponse = {
   ok: boolean;
   cards?: LearningCard[];
+  fallback?: boolean;
   error?: string;
 };
 
@@ -115,6 +116,18 @@ type TranscriptResponse = {
   confidence?: number;
   latencyMs?: number;
   error?: string;
+};
+
+type HealthResponse = {
+  ok: boolean;
+  ai: boolean;
+  model: string;
+  sttModel: string;
+  openai?: {
+    reachable: boolean;
+    status?: number;
+    error?: string;
+  };
 };
 
 type EvenBridge = Awaited<ReturnType<typeof waitForEvenAppBridge>>;
@@ -190,6 +203,9 @@ const reviewNextActionEl = document.querySelector<HTMLElement>("#review-next-act
 const reviewListEl = document.querySelector<HTMLDivElement>("#review-list")!;
 const reviewAccuracyEl = document.querySelector<HTMLElement>("#review-accuracy")!;
 const reviewPracticeRateEl = document.querySelector<HTMLElement>("#review-practice-rate")!;
+const studyNoticeEl = document.querySelector<HTMLParagraphElement>("#study-notice")!;
+const testAiConnectionButton = document.querySelector<HTMLButtonElement>("#test-ai-connection")!;
+const aiConnectionStatusEl = document.querySelector<HTMLParagraphElement>("#ai-connection-status")!;
 
 let bridge: EvenBridge | null = null;
 let bridgeReady = false;
@@ -253,9 +269,9 @@ function sampleCards(): LearningCard[] {
 function makeCard(front: string, back: string, prompt = "跟读后说出答案。", tags: string[] = []): LearningCard {
   return {
     id: crypto.randomUUID(),
-    front: front.trim(),
-    back: back.trim(),
-    prompt: prompt.trim(),
+    front: fit(front, 36),
+    back: fit(back, 120),
+    prompt: fit(prompt, 120),
     tags,
     due: Date.now(),
     repetitions: 0
@@ -269,7 +285,7 @@ function normalizeCard(input: Partial<LearningCard>): LearningCard {
     sourceEventId: input.sourceEventId ? String(input.sourceEventId) : undefined,
     sourceEventIds: Array.isArray(input.sourceEventIds) ? input.sourceEventIds.map(String) : undefined,
     projectId: input.projectId ? String(input.projectId) : undefined,
-    front: clean(input.front || "Untitled").slice(0, 64),
+    front: fit(input.front || "Untitled", 36),
     back: clean(input.back || "").slice(0, 120),
     prompt: clean(input.prompt || "跟读后说出答案。").slice(0, 120),
     tags: Array.isArray(input.tags) ? input.tags.map(String).slice(0, 4) : [],
@@ -294,6 +310,49 @@ function fit(text: string, max: number): string {
   return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
+function importCardLimit(text: string): number {
+  const normalized = clean(text);
+  const sentenceCount = text
+    .split(/(?:[.!?。！？]+|\r?\n+)/)
+    .map(part => clean(part))
+    .filter(part => part.length >= 12)
+    .length;
+  const densityEstimate = Math.ceil(normalized.length / 240);
+  return Math.max(1, Math.min(8, Math.max(sentenceCount, densityEstimate)));
+}
+
+function wrappedLines(text: string, maxChars: number, maxLines: number): string[] {
+  const normalized = clean(text);
+  if (!normalized) return [];
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const hasUsefulSpaces = words.length > 1 && words.every(word => word.length <= maxChars);
+  const lines: string[] = [];
+
+  if (hasUsefulSpaces) {
+    let current = "";
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length > maxChars && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = candidate;
+      }
+      if (lines.length === maxLines) break;
+    }
+    if (current && lines.length < maxLines) lines.push(current);
+  } else {
+    for (let index = 0; index < normalized.length && lines.length < maxLines; index += maxChars) {
+      lines.push(normalized.slice(index, index + maxChars));
+    }
+  }
+
+  if (lines.length === maxLines && normalized.length > lines.join("").length) {
+    lines[maxLines - 1] = fit(lines[maxLines - 1], Math.max(2, lines[maxLines - 1].length));
+  }
+  return lines;
+}
+
 function currentCard(): LearningCard | null {
   if (!cards.length) return null;
   cardIndex = Math.max(0, Math.min(cardIndex, cards.length - 1));
@@ -303,6 +362,75 @@ function currentCard(): LearningCard | null {
 function setStatus(text: string): void {
   statusPillEl.textContent = text;
   void logEvent("status", { text });
+}
+
+function activateTab(target: string): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(tab => {
+    tab.classList.toggle("is-active", tab.dataset.tab === target);
+  });
+  document.querySelectorAll<HTMLElement>("[data-panel]").forEach(panel => {
+    panel.hidden = panel.dataset.panel !== target;
+  });
+}
+
+function showStudyNotice(text: string, kind: "success" | "fallback" | "error" = "success"): void {
+  studyNoticeEl.textContent = text;
+  studyNoticeEl.dataset.kind = kind;
+  studyNoticeEl.hidden = false;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname.toLowerCase());
+}
+
+function apiAddressWarning(): string {
+  try {
+    const apiHost = new URL(apiBaseUrl).hostname;
+    const pageHost = window.location.hostname;
+    if (isLoopbackHost(apiHost) && !isLoopbackHost(pageHost)) {
+      return "当前 API 使用 localhost。手机或 Even App 中必须改为 Mac 的局域网地址，例如 http://192.168.x.x:8793。";
+    }
+  } catch {
+    return "Learning API 地址格式无效。";
+  }
+  return "";
+}
+
+function showApiAddressHint(): void {
+  const warning = apiAddressWarning();
+  if (warning) {
+    aiConnectionStatusEl.textContent = warning;
+    aiConnectionStatusEl.dataset.state = "warning";
+  } else if (aiConnectionStatusEl.dataset.state === "warning") {
+    aiConnectionStatusEl.textContent = "尚未测试 AI 连接。";
+    delete aiConnectionStatusEl.dataset.state;
+  }
+}
+
+async function testAiConnection(): Promise<boolean> {
+  testAiConnectionButton.disabled = true;
+  aiConnectionStatusEl.textContent = "正在检查学习 API 和 OpenAI...";
+  aiConnectionStatusEl.dataset.state = "checking";
+  try {
+    const payload = await apiGet<HealthResponse>("/health?live=1");
+    if (!payload.ai) {
+      throw new Error("学习 API 已连接，但后端没有启用 OPENAI_API_KEY。");
+    }
+    if (!payload.openai?.reachable) {
+      throw new Error(payload.openai?.error || "学习 API 已连接，但 OpenAI 不可达。");
+    }
+    aiConnectionStatusEl.textContent = `AI 可用 · ${payload.model} · OpenAI HTTP ${payload.openai.status || 200}`;
+    aiConnectionStatusEl.dataset.state = "success";
+    return true;
+  } catch (error) {
+    const warning = apiAddressWarning();
+    const detail = error instanceof Error ? error.message : "连接失败";
+    aiConnectionStatusEl.textContent = warning ? `${warning} ${detail}` : `AI 不可用：${detail}`;
+    aiConnectionStatusEl.dataset.state = "error";
+    return false;
+  } finally {
+    testAiConnectionButton.disabled = false;
+  }
 }
 
 function advanceSession(event: LearningSessionEvent): void {
@@ -437,14 +565,17 @@ async function conceptPng(card: LearningCard | null, promptText = visualPrompt(c
   context.textAlign = "center";
   context.textBaseline = "middle";
 
-  const text = fit(card?.front || "No cards", 20);
-  let fontSize = 58;
+  const titleLines = wrappedLines(card?.front || "No cards", 11, 2);
+  let fontSize = titleLines.length > 1 ? 38 : 58;
   context.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Noto Sans", sans-serif`;
-  while (fontSize > 32 && context.measureText(text).width > 264) {
+  while (fontSize > 28 && titleLines.some(line => context.measureText(line).width > 264)) {
     fontSize -= 2;
     context.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Noto Sans", sans-serif`;
   }
-  context.fillText(text, 144, 56, 264);
+  const titleStartY = titleLines.length > 1 ? 44 : 56;
+  titleLines.forEach((line, index) => {
+    context.fillText(line, 144, titleStartY + index * (fontSize + 4), 264);
+  });
 
   const prompt = promptText;
   context.fillStyle = "#cfeee7";
@@ -620,7 +751,7 @@ async function initBridge(): Promise<void> {
       new Promise<null>(resolve => window.setTimeout(() => resolve(null), 2500))
     ]);
     if (!sdkBridge) {
-      setStatus("mock");
+      setStatus("phone");
       return;
     }
 
@@ -632,7 +763,7 @@ async function initBridge(): Promise<void> {
     }));
     bridgeReady = result === StartUpPageCreateResult.success;
     void logEvent("bridge_startup", { result, bridgeReady });
-    setStatus(bridgeReady ? "g2" : `bridge ${result}`);
+    setStatus(bridgeReady ? "g2" : "phone");
 
     bridge.onEvenHubEvent(event => {
       const sysType = event.sysEvent?.eventType;
@@ -662,7 +793,7 @@ async function initBridge(): Promise<void> {
 
     await renderGlasses(true);
   } catch (error) {
-    setStatus("mock");
+    setStatus("phone");
     void logEvent("bridge_unavailable", { message: error instanceof Error ? error.message : String(error) });
     console.warn("Even App bridge unavailable", error);
   }
@@ -849,6 +980,8 @@ async function ingestLearningIncrement(): Promise<void> {
       ok: boolean;
       atoms: KnowledgeAtom[];
       cards: LearningCard[];
+      fallback?: boolean;
+      error?: string;
       today: SpiralDashboard;
     }>("/v1/events/codex", {
       source: captureSourceEl.value,
@@ -858,9 +991,11 @@ async function ingestLearningIncrement(): Promise<void> {
       retainRaw: retainSourceEl.checked
     });
     applyDashboard(payload.today, true);
+    const fallbackNote = payload.fallback ? ` Fallback: ${payload.error || "AI unavailable"}.` : "";
     captureStatusEl.textContent = payload.atoms.length
       ? `Created ${payload.atoms.length} knowledge atom${payload.atoms.length === 1 ? "" : "s"}.`
       : "No reusable learning increment found. No card was created.";
+    captureStatusEl.textContent += fallbackNote;
     if (payload.cards.length) await renderGlasses(true);
   } catch (error) {
     captureStatusEl.textContent = error instanceof Error ? error.message : "Compile failed";
@@ -889,20 +1024,27 @@ async function importWithAi(): Promise<void> {
   setStatus("importing");
   try {
     const rawText = clean(importTextEl.value);
-    if (!rawText) return;
+    if (!rawText) {
+      captureStatusEl.textContent = "请先粘贴或导入学习材料。";
+      return;
+    }
     let imported: LearningCard[];
+    let usedFallback = false;
+    let fallbackReason = "";
     try {
       const payload = await apiPost<ImportResponse>("/api/learn/import", {
         text: rawText,
         mode: "flashcards",
-        maxCards: 40
+        maxCards: importCardLimit(rawText)
       });
       if (!payload.ok || !payload.cards?.length) throw new Error(payload.error || "No cards returned");
       imported = payload.cards.map(normalizeCard);
-      setCoach("AI 已把内容转成学习卡片。");
+      usedFallback = Boolean(payload.fallback);
+      fallbackReason = payload.error || "";
     } catch (error) {
-      imported = localImport(rawText);
-      setCoach("本地解析完成。连接 AI API 后可生成更好的卡片。");
+      imported = localImport(rawText).map(normalizeCard);
+      usedFallback = true;
+      fallbackReason = error instanceof Error ? error.message : "AI unavailable";
       console.warn("AI import fallback", error);
     }
 
@@ -910,8 +1052,19 @@ async function importWithAi(): Promise<void> {
     cardIndex = 0;
     saveCards();
     updateWebView();
+    const firstCard = currentCard()?.front || "第一张卡片";
+    if (usedFallback) {
+      const message = `AI 未生成内容，已使用本地解析生成 ${imported.length} 张卡片。原因：${fit(fallbackReason || "AI unavailable", 80)}`;
+      captureStatusEl.textContent = message;
+      showStudyNotice(message, "fallback");
+    } else {
+      const message = `AI 已生成 ${imported.length} 张卡片，已打开第一张：${firstCard}`;
+      captureStatusEl.textContent = message;
+      showStudyNotice(message, "success");
+    }
+    activateTab("today");
     await renderGlasses(true);
-    setStatus(bridgeReady ? "g2" : "mock");
+    setStatus(bridgeReady ? "g2" : "phone");
   } finally {
     importAiButton.disabled = false;
   }
@@ -943,7 +1096,7 @@ async function planCourse(): Promise<void> {
     setCoach(error instanceof Error ? error.message : "课程生成失败。");
   } finally {
     planCourseButton.disabled = false;
-    setStatus(bridgeReady ? "g2" : "mock");
+    setStatus(bridgeReady ? "g2" : "phone");
   }
 }
 
@@ -991,7 +1144,7 @@ async function askTutor(kind: TutorKind, transcript = ""): Promise<void> {
     if (kind === "answer" && voiceEnabled) {
       setVoiceActivity(sessionState === "follow_up" ? "Answer follow-up" : "Listening");
     }
-    setStatus(bridgeReady ? "g2" : "mock");
+    setStatus(bridgeReady ? "g2" : "phone");
   }
 }
 
@@ -1406,18 +1559,17 @@ saveSettingsButton.addEventListener("click", () => {
   apiToken = apiTokenEl.value.trim();
   localStorage.setItem("g2LearningApiBaseUrl", apiBaseUrl);
   localStorage.setItem("g2LearningApiToken", apiToken);
-  setCoach("设置已保存。");
+  setCoach("设置已保存，正在测试 AI 连接。");
+  showApiAddressHint();
+  void testAiConnection();
 });
+
+testAiConnectionButton.addEventListener("click", () => void testAiConnection());
 
 document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(button => {
   button.addEventListener("click", () => {
-    const target = button.dataset.tab;
-    document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach(tab => {
-      tab.classList.toggle("is-active", tab === button);
-    });
-    document.querySelectorAll<HTMLElement>("[data-panel]").forEach(panel => {
-      panel.hidden = panel.dataset.panel !== target;
-    });
+    activateTab(button.dataset.tab || "today");
+    if (button.dataset.tab === "settings") showApiAddressHint();
   });
 });
 
@@ -1429,6 +1581,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-session-duration]").forEach(
 
 updateWebView();
 sessionStateEl.textContent = sessionLabel(sessionState);
+showApiAddressHint();
 void logEvent("app_loaded", {
   cards: cards.length,
   url: window.location.href,

@@ -122,8 +122,23 @@ npm run pack:ehpk
 The current upload artifact is:
 
 ```text
-release/learn-coach-0.3.0.ehpk
+release/learn-coach-0.3.2.ehpk
 ```
+
+Version `0.3.2` makes the AI import result explicit. A successful import opens
+the first generated card instead of leaving it behind the Capture panel,
+fallback output is clearly labeled, browser-only runtime status is called
+`phone` instead of the misleading `mock`, and Settings can test both the local
+learning API and live OpenAI connectivity. The app also warns when an Even App
+or phone build is configured with `localhost` instead of the Mac LAN address.
+Direct material import is capped at eight cards to keep generation fast and
+prevent a short source from expanding into a low-value card pile.
+
+Version `0.3.1` fixes acceptance-test issues found on real G2: AI import now
+surfaces fallback/error instead of pretending local fallback is AI output,
+`/health?live=1` verifies real OpenAI reachability, local fallback cards are
+normalized before rendering, and the G2 concept image wraps short titles to
+avoid code or long text being clipped on the glasses.
 
 Version `0.3.0` adds durable AI learning debts, debt severity and lifecycle,
 no-AI micro exercises, daily debt/recall/practice metrics, and time-bounded
