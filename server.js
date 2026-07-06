@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { createSpiralStore } from "./spiral-store.js";
 import { createMvp0Store } from "./mvp0-store.js";
 import { generateFallbackReport } from "./mvp0-fallback.js";
+import { generateClearanceReport } from "./mvp0-report.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -1087,9 +1088,11 @@ const server = createServer(async (req, res) => {
         jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
         return;
       }
-      const report = generateFallbackReport(artifactText, artifactType);
+      const chatFn = (!openAiApiKey || disableAi) ? null : chatJson;
+      const report = await generateClearanceReport(artifactText, artifactType, chatFn);
       const saved = await mvp0Store.saveReport(report);
-      jsonResponse(res, 200, { ok: true, report: saved, fallback: true });
+      const isFallback = (!openAiApiKey || disableAi);
+      jsonResponse(res, 200, { ok: true, report: saved, fallback: isFallback });
       return;
     }
 
