@@ -4,169 +4,169 @@
       "id": 0,
       "level": "debug",
       "message": "[vite] connecting...",
-      "ts": 1783002415167
+      "ts": 1783077350610
     },
     {
       "id": 1,
       "level": "log",
       "message": "[EvenAppBridge] Bridge initialized",
-      "ts": 1783002415173
+      "ts": 1783077350635
     },
     {
       "id": 2,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002415183
+      "ts": 1783077350635
     },
     {
       "id": 3,
       "level": "debug",
       "message": "[ShadowTimers] setInterval id=3 delay=30000ms queued (queue=3)",
-      "ts": 1783002415184
+      "ts": 1783077350635
     },
     {
       "id": 4,
       "level": "debug",
       "message": "[vite] connected.",
-      "ts": 1783002415188
+      "ts": 1783077350636
     },
     {
       "id": 5,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002415188
+      "ts": 1783077350643
     },
     {
       "id": 6,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002416919
+      "ts": 1783077352376
     },
     {
       "id": 7,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002416929
+      "ts": 1783077352385
     },
     {
       "id": 8,
       "level": "log",
       "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"eventSource\":1},\"sysEvent\":{\"eventSource\":1}}",
-      "ts": 1783002424489
+      "ts": 1783077358327
     },
     {
       "id": 9,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002426224
+      "ts": 1783077360069
     },
     {
       "id": 10,
       "level": "log",
       "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1}}",
-      "ts": 1783002426225
+      "ts": 1783077360069
     },
     {
       "id": 11,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002426226
+      "ts": 1783077360071
     },
     {
       "id": 12,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002427564
+      "ts": 1783077361405
     },
     {
       "id": 13,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002427571
+      "ts": 1783077361427
     },
     {
       "id": 14,
       "level": "log",
       "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
-      "ts": 1783002427963
+      "ts": 1783077361806
     },
     {
       "id": 15,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002427963
+      "ts": 1783077361807
     },
     {
       "id": 16,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002427965
+      "ts": 1783077361808
     },
     {
       "id": 17,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002429295
+      "ts": 1783077363144
     },
     {
       "id": 18,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002429303
+      "ts": 1783077363162
     },
     {
       "id": 19,
       "level": "log",
       "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
-      "ts": 1783002429707
+      "ts": 1783077363537
     },
     {
       "id": 20,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002429708
+      "ts": 1783077363538
     },
     {
       "id": 21,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002429709
+      "ts": 1783077363540
     },
     {
       "id": 22,
       "level": "log",
       "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
-      "ts": 1783002430009
+      "ts": 1783077363838
     },
     {
       "id": 23,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002430009
+      "ts": 1783077363839
     },
     {
       "id": 24,
       "level": "log",
       "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
-      "ts": 1783002430311
+      "ts": 1783077364141
     },
     {
       "id": 25,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002430311
+      "ts": 1783077364141
     },
     {
       "id": 26,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002431642
+      "ts": 1783077365472
     },
     {
       "id": 27,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783002431650
+      "ts": 1783077365485
     }
   ],
   "total": 28

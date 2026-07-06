@@ -34,12 +34,55 @@ function detectLanguage(text: string): 'zh' | 'en' | 'mixed' {
   return 'en'
 }
 
+function containsStepMarkers(text: string): boolean {
+  return /(?:首先|然后|其次|最后|第一步|第二步|第三步|step|steps|first|then|finally|next|1\.|2\.|3\.)/i.test(text)
+}
+
+function isLikelyConceptTerm(term: string): boolean {
+  const cleaned = term.trim()
+  if (!cleaned) return false
+
+  // Reject common leading discourse fragments that are often extracted from
+  // background text rather than real concepts.
+  if (/^[但而并因所这那将让使可需会要]\S*/.test(cleaned)) {
+    return false
+  }
+
+  const chineseStopTerms = new Set([
+    '解决方法', '方法', '问题', '内容', '背景', '步骤', '原因', '方案', '概念',
+    '东西', '事情', '结果', '信息', '知识', '主题', '标题', '讨论', '分析'
+  ])
+  if (chineseStopTerms.has(cleaned)) {
+    return false
+  }
+
+  // English terms should usually look like a concept or acronym, not a lower
+  // case filler word such as "data" pulled out of a sentence clause.
+  if (/^[a-z]+$/.test(cleaned)) {
+    const stopWords = new Set(['data', 'while', 'this', 'that', 'then', 'when', 'what', 'where', 'why', 'how', 'thing', 'stuff'])
+    if (cleaned.length < 4 || stopWords.has(cleaned.toLowerCase())) {
+      return false
+    }
+  }
+
+  // Prefer clear concept labels over long sentence fragments.
+  if (cleaned.includes(' ') && cleaned.split(/\s+/).length > 5) {
+    return false
+  }
+
+  return true
+}
+
 /**
  * Try to match concept patterns in text
  */
 function extractConcepts(chunk: TextChunk): LearningCard[] {
   const text = chunk.text
   const cards: LearningCard[] = []
+
+  if (containsStepMarkers(text)) {
+    return cards
+  }
 
   // Pattern: "X 是..." / "X 指的是..." / "X is..." / "X means..."
   const conceptPatterns = [
@@ -53,14 +96,14 @@ function extractConcepts(chunk: TextChunk): LearningCard[] {
       const term = match[1].trim()
       const definition = match[2].trim()
 
-      if (term.length > 2 && term.length < 50 && definition.length > 5 && definition.length < 100) {
+      if (term.length > 2 && term.length < 50 && definition.length > 5 && definition.length < 100 && isLikelyConceptTerm(term)) {
         const card: LearningCard = {
           id: generateId(),
           sourceId: chunk.id,
           type: 'concept',
           front: `什么是${term}？`,
           back: definition,
-          glassesText: `${term}？`,
+          glassesText: detectLanguage(term) === 'zh' ? `什么是${term}？` : `What is ${term}?`,
           prompt: `请用自己的话解释${term}的含义。`,
           hint: `它的关键特点是：${definition.split('；')[0]}`,
           sourceExcerpt: text.substring(match.index, match.index + 150),
@@ -152,8 +195,19 @@ function extractStepsCards(chunk: TextChunk): LearningCard[] {
     const numberedItems = text
       .split(/\n+/)
       .map(line => line.match(/^\s*\d+[.)、]\s*(.+)$/)?.[1]?.trim() || "")
-      .filter(Boolean);
-    stepsList.push(...numberedItems.slice(0, 6));
+      .filter(Boolean)
+
+    stepsList.push(...numberedItems.slice(0, 6))
+  }
+
+  if (stepsList.length < 2 && containsStepMarkers(text)) {
+    const rawClauses = text.split(/(?:首先|然后|其次|接着|最后|第一步|第二步|第三步|first|then|finally|next)/i)
+    const cleanedClauses = rawClauses
+      .map(item => item.replace(/^[，,:：\s]+/, '').trim())
+      .filter(Boolean)
+      .filter(item => item.length > 1)
+      .slice(0, 6)
+    stepsList.push(...cleanedClauses)
   }
 
   if (stepsList.length >= 2) {
@@ -190,7 +244,8 @@ function extractContrastCards(chunk: TextChunk): LearningCard[] {
   // Pattern: "vs", "versus", "compared with", "different from", "而不是"
   const contrastPatterns = [
     /([^ ，。]*?)\s*(?:vs|versus|compared with|different from)\s*([^ ，。]*)/gi,
-    /([^，。]*?)(?:而不是|区别是|对比于)([^，。]*)/g
+    /([^，。]*?)(?:而不是|区别是|对比于|有明显区别|有很大区别|有很大的区别)([^，。]*)/g,
+    /([^，。]*?)和([^，。]*?)(?:有|存在)?(?:明显|显著|很大)?区别/g
   ]
 
   for (const pattern of contrastPatterns) {
@@ -222,6 +277,32 @@ function extractContrastCards(chunk: TextChunk): LearningCard[] {
     }
   }
 
+  if (cards.length === 0) {
+    const pairMatch = text.match(/([^，。]*?)和([^，。]*?)(?:有|存在)?(?:明显|显著|很大)?区别/)
+    if (pairMatch && pairMatch[1] && pairMatch[2]) {
+      const itemA = pairMatch[1].trim()
+      const itemB = pairMatch[2].trim()
+      if (itemA.length > 1 && itemB.length > 1) {
+        cards.push({
+          id: generateId(),
+          sourceId: chunk.id,
+          type: 'contrast',
+          front: `${itemA}和${itemB}有什么区别？`,
+          back: text.substring(0, 150),
+          glassesText: `${itemA} vs ${itemB}`,
+          prompt: `请说出${itemA}和${itemB}最关键的区别。`,
+          sourceExcerpt: text.substring(0, 150),
+          tags: ['contrast', 'comparison', itemA, itemB],
+          difficulty: 2,
+          qualityScore: 0,
+          qualityWarnings: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        })
+      }
+    }
+  }
+
   return cards
 }
 
@@ -234,7 +315,7 @@ function extractExampleCards(chunk: TextChunk): LearningCard[] {
 
   // Pattern: "例如", "比如", "举例", "for example", "such as", "e.g."
   const examplePatterns = [
-    /(?:例如|比如|举例|如|譬如)([^，。？！]*)/g,
+    /(?:例如|比如说|比如|举个例子|for example|such as|e\.g\.)([^，。？！]*)/g,
     /(?:for example|such as|e\.g\.|example:)\s*([^.!?]+)/gi
   ]
 

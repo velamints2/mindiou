@@ -1014,14 +1014,13 @@ async function ingestLearningIncrement(): Promise<void> {
     return;
   }
   ingestButton.disabled = true;
-  captureStatusEl.textContent = "Compiling learning increment...";
+  captureStatusEl.textContent = "Capturing practice evidence...";
   try {
     const payload = await apiPost<{
       ok: boolean;
+      status: string;
       atoms: KnowledgeAtom[];
       cards: LearningCard[];
-      fallback?: boolean;
-      error?: string;
       today: SpiralDashboard;
     }>("/v1/events/codex", {
       source: captureSourceEl.value,
@@ -1030,13 +1029,10 @@ async function ingestLearningIncrement(): Promise<void> {
       rawText,
       retainRaw: retainSourceEl.checked
     });
-    applyDashboard(payload.today, true);
-    const fallbackNote = payload.fallback ? ` Fallback: ${payload.error || "AI unavailable"}.` : "";
-    captureStatusEl.textContent = payload.atoms.length
-      ? `Created ${payload.atoms.length} knowledge atom${payload.atoms.length === 1 ? "" : "s"}.`
-      : "No reusable learning increment found. No card was created.";
-    captureStatusEl.textContent += fallbackNote;
-    if (payload.cards.length) await renderGlasses(true);
+    applyDashboard(payload.today, false);
+    captureStatusEl.textContent = payload.status === "captured"
+      ? "Practice captured. Run a desktop checkpoint before any learning card is created."
+      : "Practice capture completed.";
   } catch (error) {
     captureStatusEl.textContent = error instanceof Error ? error.message : "Compile failed";
   } finally {

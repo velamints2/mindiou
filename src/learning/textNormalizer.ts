@@ -70,11 +70,18 @@ export function normalizeText(rawText: string): NormalizedText {
   // Normalize spaces: remove trailing/leading whitespace on each line
   text = text
     .split('\n')
-    .map(line => line
-      .replace(/^\s+|\s+$/g, '')
-      .replace(/^#{1,6}\s*/, '')
-      .replace(/^[-*•]\s+/, '')
-    )
+    .map(line => {
+      const trimmed = line.replace(/^\s+|\s+$/g, '')
+      if (!trimmed) return ''
+
+      // Drop heading-only lines entirely so markdown structure does not leak
+      // into learning card concept names.
+      if (/^#{1,6}\s+/.test(trimmed)) {
+        return ''
+      }
+
+      return trimmed.replace(/^[-*•]\s+/, '')
+    })
     .filter(line => line.length > 0)
     .join('\n')
 

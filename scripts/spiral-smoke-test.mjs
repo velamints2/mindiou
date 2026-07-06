@@ -60,26 +60,55 @@ try {
     })
   });
 
-  if (ingest.atoms.length < 1 || ingest.atoms.length > 3) {
-    throw new Error(`Expected 1-3 atoms, received ${ingest.atoms.length}`);
+  if (ingest.status !== "captured") throw new Error("Codex event was not captured");
+  if (ingest.atoms.length || ingest.debts.length || ingest.cards.length) {
+    throw new Error("Ingestion created formal learning assets before human review");
   }
-  if (ingest.debts.length !== ingest.atoms.length) {
-    throw new Error("Each new atom must create one learning debt");
+
+  const checkpoint = await json("/api/spiral/checkpoint", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId: "/tmp/spiral-g2" })
+  });
+  if (checkpoint.candidates.length !== 1) {
+    throw new Error(`Expected one candidate, received ${checkpoint.candidates.length}`);
   }
-  if (!ingest.debts.every(debt => debt.debtScore >= 0 && debt.debtScore <= 100 && debt.microExercise)) {
-    throw new Error("Learning debt is missing score or no-AI exercise");
+  const candidate = checkpoint.candidates[0];
+  if (candidate.status !== "pending" || candidate.researchMode !== "stub") {
+    throw new Error("Checkpoint did not create a pending candidate with labeled stub research");
   }
-  if (!ingest.cards.every(card => card.sourceEventId === "smoke-event-1" && card.projectId === "/tmp/spiral-g2")) {
-    throw new Error("Generated cards lost source traceability");
+  if (Object.values(candidate.gateEvidence || {}).some(value => !value)) {
+    throw new Error("Candidate is missing learning-value gate evidence");
   }
-  if (!ingest.cards.every(card => {
-    const atom = ingest.atoms.find(item => item.id === card.knowledgeAtomId);
-    return atom && card.front === atom.concept && card.prompt === atom.recallQuestion;
-  })) {
-    throw new Error("Generated cards must use concept as front and recall question as prompt");
+
+  const duplicateCheckpoint = await json("/api/spiral/checkpoint", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId: "/tmp/spiral-g2" })
+  });
+  if (duplicateCheckpoint.candidates.length !== 0) {
+    throw new Error("Unchanged evidence created a duplicate candidate");
   }
-  if (ingest.cards.some(card => /Goal:|request worked|Access-Control-Allow-Origin/i.test(card.prompt))) {
-    throw new Error("Raw source context leaked into a learning-card prompt");
+
+  const rejected = await json(`/api/spiral/candidates/${candidate.id}/decision`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision: "rejected" })
+  });
+  if (rejected.path || rejected.cards.length) {
+    throw new Error("Rejected candidate created formal learning assets");
+  }
+
+  const accepted = await json(`/api/spiral/candidates/${candidate.id}/decision`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision: "accepted" })
+  });
+  if (accepted.path?.cardIds.length !== 5 || accepted.cards.length !== 5) {
+    throw new Error("Accepted candidate did not create one five-step learning path");
+  }
+  if (accepted.cards.some((card, index) => card.pathOrder !== index || card.pathId !== accepted.path.id)) {
+    throw new Error("Learning path cards lost their required order or path identity");
   }
 
   const shortSession = await json("/api/g2/session?duration=15");
@@ -109,9 +138,9 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    atoms: ingest.atoms.length,
-    debts: ingest.debts.length,
-    cards: ingest.cards.length,
+    candidateId: candidate.id,
+    pathId: accepted.path.id,
+    cards: accepted.cards.length,
     shortSessionCards: shortSession.session.cardCount,
     longSessionCards: longSession.session.cardCount,
     reviewedCardId: next.card.id,

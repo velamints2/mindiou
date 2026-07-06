@@ -494,6 +494,87 @@ async function extractKnowledgeAtoms(text, context = {}) {
   }
 }
 
+async function extractCapabilityCandidate(text, context = {}) {
+  const fallback = () => {
+    const extraction = fallbackKnowledgeExtraction(text);
+    const atom = extraction.atoms[0];
+    if (!atom) return { summary: extraction.summary, candidate: null };
+    return {
+      summary: extraction.summary,
+      candidate: {
+        ...atom,
+        gate_evidence: {
+          ai_judgment: atom.ai_task,
+          missing_explain_or_verify: "The practice contains no independent explanation or completeness check from the user.",
+          project_impact: `The judgment affects the project outcome through ${atom.skill_gap}.`,
+          transfer_value: `${atom.concept} is reusable in similar AI-assisted work.`,
+          not_low_value: "This is a reusable principle or verification boundary, not a mechanical edit."
+        }
+      }
+    };
+  };
+  const result = await chatJson([
+    {
+      role: "system",
+      content: [
+        learningCoachSystemPrompt,
+        "You analyze one captured AI-assisted practice event before any learning card is created.",
+        "Return zero or one candidate capability gap. Do not create cards.",
+        "A candidate is allowed only when all five conditions are supported by the event:",
+        "1 AI materially performed or influenced a key judgment;",
+        "2 the user did not demonstrate the ability to explain or verify that judgment;",
+        "3 the judgment affects outcome, risk, or technical direction;",
+        "4 the principle transfers to future AI-assisted practice;",
+        "5 it is not a one-off mechanical implementation detail.",
+        "Prefer gaps that help the user explain a failure or verify whether an AI fix is complete.",
+        "If any condition lacks evidence, return candidate:null.",
+        "Return JSON only:",
+        "{\"summary\":\"\",\"candidate\":{\"concept\":\"\",\"plain_explanation\":\"\",\"answer\":\"\",\"recall_question\":\"\",\"ai_task\":\"\",\"skill_gap\":\"\",\"micro_exercise\":\"\",\"confidence\":0.0,\"debt_score\":0,\"gate_evidence\":{\"ai_judgment\":\"\",\"missing_explain_or_verify\":\"\",\"project_impact\":\"\",\"transfer_value\":\"\",\"not_low_value\":\"\"}}}.",
+        "Keep every field concise and grounded in the captured event. Prefer Chinese when the event is Chinese."
+      ].join(" ")
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        source: context.source || "codex",
+        projectId: context.projectId || "general",
+        practiceEvent: String(text).slice(0, 30000)
+      })
+    }
+  ], fallback);
+  const candidate = result.candidate;
+  const gate = candidate?.gate_evidence || candidate?.gateEvidence || {};
+  const normalizedCandidate = candidate ? {
+    concept: clean(candidate.concept).slice(0, 100),
+    plain_explanation: clean(candidate.plain_explanation || candidate.plainExplanation).slice(0, 500),
+    answer: clean(candidate.answer || candidate.plain_explanation || candidate.plainExplanation).slice(0, 500),
+    recall_question: clean(candidate.recall_question || candidate.recallQuestion).slice(0, 240),
+    ai_task: clean(candidate.ai_task || candidate.aiTask).slice(0, 240),
+    skill_gap: clean(candidate.skill_gap || candidate.skillGap || candidate.concept).slice(0, 160),
+    micro_exercise: clean(candidate.micro_exercise || candidate.microExercise).slice(0, 240),
+    confidence: Math.max(0, Math.min(1, Number(candidate.confidence ?? 0.7))),
+    debt_score: computedDebtScore(candidate),
+    gate_evidence: {
+      aiJudgment: clean(gate.ai_judgment || gate.aiJudgment).slice(0, 300),
+      missingExplainOrVerify: clean(gate.missing_explain_or_verify || gate.missingExplainOrVerify).slice(0, 300),
+      projectImpact: clean(gate.project_impact || gate.projectImpact).slice(0, 300),
+      transferValue: clean(gate.transfer_value || gate.transferValue).slice(0, 300),
+      notLowValue: clean(gate.not_low_value || gate.notLowValue).slice(0, 300)
+    }
+  } : null;
+  const hasAllEvidence = normalizedCandidate
+    && normalizedCandidate.concept
+    && normalizedCandidate.recall_question
+    && Object.values(normalizedCandidate.gate_evidence).every(Boolean);
+  return {
+    summary: clean(result.summary || fallback().summary).slice(0, 300),
+    candidate: hasAllEvidence ? normalizedCandidate : null,
+    ...(result.__fallback
+      ? { fallback: true, error: result.__fallbackError || "AI unavailable" }
+      : {})
+  };
+}
+
 async function ingestSpiralEvent(payload) {
   const rawText = String(payload.rawText || payload.text || "").trim();
   if (!rawText) return { ok: false, error: "Missing rawText" };
@@ -511,18 +592,106 @@ async function ingestSpiralEvent(payload) {
     retainRaw: payload.retainRaw !== false,
     privacyTags: payload.privacyTags
   });
-  const extraction = await extractKnowledgeAtoms(rawText, { source, projectId });
-  const saved = await spiralStore.saveExtraction(event.id, extraction);
   return {
     ok: true,
     event,
-    summary: extraction.summary,
-    atoms: saved.atoms,
-    debts: saved.debts,
-    cards: saved.cards,
-    fallback: Boolean(extraction.fallback),
-    error: extraction.error,
+    status: "captured",
+    atoms: [],
+    debts: [],
+    cards: [],
     today: spiralStore.dashboard()
+  };
+}
+
+function researchStubFor(atom) {
+  const networkTopic = /cors|whitelist|network|webview|api|白名单|网络/i.test(
+    `${atom.concept} ${atom.plain_explanation} ${atom.personal_context}`
+  );
+  if (networkTopic) {
+    return {
+      mode: "stub",
+      label: "Curated research stub for the vertical slice",
+      facts: [
+        {
+          text: "CORS controls whether browser or WebView code may read a cross-origin response.",
+          source: "MDN Web Docs: Cross-Origin Resource Sharing"
+        },
+        {
+          text: "An application network allowlist and CORS act at different boundaries; satisfying one does not prove device-to-service reachability.",
+          source: "Learn Coach G2 verified project evidence"
+        }
+      ],
+      findings: [
+        {
+          text: "A complete diagnosis separates request permission, network reachability, server response, and glasses rendering.",
+          kind: "inference"
+        }
+      ],
+      verification: "Verify the WebView request, server permission, device reachability, response body, and final glasses rendering separately."
+    };
+  }
+  return {
+    mode: "stub",
+    label: "Curated research stub for the vertical slice",
+    facts: [
+      {
+        text: atom.plain_explanation,
+        source: "Captured Learn Coach practice evidence"
+      }
+    ],
+    findings: [
+      {
+        text: `Understanding ${atom.concept} should improve explanation and verification of the AI-assisted decision.`,
+        kind: "inference"
+      }
+    ],
+    verification: `State the expected result and the observable evidence that would prove ${atom.concept} was handled completely.`
+  };
+}
+
+async function runManualCheckpoint(payload) {
+  const pending = spiralStore.pendingEvents(payload.projectId);
+  const event = payload.eventId
+    ? pending.find(item => item.id === payload.eventId)
+    : pending[0];
+  if (!event) {
+    return { ok: true, processed: 0, candidates: [], message: "No unprocessed practice evidence." };
+  }
+  const text = event.analysisText || event.rawText || event.excerpt;
+  const extraction = await extractCapabilityCandidate(text, { source: event.source, projectId: event.projectId });
+  const atom = extraction.candidate;
+  if (!atom) {
+    await spiralStore.markCheckpointed(event.id, extraction.summary || "No qualified capability gap.");
+    return {
+      ok: true,
+      processed: 1,
+      candidates: [],
+      fallback: Boolean(extraction.fallback),
+      message: "No practice detail passed the learning-value gate."
+    };
+  }
+  const saved = await spiralStore.saveCandidate({
+    eventId: event.id,
+    concept: atom.concept,
+    summary: extraction.summary,
+    explanation: atom.plain_explanation,
+    answer: atom.answer,
+    recallQuestion: atom.recall_question,
+    aiTask: atom.ai_task,
+    skillGap: atom.skill_gap,
+    microExercise: atom.micro_exercise,
+    debtScore: atom.debt_score,
+    confidence: atom.confidence,
+    gateEvidence: atom.gate_evidence,
+    research: researchStubFor(atom),
+    researchMode: "stub"
+  });
+  return {
+    ok: true,
+    processed: 1,
+    candidates: [saved.candidate],
+    created: saved.created,
+    fallback: Boolean(extraction.fallback)
   };
 }
 
@@ -850,6 +1019,13 @@ const server = createServer(async (req, res) => {
       jsonResponse(res, 200, { ok: true, reviews: dashboard.reviews, report: dashboard.report });
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/spiral/candidates") {
+      jsonResponse(res, 200, {
+        ok: true,
+        candidates: spiralStore.listCandidates(url.searchParams.get("status") || "")
+      });
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/v1/review/next") {
       const mode = url.searchParams.get("mode") || "learn";
       if (mode !== "learn") {
@@ -915,6 +1091,19 @@ const server = createServer(async (req, res) => {
     if (["/v1/events/codex", "/api/spiral/ingest", "/api/spiral/capture"].includes(url.pathname)) {
       const result = await ingestSpiralEvent(payload);
       jsonResponse(res, result.ok ? 200 : 400, result);
+      return;
+    }
+    if (url.pathname === "/api/spiral/checkpoint") {
+      jsonResponse(res, 200, await runManualCheckpoint(payload));
+      return;
+    }
+    const candidateDecisionMatch = url.pathname.match(/^\/api\/spiral\/candidates\/([^/]+)\/decision$/);
+    if (candidateDecisionMatch) {
+      const result = await spiralStore.decideCandidate(
+        decodeURIComponent(candidateDecisionMatch[1]),
+        payload.decision
+      );
+      jsonResponse(res, 200, { ok: true, ...result, today: spiralStore.dashboard() });
       return;
     }
     if (["/v1/reviews", "/api/spiral/review"].includes(url.pathname)) {

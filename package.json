@@ -12,7 +12,7 @@
     "preview": "vite preview --host 0.0.0.0 --port 4175",
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "test:cards": "vitest run src/learning/localCardGenerator.test.ts",
+    "test:cards": "vitest run src/learning/*.test.ts",
     "test:desktop": "npm run check && npm run test:cards",
     "test:voice": "node scripts/voice-smoke-test.mjs",
     "test:spiral": "node scripts/spiral-smoke-test.mjs",
@@ -29,12 +29,12 @@
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.1.13",
+    "@types/node": "^22.13.1",
     "concurrently": "^9.0.1",
-    "electron": "^32.1.2",
+    "electron": "^32.3.3",
     "electron-is-dev": "^3.0.1",
     "pngjs": "^7.0.0",
     "qrcode": "^1.5.4",
-    "@types/node": "^22.13.1",
     "vitest": "^3.2.4"
   }
 }

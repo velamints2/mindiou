@@ -1,31 +1,28 @@
 # Learn Coach
 
-Learn Coach is the Even G2 learning surface for Spiral, a local-first cognitive
-compiler. Spiral turns useful learning increments from Codex work into
-source-linked knowledge atoms, active-recall cards, and a persisted review
-queue. See [SPIRAL_ARCHITECTURE.md](./SPIRAL_ARCHITECTURE.md).
+Learn Coach is now focused on a local-first understanding coach workflow for
+desktop. The current MVP converts raw source text into small learning cards that
+help the user explain, compare, restate, and recall content in their own words.
 
-The repository also contains a Rokid AIUI client under
-`platforms/rokid-aiui/`. Both glasses clients use the same Spiral knowledge
-atoms, learning debts, AI tutor, and review scheduler while keeping device
-rendering and input adapters separate.
+The current priority is not flashcards for memorization. It is a local learning
+tool that turns mixed source material into cards that are stable enough to
+preview, edit, save into a deck, and later review in a lightweight session.
+
+See:
+
+- [CARD_GENERATION.md](./CARD_GENERATION.md)
+- [DESKTOP_APP.md](./DESKTOP_APP.md)
 
 ## What it does
 
-- Shows one concept, question, status, or next step at a time on G2.
-- Keeps the phone WebView focused on import, settings, and short controls.
-- Switches cards from voice commands such as `next`, `下一个`, `会了`, `跟读`, and `提问`.
-- Uses Even Hub SDK startup containers, text upgrades, list events, and MIC events.
-- Accepts allowlisted, locally redacted Codex events.
-- Compiles each event into zero to three deduplicated knowledge atoms.
-- Creates a scored AI learning debt and no-AI micro exercise for each new atom.
-- Preserves project context and source event IDs on every generated card.
-- Records understood, partial, incorrect, and skipped review outcomes.
-- Builds deterministic 15-second, 1-minute, and 3-minute G2 review sessions.
-- Converts pasted text or files into direct flashcards with an optional AI API.
-- Plans learning units from a subject and the learner's current level.
-- Evaluates answers using Feynman-style questions and Socratic follow-up.
-- Runs without AI keys using local fallback parsing and coaching.
+- Accepts pasted text or `.txt` / `.md` files.
+- Normalizes and chunks text locally.
+- Generates candidate cards locally with no AI API.
+- Scores card quality and keeps warnings visible for review.
+- Lets the user edit, delete, keep, and export cards.
+- Saves confirmed cards into local decks.
+- Opens a minimal session view from saved decks.
+- Keeps the desktop MVP focused on understanding, not memorization.
 
 The longer-term direction is a daily learning reflection system, not a larger
 flashcard interface. See:
@@ -40,64 +37,30 @@ flashcard interface. See:
 ```bash
 cd evenhub-g2-learning
 npm install
-npm run api
-npm run test:spiral
-npm run test:voice
-npm run dev
+npm run test:cards
+npm run test:desktop
+npm run dev:desktop
 ```
 
-Open:
+`npm run dev:desktop` opens a local Electron window backed by the Vite dev
+server.
 
-```text
-http://localhost:5175/?api=http://localhost:8793
+## Testing
+
+```bash
+npm run test:cards
+npm run test:desktop
 ```
 
-Put local API configuration in the ignored `.env.local` file:
+The generator tests run fully locally and do not require any API keys.
 
-```text
-OPENAI_API_KEY=your_key_here
-OPENAI_MODEL=gpt-4o-mini
-OPENAI_STT_MODEL=gpt-4o-mini-transcribe
-OPENAI_STT_PROMPT=Learn Coach vocabulary study. Commands include 下一张, 下一个, 重复, 提问, 会了, next, repeat, ask me, got it.
-OPENAI_BASE_URL=https://api.openai.com/v1
-LEARNING_API_TOKEN=
-LEARNING_STORE_PATH=tmp/spiral-store.json
-SPIRAL_PROJECT_ALLOWLIST=/absolute/path/to/allowed/project
-```
+## Desktop notes
 
-Never put the OpenAI key in the EHPK, phone Settings, Developer Portal, or
-committed source. `npm run api` automatically reads `.env.local` and enables
-Node's environment-proxy support for networks that require `HTTP_PROXY` or
-`HTTPS_PROXY`. For the
-current REST transcription and structured tutor implementation,
-`gpt-4o-mini-transcribe` and `gpt-4o-mini` are the conservative defaults.
+More detailed desktop setup and constraints are documented in
+[DESKTOP_APP.md](./DESKTOP_APP.md).
 
-Then open:
-
-```text
-http://localhost:5175/?api=http://localhost:8793&token=...
-```
-
-## Even G2 integration
-
-The plugin follows the current Even Hub WebView pattern:
-
-1. Wait for `waitForEvenAppBridge()`.
-2. Call `createStartUpPageContainer(...)`.
-3. Render one large concept image and one short event-capturing text footer.
-4. Update the footer with `textContainerUpgrade(...)`.
-5. Update the concept image with serialized `updateImageRawData(...)` calls.
-6. Treat swipe up as previous and swipe down as next.
-7. Ignore tap until click events can be distinguished reliably from unsolicited system events.
-8. Start voice with `audioControl(true, AudioInputSource.Glasses)`.
-9. Send MIC PCM to `/api/learn/transcribe` when a backend is configured.
-
-In a normal browser, it uses Web Speech API when available and keeps the G2 bridge in `mock` mode.
-
-## API
-
-- `POST /v1/events/codex`: compiles a filtered Codex event into zero to three atoms.
-- `GET /v1/review/next?mode=learn`: returns the highest-priority due card.
+More detailed card generation rules are documented in
+[CARD_GENERATION.md](./CARD_GENERATION.md).
 - `POST /v1/reviews`: records a review outcome and schedules the card.
 - `GET /api/spiral/today`: returns today's cards, atoms, metrics, and review report.
 - `GET /api/g2/session?duration=15|60|180`: returns a time-bounded due-card queue.

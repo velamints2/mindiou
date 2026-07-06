@@ -31,7 +31,9 @@ function isChineseText(text: string): boolean {
  */
 function splitChineseSentences(text: string): string[] {
   // Split by Chinese punctuation: 。！？；，、
-  const sentences = text.split(/(?<=[。！？；，、])\s*/)
+  const sentences = text
+    .replace(/([：:])\s*/g, '$1 ')
+    .split(/(?<=[。！？；，、:：])\s*/)
   return sentences.filter(s => s.length > 0)
 }
 

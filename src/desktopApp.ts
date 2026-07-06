@@ -4,7 +4,26 @@ import { chunkText } from './learning/textChunker'
 import type { LearningCard, LearningDeck, LearningCardType } from './learning/cardTypes'
 import './styles.css'
 
-type Tab = 'sources' | 'cards' | 'session'
+type Tab = 'review' | 'sources' | 'cards' | 'session'
+
+type LearningCandidate = {
+  id: string
+  projectId: string
+  concept: string
+  summary: string
+  explanation: string
+  skillGap: string
+  debtScore: number
+  status: string
+  gateEvidence: Record<string, string>
+  research?: {
+    label?: string
+    mode?: string
+    facts?: Array<{ text: string; source: string }>
+    findings?: Array<{ text: string; kind?: string }>
+    verification?: string
+  }
+}
 
 type AppState = {
   rawText: string
@@ -17,6 +36,8 @@ type AppState = {
   sortMode: 'quality' | 'updated'
   sessionIndex: number
   status: string
+  reviewProject: string
+  candidates: LearningCandidate[]
 }
 
 const STORAGE_KEYS = {
@@ -24,7 +45,8 @@ const STORAGE_KEYS = {
   cards: 'learn-coach-cards',
   decks: 'learn-coach-decks',
   activeDeckId: 'learn-coach-active-deck',
-  sessionIndex: 'learn-coach-session-index'
+  sessionIndex: 'learn-coach-session-index',
+  reviewProject: 'learn-coach-review-project'
 }
 
 const DEFAULT_STATE: AppState = {
@@ -33,11 +55,13 @@ const DEFAULT_STATE: AppState = {
   cards: [],
   decks: [],
   activeDeckId: null,
-  activeTab: 'sources',
+  activeTab: 'review',
   selectedType: 'all',
   sortMode: 'quality',
   sessionIndex: 0,
-  status: 'Ready'
+  status: 'Ready',
+  reviewProject: '',
+  candidates: []
 }
 
 const state: AppState = loadState()
@@ -52,13 +76,16 @@ function loadState(): AppState {
   const decks = readJson<LearningDeck[]>(STORAGE_KEYS.decks, [])
   const activeDeckId = localStorage.getItem(STORAGE_KEYS.activeDeckId)
   const sessionIndex = Number(localStorage.getItem(STORAGE_KEYS.sessionIndex) ?? '0')
+  const reviewProject = localStorage.getItem(STORAGE_KEYS.reviewProject) ?? ''
   return {
     ...DEFAULT_STATE,
     rawText,
     cards,
     decks,
     activeDeckId,
-    sessionIndex: Number.isFinite(sessionIndex) ? sessionIndex : 0
+    sessionIndex: Number.isFinite(sessionIndex) ? sessionIndex : 0,
+    reviewProject,
+    candidates: []
   }
 }
 
@@ -77,6 +104,30 @@ function saveState() {
   localStorage.setItem(STORAGE_KEYS.decks, JSON.stringify(state.decks))
   if (state.activeDeckId) localStorage.setItem(STORAGE_KEYS.activeDeckId, state.activeDeckId)
   localStorage.setItem(STORAGE_KEYS.sessionIndex, String(state.sessionIndex))
+  localStorage.setItem(STORAGE_KEYS.reviewProject, state.reviewProject)
+}
+
+const desktopParams = new URLSearchParams(location.search)
+const apiBase = desktopParams.get('api') || 'http://localhost:8793'
+const desktopApiToken = desktopParams.get('token') || localStorage.getItem('g2LearningApiToken') || ''
+
+async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(new URL(path, apiBase), {
+    ...options,
+    headers: {
+      'content-type': 'application/json',
+      ...(desktopApiToken ? { authorization: `Bearer ${desktopApiToken}` } : {}),
+      ...(options.headers || {})
+    }
+  })
+  const payload = await response.json() as T & { error?: string }
+  if (!response.ok) throw new Error(payload.error || `Learning API HTTP ${response.status}`)
+  return payload
+}
+
+async function refreshCandidates() {
+  const payload = await apiRequest<{ candidates: LearningCandidate[] }>('/api/spiral/candidates')
+  state.candidates = payload.candidates
 }
 
 function now() {
@@ -128,6 +179,7 @@ function render() {
           <p class="subtitle">原文 → 本地清洗 → 本地切块 → 候选卡片 → 质量评分 → 预览/编辑 → 保存 Deck → 学习会话</p>
         </div>
         <div class="topbar-actions">
+          <button class="tab ${state.activeTab === 'review' ? 'is-active' : ''}" data-tab="review">Review</button>
           <button class="tab ${state.activeTab === 'sources' ? 'is-active' : ''}" data-tab="sources">Sources</button>
           <button class="tab ${state.activeTab === 'cards' ? 'is-active' : ''}" data-tab="cards">Cards</button>
           <button class="tab ${state.activeTab === 'session' ? 'is-active' : ''}" data-tab="session">Session</button>
@@ -137,6 +189,25 @@ function render() {
       <section class="desktop-status">${escapeHtml(state.status)}</section>
 
       <section class="desktop-grid">
+        <section class="panel ${state.activeTab === 'review' ? '' : 'hidden'}" data-panel="review">
+          <div class="panel-heading">
+            <div>
+              <h2>Practice Review</h2>
+              <p class="muted">Manual vertical-slice checkpoint. Cards are generated only after acceptance.</p>
+            </div>
+            <button id="refresh-candidates-btn">Refresh</button>
+          </div>
+          <div class="row">
+            <label class="field">Connected project
+              <input id="review-project" value="${escapeHtml(state.reviewProject)}" placeholder="/path/to/connected/project" />
+            </label>
+            <button id="checkpoint-btn" class="primary">Run Checkpoint</button>
+          </div>
+          <div class="card-list">
+            ${state.candidates.map(renderCandidate).join('') || '<p class="muted">No candidates yet. Capture a Codex event, then run a checkpoint.</p>'}
+          </div>
+        </section>
+
         <section class="panel ${state.activeTab === 'sources' ? '' : 'hidden'}" data-panel="sources">
           <div class="panel-heading">
             <h2>Sources</h2>
@@ -213,6 +284,34 @@ function render() {
   bindEvents()
 }
 
+function renderCandidate(candidate: LearningCandidate) {
+  const facts = candidate.research?.facts ?? []
+  const findings = candidate.research?.findings ?? []
+  const gates = Object.entries(candidate.gateEvidence || {})
+  return `
+    <article class="card-item" data-candidate-id="${candidate.id}">
+      <div class="card-header">
+        <strong>${escapeHtml(candidate.concept)}</strong>
+        <span class="score">${Math.round(candidate.debtScore)}</span>
+      </div>
+      <p>${escapeHtml(candidate.summary || candidate.explanation)}</p>
+      <p><strong>Why learn:</strong> ${escapeHtml(candidate.skillGap)}</p>
+      <div class="excerpt-list">
+        ${gates.map(([name, value]) => `<article class="excerpt"><strong>${escapeHtml(name)}</strong><p>${escapeHtml(value)}</p></article>`).join('')}
+      </div>
+      <p class="kicker">${escapeHtml(candidate.research?.label || 'No research')}</p>
+      ${facts.map(fact => `<p><strong>Fact:</strong> ${escapeHtml(fact.text)} <small>${escapeHtml(fact.source)}</small></p>`).join('')}
+      ${findings.map(finding => `<p><strong>${escapeHtml(finding.kind || 'Inference')}:</strong> ${escapeHtml(finding.text)}</p>`).join('')}
+      ${candidate.research?.verification ? `<p><strong>Verify:</strong> ${escapeHtml(candidate.research.verification)}</p>` : ''}
+      <div class="row">
+        <button data-candidate-action="reject" ${candidate.status !== 'pending' ? 'disabled' : ''}>Reject</button>
+        <button class="primary" data-candidate-action="accept" ${candidate.status !== 'pending' ? 'disabled' : ''}>Accept</button>
+        <span class="muted">${escapeHtml(candidate.status)}</span>
+      </div>
+    </article>
+  `
+}
+
 function renderCard(card: LearningCard) {
   const warnings = card.qualityWarnings.length ? `<div class="warnings">${card.qualityWarnings.map(w => `<span>${escapeHtml(w)}</span>`).join('')}</div>` : ''
   return `
@@ -238,8 +337,78 @@ function renderCard(card: LearningCard) {
 
 function bindEvents() {
   document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(btn => {
-    btn.onclick = () => {
+    btn.onclick = async () => {
       state.activeTab = btn.dataset.tab as Tab
+      if (state.activeTab === 'review') {
+        try {
+          await refreshCandidates()
+        } catch (error) {
+          state.status = error instanceof Error ? error.message : 'Could not load candidates'
+        }
+      }
+      render()
+    }
+  })
+
+  const reviewProject = document.querySelector<HTMLInputElement>('#review-project')
+  if (reviewProject) {
+    reviewProject.oninput = () => {
+      state.reviewProject = reviewProject.value
+      saveState()
+    }
+  }
+
+  const refreshCandidatesBtn = document.querySelector<HTMLButtonElement>('#refresh-candidates-btn')
+  if (refreshCandidatesBtn) {
+    refreshCandidatesBtn.onclick = async () => {
+      try {
+        await refreshCandidates()
+        state.status = `Loaded ${state.candidates.length} candidate${state.candidates.length === 1 ? '' : 's'}`
+      } catch (error) {
+        state.status = error instanceof Error ? error.message : 'Could not load candidates'
+      }
+      render()
+    }
+  }
+
+  const checkpointBtn = document.querySelector<HTMLButtonElement>('#checkpoint-btn')
+  if (checkpointBtn) {
+    checkpointBtn.onclick = async () => {
+      state.status = 'Running manual checkpoint...'
+      render()
+      try {
+        const payload = await apiRequest<{ candidates: LearningCandidate[]; message?: string }>('/api/spiral/checkpoint', {
+          method: 'POST',
+          body: JSON.stringify({ projectId: state.reviewProject })
+        })
+        await refreshCandidates()
+        state.status = payload.message || `Checkpoint produced ${payload.candidates.length} candidate${payload.candidates.length === 1 ? '' : 's'}`
+      } catch (error) {
+        state.status = error instanceof Error ? error.message : 'Checkpoint failed'
+      }
+      render()
+    }
+  }
+
+  document.querySelectorAll<HTMLButtonElement>('[data-candidate-action]').forEach(button => {
+    button.onclick = async () => {
+      const candidateId = button.closest<HTMLElement>('[data-candidate-id]')?.dataset.candidateId
+      if (!candidateId) return
+      const decision = button.dataset.candidateAction === 'accept' ? 'accepted' : 'rejected'
+      state.status = `${decision === 'accepted' ? 'Accepting' : 'Rejecting'} candidate...`
+      render()
+      try {
+        await apiRequest(`/api/spiral/candidates/${encodeURIComponent(candidateId)}/decision`, {
+          method: 'POST',
+          body: JSON.stringify({ decision })
+        })
+        await refreshCandidates()
+        state.status = decision === 'accepted'
+          ? 'Accepted. Five-step path is now in the G2 learning queue.'
+          : 'Rejected. No learning path was created.'
+      } catch (error) {
+        state.status = error instanceof Error ? error.message : 'Candidate decision failed'
+      }
       render()
     }
   })
@@ -404,3 +573,9 @@ function downloadBlob(blob: Blob, fileName: string) {
 }
 
 render()
+void refreshCandidates()
+  .then(() => render())
+  .catch(error => {
+    state.status = error instanceof Error ? error.message : 'Learning API unavailable'
+    render()
+  })

@@ -64,7 +64,20 @@ try {
       ].join(" ")
     })
   });
-  if (!ingest.cards.length) throw new Error("Rokid smoke ingest created no cards");
+  if (ingest.cards.length) throw new Error("Rokid ingest bypassed candidate review");
+  const checkpoint = await json("/api/spiral/checkpoint", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId: "rokid-learn-coach" })
+  });
+  const candidate = checkpoint.candidates[0];
+  if (!candidate?.id) throw new Error("Rokid smoke checkpoint created no candidate");
+  const accepted = await json(`/api/spiral/candidates/${candidate.id}/decision`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision: "accepted" })
+  });
+  if (accepted.cards.length !== 5) throw new Error("Rokid accepted candidate created no learning path");
 
   const session = await json("/api/rokid/session?duration=60");
   const card = session.session.cards[0];

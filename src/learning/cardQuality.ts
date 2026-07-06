@@ -333,18 +333,20 @@ export function checkCardQuality(card: LearningCard): QualityCheckResult {
         break
       case 'missing_source_excerpt':
       case 'answer_not_grounded':
-        score -= 20
+        score -= 25
         break
       case 'front_too_long':
       case 'back_too_long':
+        score -= 15
+        break
       case 'glasses_text_too_long':
       case 'glasses_text_too_short':
-        score -= 10
+        score -= 12
         break
       case 'too_generic':
       case 'unclear_question':
       case 'duplicate_candidate':
-        score -= 15
+        score -= 22
         break
       case 'too_many_concepts':
         score -= 12
@@ -361,6 +363,10 @@ export function checkCardQuality(card: LearningCard): QualityCheckResult {
   }
   if (card.hint) {
     score += 3
+  }
+
+  if (card.type === 'summary') {
+    score -= 18
   }
 
   // Clamp score
