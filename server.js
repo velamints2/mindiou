@@ -4,6 +4,7 @@ import { createSpiralStore } from "./spiral-store.js";
 import { createMvp0Store } from "./mvp0-store.js";
 import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport } from "./mvp0-report.js";
+import { feynmanFollowUp } from "./mvp0-followup.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -1108,10 +1109,24 @@ const server = createServer(async (req, res) => {
           jsonResponse(res, 400, { ok: false, error: "Missing answer" });
           return;
         }
-        const aiFollowUp =
-          "AI follow-up is not yet available. Review your answer against the card prompt and identify what you might have missed.";
+        const report = mvp0Store.getReport(reportId);
+        const card = report.sections.feynmanCards?.find(item => item.id === cardId);
+        if (!card) {
+          jsonResponse(res, 404, { ok: false, error: `Feynman card not found: ${cardId} in report ${reportId}` });
+          return;
+        }
+        const chatFn = (!openAiApiKey || disableAi) ? null : chatJson;
+        const followUpResult = await feynmanFollowUp(card, answer, chatFn);
+        const aiFollowUp = followUpResult.shouldFollowUp
+          ? followUpResult.followUp
+          : followUpResult.summary;
         const result = await mvp0Store.updateCardAnswer(reportId, cardId, answer, aiFollowUp);
-        jsonResponse(res, 200, { ok: true, card: result.card, shouldFollowUp: true });
+        jsonResponse(res, 200, {
+          ok: true,
+          card: result.card,
+          shouldFollowUp: followUpResult.shouldFollowUp,
+          fallback: (!openAiApiKey || disableAi)
+        });
       } catch (error) {
         jsonResponse(res, 404, { ok: false, error: error.message });
       }

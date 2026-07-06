@@ -159,7 +159,7 @@ describe("MVP-0 API endpoints", () => {
       expect(data.card.userAnswer).toBe("This is my explanation of the concept.");
       expect(data.card.aiFollowUp).toBeTruthy();
       expect(data.card.answeredAt).toBeTruthy();
-      expect(data.shouldFollowUp).toBe(true);
+      expect(data.fallback).toBe(true);
     });
 
     it("returns 400 when answer is missing", async () => {
