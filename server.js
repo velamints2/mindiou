@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
 import crypto from "node:crypto";
 import { createSpiralStore } from "./spiral-store.js";
+import { createMvp0Store } from "./mvp0-store.js";
+import { generateFallbackReport } from "./mvp0-fallback.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -16,9 +18,12 @@ const sttPrompt = process.env.OPENAI_STT_PROMPT || [
   "Preserve English vocabulary terms exactly when possible."
 ].join(" ");
 const learningStorePath = process.env.LEARNING_STORE_PATH || "tmp/spiral-store.json";
+const mvp0StorePath = process.env.MVP0_STORE_PATH || "tmp/mvp0-store.json";
 const eventLog = [];
 const spiralStore = createSpiralStore(learningStorePath);
 await spiralStore.load();
+const mvp0Store = createMvp0Store(mvp0StorePath);
+await mvp0Store.load();
 
 const learningCoachSystemPrompt = [
   "You are Learn Coach, a rigorous but patient AI teacher for smart glasses including Even G2 and Rokid AIUI devices.",
@@ -1049,12 +1054,91 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── MVP-0: cognitive-debt clearance report ──
+
+    if (req.method === "GET" && url.pathname === "/api/mvp0/reports") {
+      jsonResponse(res, 200, { ok: true, reports: mvp0Store.listReports() });
+      return;
+    }
+    const mvp0ReportMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)$/);
+    if (req.method === "GET" && mvp0ReportMatch) {
+      try {
+        const report = mvp0Store.getReport(decodeURIComponent(mvp0ReportMatch[1]));
+        jsonResponse(res, 200, { ok: true, report });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
     if (req.method !== "POST") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
       return;
     }
 
     const payload = parseJson(await readBody(req));
+
+    // ── MVP-0: cognitive-debt clearance report ──
+
+    if (url.pathname === "/api/mvp0/report") {
+      const artifactText = clean(payload.artifactText || "");
+      const artifactType = clean(payload.artifactType || "other");
+      if (!artifactText) {
+        jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
+        return;
+      }
+      const report = generateFallbackReport(artifactText, artifactType);
+      const saved = await mvp0Store.saveReport(report);
+      jsonResponse(res, 200, { ok: true, report: saved, fallback: true });
+      return;
+    }
+
+    const mvp0CardAnswerMatch = url.pathname.match(
+      /^\/api\/mvp0\/reports\/([^/]+)\/cards\/([^/]+)\/answer$/
+    );
+    if (mvp0CardAnswerMatch) {
+      try {
+        const reportId = decodeURIComponent(mvp0CardAnswerMatch[1]);
+        const cardId = decodeURIComponent(mvp0CardAnswerMatch[2]);
+        const answer = clean(payload.answer || "");
+        if (!answer) {
+          jsonResponse(res, 400, { ok: false, error: "Missing answer" });
+          return;
+        }
+        const aiFollowUp =
+          "AI follow-up is not yet available. Review your answer against the card prompt and identify what you might have missed.";
+        const result = await mvp0Store.updateCardAnswer(reportId, cardId, answer, aiFollowUp);
+        jsonResponse(res, 200, { ok: true, card: result.card, shouldFollowUp: true });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    const mvp0CorrectionMatch = url.pathname.match(
+      /^\/api\/mvp0\/reports\/([^/]+)\/corrections$/
+    );
+    if (mvp0CorrectionMatch) {
+      try {
+        const reportId = decodeURIComponent(mvp0CorrectionMatch[1]);
+        const result = await mvp0Store.addCorrection(reportId, {
+          target: payload.target,
+          targetId: payload.targetId,
+          originalValue: payload.originalValue,
+          correctedValue: payload.correctedValue,
+          reason: payload.reason
+        });
+        jsonResponse(res, 200, {
+          ok: true,
+          correction: result.correction,
+          report: result.report
+        });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
     if (url.pathname === "/api/learn/events") {
       jsonResponse(res, 200, { ok: true, event: recordEvent(payload) });
       return;
