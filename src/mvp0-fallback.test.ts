@@ -177,18 +177,18 @@ describe("generateFallbackReport", () => {
 });
 
 describe("normalizeReport", () => {
-  it("fills missing sections with empty arrays", () => {
+  it("fills missing sections with empty arrays (gaps and cards get padded)", () => {
     const raw = { id: "test-1" };
     const normalized = normalizeReport(raw);
     expect(normalized.sections.aiCompleted).toEqual([]);
     expect(normalized.sections.userContributed).toEqual([]);
-    expect(normalized.sections.dangerousGaps).toEqual([]);
+    expect(normalized.sections.dangerousGaps).toHaveLength(5);
     expect(normalized.sections.cognitiveStructure.facts).toEqual([]);
     expect(normalized.sections.cognitiveStructure.hypotheses).toEqual([]);
     expect(normalized.sections.cognitiveStructure.questions).toEqual([]);
     expect(normalized.sections.cognitiveStructure.decisions).toEqual([]);
     expect(normalized.sections.cognitiveStructure.tradeoffs).toEqual([]);
-    expect(normalized.sections.feynmanCards).toEqual([]);
+    expect(normalized.sections.feynmanCards).toHaveLength(3);
     expect(normalized.sections.nextActions).toEqual([]);
   });
 
@@ -250,7 +250,12 @@ describe("normalizeReport", () => {
       }
     };
     const normalized = normalizeReport(raw);
-    expect(normalized.sections.dangerousGaps.map(g => g.rank)).toEqual([1, 2, 3]);
+    // 3 input gaps are sorted first, then padded to 5
+    expect(normalized.sections.dangerousGaps).toHaveLength(5);
+    expect(normalized.sections.dangerousGaps.map(g => g.rank)).toEqual([1, 2, 3, 4, 5]);
+    expect(normalized.sections.dangerousGaps[0].gap).toBe("first");
+    expect(normalized.sections.dangerousGaps[1].gap).toBe("second");
+    expect(normalized.sections.dangerousGaps[2].gap).toBe("third");
   });
 
   it("assigns sequential ranks when missing", () => {
@@ -390,5 +395,65 @@ describe("normalizeReport", () => {
     expect(renormalized.sections.dangerousGaps).toHaveLength(5);
     expect(renormalized.sections.feynmanCards.length).toBeGreaterThanOrEqual(3);
     expect(renormalized.status).toBe("generated");
+  });
+
+  it("enforces exactly 5 gaps even when AI returns more", () => {
+    const raw = {
+      sections: {
+        dangerousGaps: [
+          { rank: 1, gap: "g1", whyDangerous: "d1" },
+          { rank: 2, gap: "g2", whyDangerous: "d2" },
+          { rank: 3, gap: "g3", whyDangerous: "d3" },
+          { rank: 4, gap: "g4", whyDangerous: "d4" },
+          { rank: 5, gap: "g5", whyDangerous: "d5" },
+          { rank: 6, gap: "g6", whyDangerous: "d6" },
+          { rank: 7, gap: "g7", whyDangerous: "d7" }
+        ]
+      }
+    };
+    const normalized = normalizeReport(raw);
+    expect(normalized.sections.dangerousGaps).toHaveLength(5);
+    expect(normalized.sections.dangerousGaps.map(g => g.gap)).toEqual(["g1", "g2", "g3", "g4", "g5"]);
+  });
+
+  it("enforces exactly 5 gaps when AI returns fewer", () => {
+    const raw = {
+      sections: {
+        dangerousGaps: [
+          { rank: 1, gap: "only one", whyDangerous: "d1" }
+        ]
+      }
+    };
+    const normalized = normalizeReport(raw);
+    expect(normalized.sections.dangerousGaps).toHaveLength(5);
+    expect(normalized.sections.dangerousGaps[0].gap).toBe("only one");
+    expect(normalized.sections.dangerousGaps[1].gap).toBe("Manual review required");
+  });
+
+  it("enforces 3-5 feynman cards when AI returns fewer", () => {
+    const raw = {
+      sections: {
+        feynmanCards: [
+          { target: "gap1", prompt: "explain gap1" }
+        ]
+      }
+    };
+    const normalized = normalizeReport(raw);
+    expect(normalized.sections.feynmanCards).toHaveLength(3);
+    expect(normalized.sections.feynmanCards[0].target).toBe("gap1");
+    expect(normalized.sections.feynmanCards[1].id).toBeTruthy();
+  });
+
+  it("enforces 3-5 feynman cards when AI returns more", () => {
+    const raw = {
+      sections: {
+        feynmanCards: Array.from({ length: 8 }, (_, i) => ({
+          target: `gap${i + 1}`,
+          prompt: `explain gap${i + 1}`
+        }))
+      }
+    };
+    const normalized = normalizeReport(raw);
+    expect(normalized.sections.feynmanCards).toHaveLength(5);
   });
 });

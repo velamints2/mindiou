@@ -15,7 +15,11 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5175,
-    allowedHosts: true
+    allowedHosts: true,
+    proxy: {
+      "/api": "http://localhost:8793",
+      "/health": "http://localhost:8793"
+    }
   },
   preview: {
     host: "0.0.0.0",

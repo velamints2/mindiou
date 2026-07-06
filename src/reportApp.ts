@@ -128,6 +128,15 @@ async function generateReport(artifactText: string, artifactType: string): Promi
   return { report: data.report, fallback: data.fallback }
 }
 
+async function fetchReport(reportId: string): Promise<ClearanceReport> {
+  const res = await fetch(`${API_BASE}/api/mvp0/reports/${reportId}`)
+  if (!res.ok) {
+    throw new Error(`Report not found: ${reportId}`)
+  }
+  const data = await res.json()
+  return data.report
+}
+
 async function submitCardAnswer(reportId: string, cardId: string, answer: string): Promise<{ card: FeynmanCard; shouldFollowUp: boolean }> {
   const res = await fetch(`${API_BASE}/api/mvp0/reports/${reportId}/cards/${cardId}/answer`, {
     method: 'POST',
@@ -218,6 +227,7 @@ function renderInputForm(): HTMLElement {
       state.report = report
       state.isFallback = fallback
       state.selectedCardId = report.sections.feynmanCards[0]?.id || null
+      sessionStorage.setItem('mindiou-report-id', report.id)
     } catch (err) {
       state.error = err instanceof Error ? err.message : String(err)
     } finally {
@@ -397,6 +407,7 @@ function renderFeynmanCards(cards: FeynmanCard[], reportId: string): HTMLElement
             if (idx >= 0) {
               state.report.sections.feynmanCards[idx] = result.card
             }
+            sessionStorage.setItem('mindiou-report-id', state.report.id)
           }
           delete state.cardAnswers[card.id]
         } catch (err) {
@@ -464,4 +475,26 @@ function renderGlassesPreview(card: FeynmanCard): HTMLElement {
 
 // ── Init ──
 
-render()
+async function restoreReport(): Promise<void> {
+  const savedId = sessionStorage.getItem('mindiou-report-id')
+  if (!savedId) {
+    render()
+    return
+  }
+  state.loading = true
+  render()
+  try {
+    const report = await fetchReport(savedId)
+    state.report = report
+    state.isFallback = false
+    state.selectedCardId = report.sections.feynmanCards[0]?.id || null
+  } catch {
+    // Report no longer exists on server, clear stale id
+    sessionStorage.removeItem('mindiou-report-id')
+  } finally {
+    state.loading = false
+    render()
+  }
+}
+
+restoreReport()

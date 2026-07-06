@@ -136,8 +136,8 @@ export function normalizeReport(raw) {
   }
 
   function normalizeGapArray(arr) {
-    if (!Array.isArray(arr)) return [];
-    return arr
+    if (!Array.isArray(arr)) arr = [];
+    const gaps = arr
       .map((gap, idx) => {
         if (typeof gap !== "object" || gap === null) {
           return makeGap(idx + 1, String(gap));
@@ -150,6 +150,11 @@ export function normalizeReport(raw) {
         };
       })
       .sort((a, b) => a.rank - b.rank);
+    // Enforce exactly TARGET_GAPS (5)
+    while (gaps.length < TARGET_GAPS) {
+      gaps.push(makeGap(gaps.length + 1, "Manual review required"));
+    }
+    return gaps.slice(0, TARGET_GAPS);
   }
 
   function normalizeCognitiveStructure(cs) {
@@ -164,8 +169,8 @@ export function normalizeReport(raw) {
   }
 
   function normalizeCardArray(arr) {
-    if (!Array.isArray(arr)) return [];
-    return arr.map(card => {
+    if (!Array.isArray(arr)) arr = [];
+    const cards = arr.map(card => {
       if (typeof card !== "object" || card === null) {
         return makeCard(uuid(), "unknown", String(card));
       }
@@ -178,6 +183,15 @@ export function normalizeReport(raw) {
         answeredAt: card.answeredAt || null
       };
     });
+    // Enforce 3-5 cards
+    while (cards.length < MIN_CARDS) {
+      cards.push(makeCard(
+        uuid(),
+        `Topic ${cards.length + 1}`,
+        "Explain in your own words: what did you understand from this section?"
+      ));
+    }
+    return cards.slice(0, MAX_CARDS);
   }
 
   function normalizeActionArray(arr) {
