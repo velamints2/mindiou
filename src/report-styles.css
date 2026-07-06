@@ -1,0 +1,405 @@
+/* MindIOU report surface — self-contained, no framework */
+
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #06100e;
+  color: #eef9f5;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #06100e;
+}
+
+button, input, textarea, select {
+  font: inherit;
+}
+
+#app {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+/* ── Layout ── */
+
+.report-surface {
+  width: min(100%, 860px);
+  margin: 0 auto;
+}
+
+.report-header {
+  margin-bottom: 24px;
+}
+
+.report-header h1 {
+  font-size: 1.5rem;
+  margin: 0 0 4px 0;
+}
+
+.report-header p {
+  margin: 0;
+  color: #7ba89e;
+  font-size: 0.9rem;
+}
+
+/* ── Input form ── */
+
+.input-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.input-form textarea {
+  width: 100%;
+  min-height: 160px;
+  padding: 12px;
+  border: 1px solid #28584e;
+  border-radius: 6px;
+  background: #0a1815;
+  color: #eef9f5;
+  resize: vertical;
+}
+
+.input-form textarea:focus {
+  outline: none;
+  border-color: #3d8b7a;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.form-row select {
+  padding: 8px 12px;
+  border: 1px solid #28584e;
+  border-radius: 6px;
+  background: #0a1815;
+  color: #eef9f5;
+}
+
+.btn-generate {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 6px;
+  background: #1a7a6a;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-generate:hover:not(:disabled) {
+  background: #239c87;
+}
+
+.btn-generate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Status ── */
+
+.status-bar {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  font-size: 0.9rem;
+}
+
+.status-bar.loading {
+  background: #0e2233;
+  border: 1px solid #2d5a8a;
+}
+
+.status-bar.error {
+  background: #2a1111;
+  border: 1px solid #6b2222;
+}
+
+.status-bar.fallback {
+  background: #2a2411;
+  border: 1px solid #6b5a22;
+}
+
+/* ── Report sections ── */
+
+.report-section {
+  margin-bottom: 28px;
+}
+
+.report-section h2 {
+  font-size: 1.1rem;
+  margin: 0 0 12px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #1a3a32;
+  color: #b0e0d0;
+}
+
+.item-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.item-entry {
+  padding: 10px 14px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  background: #0a1815;
+  border: 1px solid #152823;
+}
+
+.item-text {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.evidence-label {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin-right: 6px;
+}
+
+.evidence-label.source {
+  background: #1a3a2a;
+  color: #6acb8e;
+  border: 1px solid #2d6b4a;
+}
+
+.evidence-label.inference {
+  background: #3a2a1a;
+  color: #cb9a6a;
+  border: 1px solid #6b4a2d;
+}
+
+.evidence-text {
+  font-size: 0.85rem;
+  color: #7ba89e;
+  font-style: italic;
+}
+
+/* ── Gaps ── */
+
+.gap-entry {
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: #0a1815;
+  border-left: 3px solid #6b2222;
+}
+
+.gap-rank {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  line-height: 24px;
+  text-align: center;
+  border-radius: 50%;
+  background: #6b2222;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.gap-why {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: #cb8a6a;
+}
+
+/* ── Cognitive structure ── */
+
+.cog-group {
+  margin-bottom: 12px;
+}
+
+.cog-group h3 {
+  font-size: 0.9rem;
+  margin: 0 0 6px 0;
+  color: #8ab0a4;
+}
+
+/* ── Feynman cards ── */
+
+.feynman-card {
+  padding: 16px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: #0e1f1a;
+  border: 1px solid #1f4a3e;
+}
+
+.card-target {
+  font-size: 0.8rem;
+  color: #7ba89e;
+  margin-bottom: 4px;
+}
+
+.card-prompt {
+  display: block;
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+
+.card-answer-input {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px;
+  border: 1px solid #28584e;
+  border-radius: 6px;
+  background: #06100e;
+  color: #eef9f5;
+  resize: vertical;
+  margin-bottom: 8px;
+}
+
+.card-answer-input:focus {
+  outline: none;
+  border-color: #3d8b7a;
+}
+
+.btn-submit-answer {
+  padding: 6px 18px;
+  border: none;
+  border-radius: 6px;
+  background: #1a5a6a;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.btn-submit-answer:hover:not(:disabled) {
+  background: #237a8a;
+}
+
+.btn-submit-answer:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.card-answered {
+  font-size: 0.85rem;
+}
+
+.card-user-answer {
+  display: block;
+  padding: 8px 10px;
+  margin: 8px 0;
+  border-radius: 4px;
+  background: #0a1815;
+  border: 1px solid #152823;
+}
+
+.card-followup {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: #1a2a2a;
+  border-left: 3px solid #3d8b7a;
+  color: #b0e0d0;
+}
+
+.card-answered-at {
+  font-size: 0.75rem;
+  color: #5a8a7e;
+}
+
+/* ── Next actions ── */
+
+.action-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  background: #0a1815;
+  border: 1px solid #152823;
+}
+
+.action-route {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 2px 10px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.action-route.verify { background: #1a2a4a; color: #6a9acb; }
+.action-route.note { background: #1a3a2a; color: #6acb8e; }
+.action-route.task { background: #2a2a1a; color: #cbc26a; }
+.action-route.ask { background: #2a1a2a; color: #cb6aca; }
+
+.action-content {
+  flex: 1;
+}
+
+.action-item {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.action-reason {
+  font-size: 0.8rem;
+  color: #7ba89e;
+}
+
+/* ── Glasses preview ── */
+
+.glasses-preview {
+  margin: 20px 0;
+  padding: 16px;
+  border-radius: 10px;
+  background: #03080a;
+  border: 1px solid #1a2a3a;
+}
+
+.glasses-preview-label {
+  font-size: 0.75rem;
+  color: #5a7a8e;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.glasses-display {
+  width: 288px;
+  height: 144px;
+  margin: 0 auto;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #0a0f14, #0e1a1e);
+  border: 1px solid #1a3a3a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.glasses-text {
+  font-size: 0.95rem;
+  text-align: center;
+  color: #b0e0d0;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.glasses-empty {
+  font-size: 0.8rem;
+  color: #3a5a4e;
+  text-align: center;
+}
