@@ -133,6 +133,27 @@ function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function detectArtifactType(text) {
+  const lower = text.toLowerCase();
+  if (/chatgpt|gpt-4|gpt-3\.5|gpt-3\b/i.test(text)) return "chatgpt";
+  if (lower.includes("user:") && lower.includes("assistant:")) return "chatgpt";
+  if (lower.includes("你是一个") && lower.includes("请")) return "chatgpt";
+  if (/claude|anthropic/i.test(text)) return "claude";
+  if (lower.includes("human:") && lower.includes("assistant:")) return "claude";
+  if (/cursor|cursor\s+ide|cursor\s+chat/i.test(text)) return "cursor";
+  if (lower.includes("@@codebase") || lower.includes("cmd+k") || lower.includes("ctrl+k")) return "cursor";
+  if (/codex|copilot|git\s+commit|diff\s+--git|patch/i.test(text)) return "codex";
+  if (lower.includes("function ") && lower.includes("import ") && lower.includes("const ")) return "codex";
+  if (/```[\s\S]*```/.test(text) && /function|class|const|import/.test(text)) return "codex";
+  if (/hackathon|黑客松|demo\s+day|pitch|项目展示|路演/i.test(text)) return "hackathon";
+  if (lower.includes("评委") && lower.includes("项目")) return "hackathon";
+  if (/会议纪要|meeting\s+notes|action\s+items|参会人|主持人|议程/i.test(text)) return "meeting";
+  if (lower.includes("会议") && (lower.includes("讨论") || lower.includes("决定"))) return "meeting";
+  if (/^#|markdown|博客|blog|文章|essay/i.test(text.trim())) return "article";
+  if (lower.includes("摘要") && lower.includes("关键词")) return "article";
+  return "other";
+}
+
 function fit(value, max) {
   const text = clean(value);
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -1084,16 +1105,20 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/api/mvp0/report") {
       const artifactText = clean(payload.artifactText || "");
-      const artifactType = clean(payload.artifactType || "other");
+      let artifactType = clean(payload.artifactType || "");
       if (!artifactText) {
         jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
         return;
+      }
+      // Auto-detect type if not provided or empty
+      if (!artifactType) {
+        artifactType = detectArtifactType(artifactText);
       }
       const chatFn = (!openAiApiKey || disableAi) ? null : chatJson;
       const report = await generateClearanceReport(artifactText, artifactType, chatFn);
       const saved = await mvp0Store.saveReport(report);
       const isFallback = (!openAiApiKey || disableAi);
-      jsonResponse(res, 200, { ok: true, report: saved, fallback: isFallback });
+      jsonResponse(res, 200, { ok: true, report: saved, fallback: isFallback, detectedType: artifactType });
       return;
     }
 

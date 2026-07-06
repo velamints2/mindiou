@@ -66,6 +66,9 @@ type AppState = {
   selectedCardId: string | null
   cardAnswers: Record<string, string>
   cardSubmitting: Record<string, boolean>
+  detectedType: string | null
+  typeEditing: boolean
+  _lastInputText: string
 }
 
 // ── Constants ──
@@ -74,12 +77,54 @@ const ARTIFACT_TYPES = [
   { value: 'chatgpt', label: 'ChatGPT 对话' },
   { value: 'claude', label: 'Claude 对话' },
   { value: 'cursor', label: 'Cursor 对话' },
-  { value: 'codex', label: 'Codex 记录' },
-  { value: 'hackathon', label: '黑客松项目' },
+  { value: 'codex', label: 'AI 编程记录' },
+  { value: 'hackathon', label: '黑客松方案' },
   { value: 'meeting', label: '会议纪要' },
   { value: 'article', label: 'AI 辅助文章' },
   { value: 'other', label: '其他' }
 ]
+
+const TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  ARTIFACT_TYPES.map(t => [t.value, t.label])
+)
+
+// ── Auto-detect artifact type ──
+
+function detectArtifactType(text: string): string {
+  const lower = text.toLowerCase()
+
+  // ChatGPT: contains "chatgpt", "gpt-4", "gpt-3", or typical ChatGPT UI markers
+  if (/chatgpt|gpt-4|gpt-3\.5|gpt-3\b/i.test(text)) return 'chatgpt'
+  if (lower.includes('user:') && lower.includes('assistant:')) return 'chatgpt'
+  if (lower.includes('你是一个') && lower.includes('请')) return 'chatgpt'
+
+  // Claude: contains "claude" or typical Claude patterns
+  if (/claude|anthropic/i.test(text)) return 'claude'
+  if (lower.includes('human:') && lower.includes('assistant:')) return 'claude'
+
+  // Cursor: IDE-style interactions
+  if (/cursor|cursor\s+ide|cursor\s+chat/i.test(text)) return 'cursor'
+  if (lower.includes('@@codebase') || lower.includes('cmd+k') || lower.includes('ctrl+k')) return 'cursor'
+
+  // Codex: AI coding session, commit messages, code diffs
+  if (/codex|copilot|git\s+commit|diff\s+--git|patch/i.test(text)) return 'codex'
+  if (lower.includes('function ') && lower.includes('import ') && lower.includes('const ')) return 'codex'
+  if (/```[\s\S]*```/.test(text) && /function|class|const|import/.test(text)) return 'codex'
+
+  // Hackathon: project pitches, demo schedules
+  if (/hackathon|黑客松|demo\s+day|pitch|项目展示|路演/i.test(text)) return 'hackathon'
+  if (lower.includes('评委') && lower.includes('项目')) return 'hackathon'
+
+  // Meeting: meeting notes, action items
+  if (/会议纪要|meeting\s+notes|action\s+items|参会人|主持人|议程/i.test(text)) return 'meeting'
+  if (lower.includes('会议') && (lower.includes('讨论') || lower.includes('决定'))) return 'meeting'
+
+  // Article: blog posts, essays with AI assistance
+  if (/^#|markdown|博客|blog|文章|essay/i.test(text.trim())) return 'article'
+  if (lower.includes('摘要') && lower.includes('关键词')) return 'article'
+
+  return 'other'
+}
 
 const API_BASE = ''
 
@@ -92,7 +137,10 @@ const state: AppState = {
   isFallback: false,
   selectedCardId: null,
   cardAnswers: {},
-  cardSubmitting: {}
+  cardSubmitting: {},
+  detectedType: null,
+  typeEditing: false,
+  _lastInputText: ''
 }
 
 // ── DOM helpers ──
@@ -196,18 +244,73 @@ function renderInputForm(): HTMLElement {
   const textarea = document.createElement('textarea')
   textarea.placeholder = '粘贴 AI 辅助工作的材料：ChatGPT/Claude 对话、AI 生成的方案、黑客松记录、会议纪要…'
   textarea.id = 'artifact-text'
+  textarea.value = state._lastInputText || ''
+  textarea.oninput = () => {
+    const text = textarea.value.trim()
+    state._lastInputText = textarea.value
+    if (text.length > 20) {
+      const detected = detectArtifactType(text)
+      if (detected !== state.detectedType) {
+        state.detectedType = detected
+        state.typeEditing = false
+        render()
+      }
+    } else if (state.detectedType) {
+      state.detectedType = null
+      state.typeEditing = false
+      render()
+    }
+  }
   form.appendChild(textarea)
 
-  const row = el('div', 'form-row')
+  // Auto-detected type display (replaces selector)
+  if (state.detectedType) {
+    const typeBar = el('div', 'type-detect-bar')
 
-  const select = document.createElement('select')
-  select.id = 'artifact-type'
-  for (const t of ARTIFACT_TYPES) {
-    const opt = el('option', undefined, t.label) as HTMLOptionElement
-    opt.value = t.value
-    select.appendChild(opt)
+    if (!state.typeEditing) {
+      // Show "已识别为：XX，可修改"
+      const label = el('span', 'type-detected-label', `已识别为：${TYPE_LABELS[state.detectedType] || state.detectedType}`)
+      typeBar.appendChild(label)
+
+      const editBtn = document.createElement('button')
+      editBtn.className = 'btn-edit-type'
+      editBtn.textContent = '可修改'
+      editBtn.onclick = () => {
+        state.typeEditing = true
+        render()
+      }
+      typeBar.appendChild(editBtn)
+    } else {
+      // Show selector for manual change
+      const select = document.createElement('select')
+      select.className = 'type-select'
+      for (const t of ARTIFACT_TYPES) {
+        const opt = el('option', undefined, t.label) as HTMLOptionElement
+        opt.value = t.value
+        if (t.value === state.detectedType) opt.selected = true
+        select.appendChild(opt)
+      }
+      select.onchange = () => {
+        state.detectedType = select.value
+        state.typeEditing = false
+        render()
+      }
+      typeBar.appendChild(select)
+
+      const confirmBtn = document.createElement('button')
+      confirmBtn.className = 'btn-edit-type'
+      confirmBtn.textContent = '确认'
+      confirmBtn.onclick = () => {
+        state.typeEditing = false
+        render()
+      }
+      typeBar.appendChild(confirmBtn)
+    }
+
+    form.appendChild(typeBar)
   }
-  row.appendChild(select)
+
+  const row = el('div', 'form-row')
 
   const btn = document.createElement('button')
   btn.className = 'btn-generate'
@@ -215,8 +318,8 @@ function renderInputForm(): HTMLElement {
   btn.disabled = state.loading
   btn.onclick = async () => {
     const text = (document.getElementById('artifact-text') as HTMLTextAreaElement).value.trim()
-    const type = (document.getElementById('artifact-type') as HTMLSelectElement).value
     if (!text) return
+    const type = state.detectedType || 'other'
     state.loading = true
     state.error = null
     state.report = null

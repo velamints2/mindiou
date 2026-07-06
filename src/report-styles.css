@@ -85,6 +85,50 @@ button, input, textarea, select {
   color: #eef9f5;
 }
 
+/* ── Type detection bar ── */
+
+.type-detect-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: #0e2a22;
+  border: 1px solid #1f5a4a;
+}
+
+.type-detected-label {
+  font-size: 0.9rem;
+  color: #6acb8e;
+}
+
+.type-detected-label::before {
+  content: "✓ ";
+}
+
+.btn-edit-type {
+  padding: 4px 12px;
+  border: 1px solid #2d6b4a;
+  border-radius: 4px;
+  background: transparent;
+  color: #6acb8e;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.btn-edit-type:hover {
+  background: #1a3a2a;
+}
+
+.type-select {
+  padding: 4px 10px;
+  border: 1px solid #28584e;
+  border-radius: 4px;
+  background: #0a1815;
+  color: #eef9f5;
+  font-size: 0.85rem;
+}
+
 .btn-generate {
   padding: 10px 24px;
   border: none;
