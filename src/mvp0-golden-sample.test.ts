@@ -75,6 +75,27 @@ Git commit: 7e3da11
 
 // Mock AI response that follows the new prompt rules
 const MOCK_AI_RESPONSE_FOR_WORKFLOW = {
+  analysis: {
+    artifactKind: "ai_workflow_transcript",
+    userCapability: {
+      overall: "mixed",
+      dimensions: {
+        domainProductUnderstanding: "L3",
+        aiAgentSteering: "L4",
+        technicalDomainImplementation: "L1",
+        validationDebugging: "L1"
+      },
+      currentDomain: "MindIOU MVP-0 development / Node.js web app",
+      evidenceSignals: [
+        "User defined acceptance criteria but did not mention implementation files, commands, or APIs.",
+        "User approved execution without asking for implementation reasoning ('执行吧').",
+        "User delegated all code changes, test execution, and commit generation to AI.",
+        "User provided product direction (cognitive debt clearance) but not technical details."
+      ],
+      confidence: 0.85,
+      recommendedCardLevel: "foundation"
+    }
+  },
   sections: {
     aiCompleted: [
       { item: "Trae 完成验收审计，逐项检查 15 条验收路径", evidence: "原文中 Trae 输出了 Passed/Failed/Risky 分析，这是 AI 执行的审计工作，不是用户设定的标准。", isInference: false },
@@ -117,11 +138,11 @@ const MOCK_AI_RESPONSE_FOR_WORKFLOW = {
       ]
     },
     feynmanCards: [
-      { id: "card-1", target: "sessionStorage 恢复机制边界", prompt: "为什么只保存 report id 到 sessionStorage 就能在刷新后恢复报告？这个方案在什么条件下会失败？（提示：sessionStorage 被清除、跨标签页、服务端数据被删）", userAnswer: "", aiFollowUp: "", answeredAt: null },
-      { id: "card-2", target: "Normalization 的必要性", prompt: "为什么 normalizeGapArray 需要同时 pad 和 truncate？如果只依赖 prompt 告诉 AI 返回 5 个 gap，会有什么风险？", userAnswer: "", aiFollowUp: "", answeredAt: null },
-      { id: "card-3", target: "Fallback 与 AI report 的区别", prompt: "fallback report 和 real AI report 在语义上有什么区别？为什么 demo 时需要区分两者？", userAnswer: "", aiFollowUp: "", answeredAt: null },
-      { id: "card-4", target: "Dev proxy 的边界", prompt: "为什么 Vite proxy 修的是开发环境问题，而不是生产部署问题？如果部署到生产环境，还需要做什么？", userAnswer: "", aiFollowUp: "", answeredAt: null },
-      { id: "card-5", target: "测试全绿 ≠ 语义正确", prompt: "为什么 181 项测试全绿仍然不能证明 MindIOU 的产品语义正确？测试验证了什么，没有验证什么？", userAnswer: "", aiFollowUp: "", answeredAt: null }
+      { id: "card-1", target: "sessionStorage 恢复机制边界", prompt: "为什么只保存 report id 到 sessionStorage 就能在刷新后恢复报告？这个方案在什么条件下会失败？（提示：sessionStorage 被清除、跨标签页、服务端数据被删）", targetLevel: "L2", difficulty: "intermediate", userAnswer: "", aiFollowUp: "", answeredAt: null },
+      { id: "card-2", target: "Normalization 的必要性", prompt: "为什么 normalizeGapArray 需要同时 pad 和 truncate？如果只依赖 prompt 告诉 AI 返回 5 个 gap，会有什么风险？", targetLevel: "L2", difficulty: "intermediate", userAnswer: "", aiFollowUp: "", answeredAt: null },
+      { id: "card-3", target: "Fallback 与 AI report 的区别", prompt: "fallback report 和 real AI report 在语义上有什么区别？为什么 demo 时需要区分两者？", targetLevel: "L1", difficulty: "foundation", userAnswer: "", aiFollowUp: "", answeredAt: null },
+      { id: "card-4", target: "Dev proxy 的边界", prompt: "为什么 Vite proxy 修的是开发环境问题，而不是生产部署问题？如果部署到生产环境，还需要做什么？", targetLevel: "L2", difficulty: "intermediate", userAnswer: "", aiFollowUp: "", answeredAt: null },
+      { id: "card-5", target: "测试全绿 ≠ 语义正确", prompt: "为什么 181 项测试全绿仍然不能证明 MindIOU 的产品语义正确？测试验证了什么，没有验证什么？", targetLevel: "L2", difficulty: "advanced", userAnswer: "", aiFollowUp: "", answeredAt: null }
     ],
     nextActions: [
       { item: "验证 sessionStorage 恢复机制在多种边界条件下的行为（清除缓存、跨标签页、服务端数据删除）", route: "verify", reason: "需要确认恢复机制在边界条件下是否仍然有效" },
@@ -292,6 +313,112 @@ describe("Golden sample: ai_workflow_transcript", () => {
       const prompt = getClearanceReportSystemPrompt();
       expect(prompt).toContain("not an AI-assisted work artifact");
       expect(prompt).toContain("empty arrays");
+    });
+  });
+
+  describe("capability assessment (Step 0)", () => {
+    it("prompt contains Step 0: User Capability Calibration", () => {
+      const prompt = getClearanceReportSystemPrompt();
+      expect(prompt).toContain("Step 0: User Capability Calibration");
+      expect(prompt).toContain("BEFORE generating dangerousGaps");
+    });
+
+    it("prompt defines capability dimensions", () => {
+      const prompt = getClearanceReportSystemPrompt();
+      expect(prompt).toContain("domainProductUnderstanding");
+      expect(prompt).toContain("aiAgentSteering");
+      expect(prompt).toContain("technicalDomainImplementation");
+      expect(prompt).toContain("validationDebugging");
+    });
+
+    it("prompt defines capability levels L0-L5", () => {
+      const prompt = getClearanceReportSystemPrompt();
+      expect(prompt).toContain("L0 unfamiliar");
+      expect(prompt).toContain("L1 macro requester");
+      expect(prompt).toContain("L2 guided operator");
+      expect(prompt).toContain("L3 junior implementer");
+      expect(prompt).toContain("L4 independent implementer");
+      expect(prompt).toContain("L5 architect/reviewer");
+    });
+
+    it("prompt instructs to generate at current level + 1", () => {
+      const prompt = getClearanceReportSystemPrompt();
+      expect(prompt).toContain("current level + 1");
+      expect(prompt).toContain("Do NOT generate expert-level cards for a beginner");
+    });
+
+    it("prompt output format includes analysis field", () => {
+      const prompt = getClearanceReportSystemPrompt();
+      expect(prompt).toContain("analysis");
+      expect(prompt).toContain("userCapability");
+      expect(prompt).toContain("recommendedCardLevel");
+    });
+
+    it("normalizes analysis field from AI output", async () => {
+      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_RESPONSE_FOR_WORKFLOW);
+      const report = await generateClearanceReport(GOLDEN_SAMPLE_WORKFLOW, "codex", mockChatFn);
+
+      expect(report.analysis).toBeDefined();
+      expect(report.analysis.artifactKind).toBe("ai_workflow_transcript");
+      expect(report.analysis.userCapability).toBeDefined();
+      expect(report.analysis.userCapability.overall).toBe("mixed");
+      expect(report.analysis.userCapability.dimensions.domainProductUnderstanding).toBe("L3");
+      expect(report.analysis.userCapability.dimensions.aiAgentSteering).toBe("L4");
+      expect(report.analysis.userCapability.dimensions.technicalDomainImplementation).toBe("L1");
+      expect(report.analysis.userCapability.dimensions.validationDebugging).toBe("L1");
+      expect(report.analysis.userCapability.currentDomain).toContain("MindIOU");
+      expect(report.analysis.userCapability.evidenceSignals.length).toBeGreaterThan(0);
+      expect(report.analysis.userCapability.confidence).toBeGreaterThan(0.5);
+      expect(report.analysis.userCapability.recommendedCardLevel).toBe("foundation");
+    });
+
+    it("preserves card targetLevel and difficulty from AI output", async () => {
+      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_RESPONSE_FOR_WORKFLOW);
+      const report = await generateClearanceReport(GOLDEN_SAMPLE_WORKFLOW, "codex", mockChatFn);
+
+      for (const card of report.sections.feynmanCards) {
+        expect(card.targetLevel).toBeTruthy();
+        expect(["L0", "L1", "L2", "L3", "L4", "L5"]).toContain(card.targetLevel);
+        expect(card.difficulty).toBeTruthy();
+        expect(["foundation", "intermediate", "advanced"]).toContain(card.difficulty);
+      }
+    });
+
+    it("gaps depend on capability assessment — L1 user gets foundation-level gaps", async () => {
+      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_RESPONSE_FOR_WORKFLOW);
+      const report = await generateClearanceReport(GOLDEN_SAMPLE_WORKFLOW, "codex", mockChatFn);
+
+      // User is L1 in technical implementation, so gaps should be about basics not architecture
+      const gaps = report.sections.dangerousGaps.map(g => g.gap).join(" ");
+      // Should not be asking about advanced architecture
+      expect(gaps).not.toContain("架构取舍");
+      expect(gaps).not.toContain("distributed system");
+    });
+
+    it("cards match recommendedCardLevel from capability assessment", async () => {
+      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_RESPONSE_FOR_WORKFLOW);
+      const report = await generateClearanceReport(GOLDEN_SAMPLE_WORKFLOW, "codex", mockChatFn);
+
+      // recommendedCardLevel is "foundation", so at least one card should be foundation
+      const foundationCards = report.sections.feynmanCards.filter(c => c.difficulty === "foundation");
+      expect(foundationCards.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("fallback report has default analysis with unknown artifactKind", async () => {
+      const report = await generateClearanceReport(GOLDEN_SAMPLE_WORKFLOW, "codex", null);
+      expect(report.analysis).toBeDefined();
+      expect(report.analysis.artifactKind).toBe("unknown");
+      expect(report.analysis.userCapability.overall).toBe("mixed");
+      expect(report.analysis.userCapability.recommendedCardLevel).toBe("foundation");
+    });
+
+    it("buildCapabilityAwarePrompt detects macro goal signals", async () => {
+      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_RESPONSE_FOR_WORKFLOW);
+      await generateClearanceReport(GOLDEN_SAMPLE_WORKFLOW, "codex", mockChatFn);
+
+      const userPayload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
+      expect(userPayload.hint).toContain("capability");
+      expect(userPayload.hint).toContain("Step 0");
     });
   });
 });

@@ -28,10 +28,47 @@ function truncate(value, max) {
   return text.length > max ? text.slice(0, max) : text;
 }
 
+const capabilityCalibrationStep = [
+  "## Step 0: User Capability Calibration (do this BEFORE generating dangerousGaps or feynmanCards)",
+  "",
+  "Before generating gaps or cards, infer the user's capability layer in the current task domain.",
+  "Do NOT assume the user is an implementation-level engineer.",
+  "",
+  "Infer the user's capability from:",
+  "- what the user asks",
+  "- what the user does NOT ask",
+  "- whether the user provides macro goals or implementation details",
+  "- whether the user mentions files, commands, APIs, permissions, tests, logs, validation boundaries",
+  "- whether the user approves AI execution without asking for implementation reasoning",
+  "- whether the user provides product direction but not technical details",
+  "",
+  "Capability dimensions:",
+  "1. domainProductUnderstanding — does the user understand the problem domain?",
+  "2. aiAgentSteering — can the user direct AI effectively?",
+  "3. technicalDomainImplementation — can the user implement in this tech stack?",
+  "4. validationDebugging — can the user verify and debug AI output?",
+  "",
+  "Levels for each dimension:",
+  "L0 unfamiliar — does not know what the objects/concepts are",
+  "L1 macro requester — gives goals, delegates all implementation, asks no technical questions",
+  "L2 guided operator — can follow steps, cannot independently choose approach",
+  "L3 junior implementer — can implement with guidance, cannot debug independently",
+  "L4 independent implementer — can implement and debug independently",
+  "L5 architect/reviewer — can make architecture tradeoffs and review others' work",
+  "",
+  "Generate gaps and Feynman cards at the user's current level + 1.",
+  "Do NOT generate expert-level cards for a beginner.",
+  "Do NOT generate basic-concept cards for an expert.",
+  "",
+  "Include the capability assessment in the output as the 'analysis' field (see Output Format)."
+].join("\n");
+
 const clearanceReportSystemPrompt = [
   "You are MindIOU, an AI cognitive-debt clearance analyst.",
   "Your job is NOT to summarize the input text.",
   "Your job is to identify what understanding processes were skipped when AI assisted the user, and produce a structured clearance report.",
+  "",
+  capabilityCalibrationStep,
   "",
   "## Step 1: Artifact Interpretation (do this internally before writing the report)",
   "",
@@ -83,38 +120,52 @@ const clearanceReportSystemPrompt = [
   "",
   "If you cannot determine attribution from the text, set isInference: true and explain your uncertainty.",
   "",
-  "## Step 4: Dangerous Gaps Rules",
+  "## Step 4: Dangerous Gaps Rules (DEPENDS ON Step 0 capability assessment)",
   "",
   "dangerousGaps are NOT bug lists.",
   "dangerousGaps are understanding debts: things the user has NOT proven they understand.",
+  "Gaps must be calibrated to the user's capability level (from Step 0).",
+  "Generate gaps at user's current level + 1 — the zone where growth is possible.",
+  "",
+  "If the user is L0-L1 in a dimension:",
+  "- Do NOT ask about advanced architecture tradeoffs",
+  "- DO ask whether they understand the basic concepts and objects in the domain",
+  "If the user is L3-L4 in a dimension:",
+  "- Do NOT ask what basic objects are",
+  "- DO ask about boundaries, tradeoffs, and edge cases they haven't demonstrated",
   "",
   "If a problem was already identified AND fixed AND tested in the input, do NOT list it as a current bug.",
   "Instead, transform it into a verification debt or understanding debt.",
   "",
-  "WRONG gaps:",
-  "- '刷新页面后数据丢失' (this was already fixed)",
-  "- 'API跨端口问题' (this was already fixed)",
+  "WRONG gaps (for an L0-L1 user in HarmonyOS development):",
+  "- '用户不理解 API 26 与 HarmonyOS 7 的兼容性矩阵' (too advanced)",
   "",
-  "RIGHT gaps:",
-  "- '用户尚未证明自己理解 sessionStorage + report id 恢复机制的边界'",
-  "- '用户尚未证明自己理解为什么 normalization 不能只靠 prompt'",
-  "- '用户尚未证明自己理解 fallback report 和 real AI report 的区别'",
-  "- '用户尚未证明自己理解 Vite proxy 只解决开发环境问题'",
-  "- '用户尚未证明自己理解测试全绿不等于产品语义正确'",
+  "RIGHT gaps (for an L0-L1 user):",
+  "- '用户尚未证明自己知道 DevEco、SDK、API version、HAP、虚拟机、真机分别是什么'",
+  "- '用户尚未证明自己理解为什么 AI 放弃了 API 24 而不是继续修复'",
+  "",
+  "WRONG gaps (for an L4 user):",
+  "- '用户不知道什么是 HAP' (too basic)",
+  "",
+  "RIGHT gaps (for an L4 user):",
+  "- '用户尚未证明自己理解 API 26 VM 验收与 HarmonyOS 真机验证的边界差异'",
   "",
   "Requirements:",
   "- Exactly 5 gaps, ranked 1-5 by danger level",
   "- Each gap: { rank, gap, whyDangerous, evidence }",
   "- Gaps must focus on consequential understanding, not terminology",
   "",
-  "## Step 5: Feynman Card Rules",
+  "## Step 5: Feynman Card Rules (DEPENDS ON Step 0 capability assessment)",
   "",
   "Feynman cards must test whether the user understands the judgments, code, tests, or engineering tradeoffs that AI made on their behalf.",
+  "Cards must be calibrated to user's current level + 1 (from Step 0).",
   "",
   "WRONG card prompt: '为什么刷新页面数据丢失是一个问题？'",
   "RIGHT card prompt: '为什么只保存 report id 到 sessionStorage 就能在刷新后恢复报告？这个方案的边界是什么？'",
   "",
-  "Each card: { id, target, prompt, userAnswer: \"\", aiFollowUp: \"\", answeredAt: null }",
+  "Each card: { id, target, prompt, targetLevel, difficulty, userAnswer: \"\", aiFollowUp: \"\", answeredAt: null }",
+  "- targetLevel: the capability level this card is testing (e.g., \"L1\", \"L2\", \"L3\")",
+  "- difficulty: \"foundation\" (basic concepts), \"intermediate\" (process/reasoning), \"advanced\" (tradeoffs/edge cases)",
   "Each card should target one dangerous gap.",
   "3-5 cards total.",
   "",
@@ -139,13 +190,53 @@ const clearanceReportSystemPrompt = [
   "## Output Format",
   "",
   "Return JSON only with this shape:",
-  '{"sections":{"aiCompleted":[],"userContributed":[],"dangerousGaps":[],"cognitiveStructure":{"facts":[],"hypotheses":[],"questions":[],"decisions":[],"tradeoffs":[]},"feynmanCards":[],"nextActions":[]}}',
+  '{"analysis":{"artifactKind":"ai_workflow_transcript|ai_chat|ai_coding_log|ai_generated_document|meeting_notes|unknown","userCapability":{"overall":"L0|L1|L2|L3|L4|L5|mixed","dimensions":{"domainProductUnderstanding":"L0-L5","aiAgentSteering":"L0-L5","technicalDomainImplementation":"L0-L5","validationDebugging":"L0-L5"},"currentDomain":"brief description","evidenceSignals":["signal1","signal2"],"confidence":0.0,"recommendedCardLevel":"foundation|intermediate|advanced"}},"sections":{"aiCompleted":[],"userContributed":[],"dangerousGaps":[],"cognitiveStructure":{"facts":[],"hypotheses":[],"questions":[],"decisions":[],"tradeoffs":[]},"feynmanCards":[{"id":"","target":"","prompt":"","targetLevel":"L1","difficulty":"foundation","userAnswer":"","aiFollowUp":"","answeredAt":null}],"nextActions":[]}}',
   "",
   "Rules:",
   "- Do not fabricate evidence that does not exist in the source text.",
   "- Prefer Chinese when the source text is Chinese.",
   "- If the input is not an AI-assisted work artifact (e.g., it is a dictionary definition or random text), return empty arrays for aiCompleted and userContributed with a note in cognitiveStructure.questions explaining the issue."
 ].join("\n");
+
+/**
+ * Build a capability-aware context hint for the user message.
+ * This gives the AI additional framing about what to look for.
+ */
+function buildCapabilityAwarePrompt(artifactText, artifactType) {
+  const text = truncate(artifactText, MAX_TEXT);
+  const type = VALID_ARTIFACT_TYPES.includes(artifactType) ? artifactType : "other";
+
+  const signals = [];
+
+  // Detect macro-only vs technical detail patterns
+  const hasTechnicalTerms = /\b(file|command|api|permission|test|log|debug|build|deploy|config|sdk|port|route|endpoint)\b/i.test(text);
+  const hasMacroGoals = /(帮我|给我|做一个|实现一个|我想要|需要|应该|产品|功能|需求|目标)/i.test(text);
+  const hasApprovalWithoutReasoning = /(执行吧|继续|好的|可以|没问题|go ahead|proceed|do it)/i.test(text);
+  const hasQuestions = /[?？]/.test(text);
+
+  if (hasMacroGoals && !hasTechnicalTerms) {
+    signals.push("User provides macro goals but does not mention technical implementation details.");
+  }
+  if (hasApprovalWithoutReasoning && !hasQuestions) {
+    signals.push("User approves AI execution without asking for implementation reasoning.");
+  }
+  if (!hasQuestions) {
+    signals.push("User does not ask technical questions in the artifact.");
+  }
+
+  return {
+    artifactText: text,
+    artifactType: type,
+    charCount: clean(text).length,
+    hint: [
+      "Analyze this artifact for cognitive debt.",
+      "First calibrate the user's capability (Step 0), then determine artifact type (Step 1).",
+      "Apply role attribution rules (Step 2). Evidence must explain WHY the excerpt proves attribution (Step 3).",
+      "Generate gaps and cards at user's current level + 1 (Steps 4-5).",
+      "Capability signals detected: " + (signals.length > 0 ? signals.join(" ") : "none auto-detected; infer from content.")
+    ].join(" ")
+  };
+}
 
 /**
  * Generate a clearance report using AI, with fallback on failure.
@@ -165,17 +256,10 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
   }
 
   try {
+    const userPayload = buildCapabilityAwarePrompt(text, type);
     const messages = [
       { role: "system", content: clearanceReportSystemPrompt },
-      {
-        role: "user",
-        content: JSON.stringify({
-          artifactText: text,
-          artifactType: type,
-          charCount: clean(text).length,
-          hint: "Analyze this artifact for cognitive debt. First determine the artifact type internally, then apply role attribution rules. Remember: evidence must explain WHY the excerpt proves attribution, not just copy the source."
-        })
-      }
+      { role: "user", content: JSON.stringify(userPayload) }
     ];
 
     // The fallback function returns a marker; if chatJson calls it,

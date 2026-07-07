@@ -83,6 +83,8 @@ function makeCard(id, target, prompt) {
     id,
     target: truncate(target, 150),
     prompt: truncate(prompt, 300),
+    targetLevel: "L1",
+    difficulty: "foundation",
     userAnswer: "",
     aiFollowUp: "",
     answeredAt: null
@@ -170,6 +172,8 @@ export function normalizeReport(raw) {
 
   function normalizeCardArray(arr) {
     if (!Array.isArray(arr)) arr = [];
+    const validLevels = ["L0", "L1", "L2", "L3", "L4", "L5"];
+    const validDifficulties = ["foundation", "intermediate", "advanced"];
     const cards = arr.map(card => {
       if (typeof card !== "object" || card === null) {
         return makeCard(uuid(), "unknown", String(card));
@@ -178,6 +182,8 @@ export function normalizeReport(raw) {
         id: clean(card.id || uuid()).slice(0, 100),
         target: truncate(card.target, 150),
         prompt: truncate(card.prompt, 300),
+        targetLevel: validLevels.includes(card.targetLevel) ? card.targetLevel : "L1",
+        difficulty: validDifficulties.includes(card.difficulty) ? card.difficulty : "foundation",
         userAnswer: truncate(card.userAnswer, 2000),
         aiFollowUp: truncate(card.aiFollowUp, 500),
         answeredAt: card.answeredAt || null
@@ -204,6 +210,58 @@ export function normalizeReport(raw) {
     });
   }
 
+  function normalizeAnalysis(raw) {
+    if (typeof raw !== "object" || raw === null) {
+      return {
+        artifactKind: "unknown",
+        userCapability: {
+          overall: "mixed",
+          dimensions: {
+            domainProductUnderstanding: "L1",
+            aiAgentSteering: "L1",
+            technicalDomainImplementation: "L1",
+            validationDebugging: "L1"
+          },
+          currentDomain: "unknown",
+          evidenceSignals: [],
+          confidence: 0,
+          recommendedCardLevel: "foundation"
+        }
+      };
+    }
+    const validKinds = [
+      "ai_workflow_transcript", "ai_chat", "ai_coding_log",
+      "ai_generated_document", "meeting_notes", "unknown"
+    ];
+    const validLevels = ["L0", "L1", "L2", "L3", "L4", "L5", "mixed"];
+    const validCardLevels = ["foundation", "intermediate", "advanced"];
+    const rawCap = raw.userCapability || {};
+    const rawDims = rawCap.dimensions || {};
+    return {
+      artifactKind: validKinds.includes(raw.artifactKind) ? raw.artifactKind : "unknown",
+      userCapability: {
+        overall: validLevels.includes(rawCap.overall) ? rawCap.overall : "mixed",
+        dimensions: {
+          domainProductUnderstanding: validLevels.includes(rawDims.domainProductUnderstanding)
+            ? rawDims.domainProductUnderstanding : "L1",
+          aiAgentSteering: validLevels.includes(rawDims.aiAgentSteering)
+            ? rawDims.aiAgentSteering : "L1",
+          technicalDomainImplementation: validLevels.includes(rawDims.technicalDomainImplementation)
+            ? rawDims.technicalDomainImplementation : "L1",
+          validationDebugging: validLevels.includes(rawDims.validationDebugging)
+            ? rawDims.validationDebugging : "L1"
+        },
+        currentDomain: truncate(rawCap.currentDomain || "unknown", 100),
+        evidenceSignals: Array.isArray(rawCap.evidenceSignals)
+          ? rawCap.evidenceSignals.slice(0, 10).map(s => truncate(s, 300))
+          : [],
+        confidence: Math.max(0, Math.min(1, Number(rawCap.confidence) || 0)),
+        recommendedCardLevel: validCardLevels.includes(rawCap.recommendedCardLevel)
+          ? rawCap.recommendedCardLevel : "foundation"
+      }
+    };
+  }
+
   const normalized = {
     id: clean(raw.id || uuid()).slice(0, 100),
     createdAt: raw.createdAt || now,
@@ -214,6 +272,7 @@ export function normalizeReport(raw) {
         : "other",
       charCount: Number(raw.input?.charCount) || (raw.input?.artifactText ? clean(raw.input.artifactText).length : 0)
     },
+    analysis: normalizeAnalysis(raw.analysis),
     sections: {
       aiCompleted: normalizeItemArray(sections.aiCompleted),
       userContributed: normalizeItemArray(sections.userContributed),
