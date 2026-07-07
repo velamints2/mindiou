@@ -564,13 +564,16 @@ function renderGlassesPreview(card: FeynmanCard): HTMLElement {
 
   const display = el('div', 'glasses-display')
 
-  if (card.userAnswer) {
-    // Show follow-up or summary on glasses
-    const text = card.aiFollowUp || card.prompt
-    display.appendChild(el('div', 'glasses-text', text))
-  } else {
-    display.appendChild(el('div', 'glasses-text', card.prompt))
-  }
+  // Glasses preview shows the cognitive debt reminder, not the AI follow-up.
+  // Priority: card.target (debt label) + card.prompt (what to explain)
+  const debtLabel = el('div', 'glasses-text', `今日认知欠条：\n${card.target}`)
+  display.appendChild(debtLabel)
+
+  const promptLine = el('div', 'glasses-text', card.prompt)
+  promptLine.style.fontSize = '0.8rem'
+  promptLine.style.marginTop = '8px'
+  promptLine.style.color = '#8ab0a4'
+  display.appendChild(promptLine)
 
   container.appendChild(display)
   return container
