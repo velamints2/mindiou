@@ -27,6 +27,8 @@ type FeynmanCard = {
   id: string
   target: string
   prompt: string
+  targetLevel?: string
+  difficulty?: 'foundation' | 'intermediate' | 'advanced'
   userAnswer: string
   aiFollowUp: string
   answeredAt: string | null
@@ -45,6 +47,17 @@ type ClearanceReport = {
     artifactText: string
     artifactType: string
     charCount: number
+  }
+  analysis?: {
+    artifactKind: string
+    userCapability: {
+      overall: string
+      dimensions: Record<string, string>
+      currentDomain: string
+      evidenceSignals: string[]
+      confidence: number
+      recommendedCardLevel: string
+    }
   }
   sections: {
     aiCompleted: EvidenceItem[]
@@ -347,6 +360,9 @@ function renderInputForm(): HTMLElement {
 function renderReport(report: ClearanceReport): HTMLElement {
   const container = el('div', 'report-container')
 
+  if (report.analysis) {
+    container.appendChild(renderCapabilityAnalysis(report.analysis))
+  }
   container.appendChild(renderSection('AI 替你完成了什么', report.sections.aiCompleted))
   container.appendChild(renderSection('你真正提供了什么', report.sections.userContributed))
   container.appendChild(renderGaps(report.sections.dangerousGaps))
@@ -363,6 +379,46 @@ function renderReport(report: ClearanceReport): HTMLElement {
   }
 
   return container
+}
+
+function renderCapabilityAnalysis(analysis: NonNullable<ClearanceReport['analysis']>): HTMLElement {
+  const section = el('div', 'report-section capability-section')
+  section.appendChild(el('h2', undefined, '能力校准'))
+
+  const cap = analysis.userCapability
+  const meta = el('div', 'capability-meta')
+  meta.appendChild(el('span', 'capability-pill', `任务类型 ${analysis.artifactKind}`))
+  meta.appendChild(el('span', 'capability-pill', `整体 ${cap.overall}`))
+  meta.appendChild(el('span', 'capability-pill', `卡片难度 ${cap.recommendedCardLevel}`))
+  meta.appendChild(el('span', 'capability-pill', `置信度 ${Math.round(cap.confidence * 100)}%`))
+  section.appendChild(meta)
+
+  if (cap.currentDomain && cap.currentDomain !== 'unknown') {
+    section.appendChild(el('p', 'capability-domain', cap.currentDomain))
+  }
+
+  const dims = el('div', 'capability-dims')
+  const labels: Record<string, string> = {
+    domainProductUnderstanding: '领域理解',
+    aiAgentSteering: 'AI 指挥',
+    technicalDomainImplementation: '技术实现',
+    validationDebugging: '验收调试'
+  }
+  for (const [key, label] of Object.entries(labels)) {
+    const value = cap.dimensions[key]
+    if (value) dims.appendChild(el('span', 'capability-dim', `${label}: ${value}`))
+  }
+  section.appendChild(dims)
+
+  if (cap.evidenceSignals.length > 0) {
+    const list = el('ul', 'capability-signals')
+    for (const signal of cap.evidenceSignals.slice(0, 4)) {
+      list.appendChild(el('li', undefined, signal))
+    }
+    section.appendChild(list)
+  }
+
+  return section
 }
 
 function renderSection(title: string, items: EvidenceItem[]): HTMLElement {

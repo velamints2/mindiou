@@ -186,6 +186,46 @@ button, input, textarea, select {
   color: #b0e0d0;
 }
 
+.capability-section {
+  padding: 14px;
+  border: 1px solid #18352e;
+  border-radius: 6px;
+  background: #071310;
+}
+
+.capability-meta,
+.capability-dims {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.capability-pill,
+.capability-dim {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 9px;
+  border: 1px solid #244b43;
+  border-radius: 4px;
+  background: #0c1f1a;
+  color: #d6eee6;
+  font-size: 0.8rem;
+}
+
+.capability-domain {
+  margin: 0 0 10px 0;
+  color: #d7e7e2;
+}
+
+.capability-signals {
+  margin: 0;
+  padding-left: 18px;
+  color: #90aaa1;
+  font-size: 0.86rem;
+}
+
 .item-list {
   list-style: none;
   padding: 0;

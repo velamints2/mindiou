@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it, vi } from "vitest";
 import { feynmanFollowUp, getFeynmanFollowUpSystemPrompt } from "../mvp0-followup.js";
 

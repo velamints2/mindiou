@@ -62,6 +62,22 @@ export function createMvp0Store(filePath) {
         artifactType: clean(report.input?.artifactType || "other").slice(0, 40),
         charCount: Number(report.input?.charCount) || 0
       },
+      analysis: report.analysis || {
+        artifactKind: "unknown",
+        userCapability: {
+          overall: "mixed",
+          dimensions: {
+            domainProductUnderstanding: "L1",
+            aiAgentSteering: "L1",
+            technicalDomainImplementation: "L1",
+            validationDebugging: "L1"
+          },
+          currentDomain: "unknown",
+          evidenceSignals: [],
+          confidence: 0,
+          recommendedCardLevel: "foundation"
+        }
+      },
       sections: report.sections || {
         aiCompleted: [],
         userContributed: [],

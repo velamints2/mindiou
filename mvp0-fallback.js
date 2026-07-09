@@ -174,13 +174,21 @@ export function normalizeReport(raw) {
     if (!Array.isArray(arr)) arr = [];
     const validLevels = ["L0", "L1", "L2", "L3", "L4", "L5"];
     const validDifficulties = ["foundation", "intermediate", "advanced"];
+    const normalizedGaps = normalizeGapArray(sections.dangerousGaps);
+    function normalizeCardTarget(target) {
+      const value = clean(target);
+      const match = value.match(/^dangerousGap-(\d+)$/i);
+      if (!match) return truncate(value, 150);
+      const gap = normalizedGaps[Number(match[1]) - 1];
+      return truncate(gap?.gap || value, 150);
+    }
     const cards = arr.map(card => {
       if (typeof card !== "object" || card === null) {
         return makeCard(uuid(), "unknown", String(card));
       }
       return {
         id: clean(card.id || uuid()).slice(0, 100),
-        target: truncate(card.target, 150),
+        target: normalizeCardTarget(card.target),
         prompt: truncate(card.prompt, 300),
         targetLevel: validLevels.includes(card.targetLevel) ? card.targetLevel : "L1",
         difficulty: validDifficulties.includes(card.difficulty) ? card.difficulty : "foundation",
@@ -410,6 +418,22 @@ export function generateFallbackReport(artifactText, artifactType) {
       artifactText: text,
       artifactType: type,
       charCount: clean(text).length
+    },
+    analysis: {
+      artifactKind: "unknown",
+      userCapability: {
+        overall: "mixed",
+        dimensions: {
+          domainProductUnderstanding: "L1",
+          aiAgentSteering: "L1",
+          technicalDomainImplementation: "L1",
+          validationDebugging: "L1"
+        },
+        currentDomain: "unknown",
+        evidenceSignals: [],
+        confidence: 0,
+        recommendedCardLevel: "foundation"
+      }
     },
     sections: {
       aiCompleted,

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { createMvp0Store } from "../mvp0-store.js";
 import { mkdir, rm } from "node:fs/promises";
@@ -14,6 +15,22 @@ function makeReport(overrides = {}) {
       artifactText: overrides.artifactText || "Sample AI conversation text",
       artifactType: overrides.artifactType || "chatgpt",
       charCount: overrides.charCount ?? 28
+    },
+    analysis: overrides.analysis || {
+      artifactKind: "ai_workflow_transcript",
+      userCapability: {
+        overall: "mixed",
+        dimensions: {
+          domainProductUnderstanding: "L3",
+          aiAgentSteering: "L4",
+          technicalDomainImplementation: "L1",
+          validationDebugging: "L1"
+        },
+        currentDomain: "MindIOU MVP-0",
+        evidenceSignals: ["User provided acceptance criteria."],
+        confidence: 0.85,
+        recommendedCardLevel: "foundation"
+      }
     },
     sections: {
       aiCompleted: [
@@ -108,6 +125,13 @@ describe("MVP-0 store", () => {
       const longText = "x".repeat(40000);
       const saved = await store.saveReport(makeReport({ artifactText: longText, charCount: 40000 }));
       expect(saved.input.artifactText.length).toBe(30000);
+    });
+
+    it("preserves capability analysis for report quality inspection", async () => {
+      const saved = await store.saveReport(makeReport());
+      expect(saved.analysis.artifactKind).toBe("ai_workflow_transcript");
+      expect(saved.analysis.userCapability.dimensions.technicalDomainImplementation).toBe("L1");
+      expect(saved.analysis.userCapability.recommendedCardLevel).toBe("foundation");
     });
   });
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, it } from "vitest";
 import { generateFallbackReport, normalizeReport } from "../mvp0-fallback.js";
 
@@ -237,6 +238,22 @@ describe("normalizeReport", () => {
     const normalized = normalizeReport(raw);
     expect(normalized.sections.aiCompleted[0].isInference).toBe(true);
     expect(normalized.sections.aiCompleted[1].isInference).toBe(false);
+  });
+
+  it("maps dangerousGap-N card targets back to the real gap text", () => {
+    const normalized = normalizeReport({
+      sections: {
+        dangerousGaps: [
+          { rank: 1, gap: "用户尚未证明自己理解 sessionStorage 恢复边界", whyDangerous: "Cannot verify restore failures", evidence: "inference" },
+          { rank: 2, gap: "用户尚未证明自己理解结构契约和语义质量的区别", whyDangerous: "May treat schema compliance as product quality", evidence: "inference" }
+        ],
+        feynmanCards: [
+          { id: "card-1", target: "dangerousGap-2", prompt: "Explain the contract vs semantic quality boundary." }
+        ]
+      }
+    });
+
+    expect(normalized.sections.feynmanCards[0].target).toBe("用户尚未证明自己理解结构契约和语义质量的区别");
   });
 
   it("sorts dangerousGaps by rank", () => {
