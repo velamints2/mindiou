@@ -12,6 +12,21 @@ It configured Tailwind CSS and created all the components. I just followed along
 The deployment is on Vercel, but I don't understand how the build pipeline works.
 `;
 
+function rolloutJsonl(entries: unknown[]) {
+  return entries.map(entry => JSON.stringify(entry)).join("\n");
+}
+
+function rolloutMessage(role: string, text: string) {
+  return {
+    type: "response_item",
+    payload: {
+      type: "message",
+      role,
+      content: [{ type: "input_text", text }]
+    }
+  };
+}
+
 // A realistic AI response that matches the schema
 const MOCK_AI_SUCCESS = {
   sections: {
@@ -272,6 +287,28 @@ describe("generateClearanceReport", () => {
 
       const userPayload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
       expect(userPayload.artifactText.length).toBe(30000);
+    });
+
+    it("uses structured compression for rollout JSONL before sending the prompt", async () => {
+      const raw = rolloutJsonl([
+        { type: "session_meta", payload: { id: "session-3", cwd: "/workspace" } },
+        rolloutMessage("user", "请先调查 API 24 路线。"),
+        rolloutMessage("assistant", "API 24 早期调查。".repeat(4000)),
+        rolloutMessage("user", "切到 API 26 VM 做最终验证。"),
+        rolloutMessage("assistant", "最终结果：API 26 VM 已通过 HAP 构建、hdc 安装、aa start 启动。仍需区分 VM 验收与真机验收。")
+      ]);
+      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
+
+      const report = await generateClearanceReport(raw, "codex", mockChatFn);
+
+      const userPayload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
+      expect(userPayload.preprocess.strategy).toBe("rollout-jsonl-structured");
+      expect(userPayload.preprocess.didCompress).toBe(true);
+      expect(userPayload.artifactText).toContain("Structured Compression");
+      expect(userPayload.artifactText).toContain("API 26 VM 已通过");
+      expect(userPayload.artifactText).toContain("VM 验收与真机验收");
+      expect(userPayload.artifactText.length).toBeLessThanOrEqual(30000);
+      expect(report.input.preprocess.strategy).toBe("rollout-jsonl-structured");
     });
 
     it("defaults invalid artifactType to 'other'", async () => {

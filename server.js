@@ -1104,7 +1104,7 @@ const server = createServer(async (req, res) => {
     // ── MVP-0: cognitive-debt clearance report ──
 
     if (url.pathname === "/api/mvp0/report") {
-      const artifactText = clean(payload.artifactText || "");
+      const artifactText = String(payload.artifactText || "").trim();
       let artifactType = clean(payload.artifactType || "");
       if (!artifactText) {
         jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });

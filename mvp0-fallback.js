@@ -99,6 +99,18 @@ function makeAction(item, route, reason) {
   };
 }
 
+function normalizePreprocess(raw) {
+  if (typeof raw !== "object" || raw === null) return null;
+  return {
+    strategy: truncate(raw.strategy || "unknown", 80),
+    didCompress: Boolean(raw.didCompress),
+    originalCharCount: Number(raw.originalCharCount) || 0,
+    preparedCharCount: Number(raw.preparedCharCount) || 0,
+    parsedEntries: Number(raw.parsedEntries) || 0,
+    parseFailures: Number(raw.parseFailures) || 0
+  };
+}
+
 /**
  * Normalize any report-like object into a schema-valid clearance report.
  * Fills missing fields, enforces constraints, and labels inferences.
@@ -278,7 +290,8 @@ export function normalizeReport(raw) {
       artifactType: VALID_ARTIFACT_TYPES.includes(raw.input?.artifactType)
         ? raw.input.artifactType
         : "other",
-      charCount: Number(raw.input?.charCount) || (raw.input?.artifactText ? clean(raw.input.artifactText).length : 0)
+      charCount: Number(raw.input?.charCount) || (raw.input?.artifactText ? clean(raw.input.artifactText).length : 0),
+      preprocess: normalizePreprocess(raw.input?.preprocess)
     },
     analysis: normalizeAnalysis(raw.analysis),
     sections: {

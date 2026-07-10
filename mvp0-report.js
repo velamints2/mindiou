@@ -1,4 +1,5 @@
 import { normalizeReport, generateFallbackReport } from "./mvp0-fallback.js";
+import { prepareArtifactForReport } from "./mvp0-artifact-preprocess.js";
 
 /**
  * MVP-0 clearance report generator.
@@ -202,7 +203,7 @@ const clearanceReportSystemPrompt = [
  * Build a capability-aware context hint for the user message.
  * This gives the AI additional framing about what to look for.
  */
-function buildCapabilityAwarePrompt(artifactText, artifactType) {
+function buildCapabilityAwarePrompt(artifactText, artifactType, preprocessMetadata = null) {
   const text = truncate(artifactText, MAX_TEXT);
   const type = VALID_ARTIFACT_TYPES.includes(artifactType) ? artifactType : "other";
 
@@ -228,12 +229,16 @@ function buildCapabilityAwarePrompt(artifactText, artifactType) {
     artifactText: text,
     artifactType: type,
     charCount: clean(text).length,
+    preprocess: preprocessMetadata,
     hint: [
       "Analyze this artifact for cognitive debt.",
       "First calibrate the user's capability (Step 0), then determine artifact type (Step 1).",
       "Apply role attribution rules (Step 2). Evidence must explain WHY the excerpt proves attribution (Step 3).",
       "Generate gaps and cards at user's current level + 1 (Steps 4-5).",
-      "Capability signals detected: " + (signals.length > 0 ? signals.join(" ") : "none auto-detected; infer from content.")
+      "Capability signals detected: " + (signals.length > 0 ? signals.join(" ") : "none auto-detected; infer from content."),
+      preprocessMetadata?.didCompress
+        ? `Input strategy: ${preprocessMetadata.strategy}. Treat this as a balanced evidence digest from a larger artifact, not as the full chronological transcript.`
+        : "Input strategy: plain text."
     ].join(" ")
   };
 }
@@ -247,16 +252,20 @@ function buildCapabilityAwarePrompt(artifactText, artifactType) {
  * @returns {Promise<object>} Normalized clearance report with all six sections
  */
 export async function generateClearanceReport(artifactText, artifactType, chatFn) {
-  const text = truncate(artifactText, MAX_TEXT);
   const type = VALID_ARTIFACT_TYPES.includes(artifactType) ? artifactType : "other";
+  const prepared = prepareArtifactForReport(artifactText, type, { maxText: MAX_TEXT });
+  const text = truncate(prepared.text, MAX_TEXT);
+  const preprocess = prepared.metadata;
 
   // If no chat function is provided, use fallback directly
   if (!chatFn) {
-    return generateFallbackReport(text, type);
+    const fallbackReport = generateFallbackReport(text, type);
+    fallbackReport.input.preprocess = preprocess;
+    return fallbackReport;
   }
 
   try {
-    const userPayload = buildCapabilityAwarePrompt(text, type);
+    const userPayload = buildCapabilityAwarePrompt(text, type, preprocess);
     const messages = [
       { role: "system", content: clearanceReportSystemPrompt },
       { role: "user", content: JSON.stringify(userPayload) }
@@ -270,6 +279,7 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
     // If AI was unavailable (chatJson returned fallback marker)
     if (result.__fallback || result.__useFallback) {
       const fallbackReport = generateFallbackReport(text, type);
+      fallbackReport.input.preprocess = preprocess;
       return fallbackReport;
     }
 
@@ -281,14 +291,17 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
       input: {
         artifactText: text,
         artifactType: type,
-        charCount: clean(text).length
+        charCount: clean(text).length,
+        preprocess
       }
     });
 
     return report;
   } catch (error) {
     // Any AI failure (network, parse, timeout) falls back to structural report
-    return generateFallbackReport(text, type);
+    const fallbackReport = generateFallbackReport(text, type);
+    fallbackReport.input.preprocess = preprocess;
+    return fallbackReport;
   }
 }
 

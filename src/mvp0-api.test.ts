@@ -16,6 +16,10 @@ I wanted to use Firebase, but the AI said Supabase was better for this use case.
 The AI wrote all the database queries and API routes. I'm not sure how the auth flow works.
 `;
 
+function rolloutJsonl(entries: unknown[]) {
+  return entries.map(entry => JSON.stringify(entry)).join("\n");
+}
+
 async function waitForServer(url: string, maxAttempts = 30): Promise<void> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
@@ -108,6 +112,50 @@ describe("MVP-0 API endpoints", () => {
       });
       const data = await res.json();
       expect(data.report.input.artifactType).toBe("claude");
+    });
+
+    it("preserves JSONL line breaks so rollout input can be structurally compressed", async () => {
+      const raw = rolloutJsonl([
+        { type: "session_meta", payload: { id: "api-jsonl-test", cwd: "/workspace" } },
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "切到 API 26 VM 做最终验证。" }]
+          }
+        },
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            output: "BUILD SUCCESSFUL\ninstall bundle successfully.\nstart ability successfully."
+          }
+        },
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "input_text", text: "最终结果：API 26 VM 构建、安装和启动通过。" }]
+          }
+        }
+      ]);
+      const res = await fetch(`${BASE}/api/mvp0/report`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          artifactText: raw,
+          artifactType: "codex"
+        })
+      });
+      const data = await res.json();
+
+      expect(data.report.input.preprocess.strategy).toBe("rollout-jsonl-structured");
+      expect(data.report.input.preprocess.didCompress).toBe(true);
+      expect(data.report.input.preprocess.parsedEntries).toBe(4);
+      expect(data.report.input.artifactText).toContain("BUILD SUCCESSFUL");
+      expect(data.report.input.artifactText).toContain("start ability successfully");
     });
   });
 

@@ -13,6 +13,18 @@ function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function normalizePreprocess(raw) {
+  if (typeof raw !== "object" || raw === null) return null;
+  return {
+    strategy: clean(raw.strategy || "unknown").slice(0, 80),
+    didCompress: Boolean(raw.didCompress),
+    originalCharCount: Number(raw.originalCharCount) || 0,
+    preparedCharCount: Number(raw.preparedCharCount) || 0,
+    parsedEntries: Number(raw.parsedEntries) || 0,
+    parseFailures: Number(raw.parseFailures) || 0
+  };
+}
+
 /**
  * MVP-0 store for cognitive-debt clearance reports.
  * Completely independent from spiral-store.js.
@@ -60,7 +72,8 @@ export function createMvp0Store(filePath) {
       input: {
         artifactText: String(report.input?.artifactText || "").slice(0, 30000),
         artifactType: clean(report.input?.artifactType || "other").slice(0, 40),
-        charCount: Number(report.input?.charCount) || 0
+        charCount: Number(report.input?.charCount) || 0,
+        preprocess: normalizePreprocess(report.input?.preprocess)
       },
       analysis: report.analysis || {
         artifactKind: "unknown",
