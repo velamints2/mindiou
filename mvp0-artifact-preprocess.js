@@ -46,7 +46,7 @@ function parseJsonl(text) {
 }
 
 function looksLikeRolloutJsonl(parsed) {
-  if (parsed.length < 5) return false;
+  if (parsed.length < 3) return false;
   const typeCounts = new Map();
   for (const entry of parsed) {
     typeCounts.set(entry.type, (typeCounts.get(entry.type) || 0) + 1);
