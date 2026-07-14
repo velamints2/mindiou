@@ -75,6 +75,40 @@ More detailed card generation rules are documented in
 
 The API uses `OPENAI_API_KEY` when present. Without it, import and tutor endpoints return fallback content; transcription returns an explicit missing-key error.
 
+## MindIOU MVP-1 eval-first loop
+
+MVP-1 starts from a persisted MVP-0 report card and runs one source-grounded
+cognitive-debt clearance session. It is backend-only in this increment.
+
+- `POST /api/mvp1/sessions`: starts from `reportId` + `cardId`, performs real
+  web research, and returns a rewritten question with cited sources. The hidden
+  explanation scaffold is not returned yet.
+- `POST /api/mvp1/sessions/:id/answers`: analyzes a learner explanation against
+  the cited scaffold, reveals the scaffold, and returns teaching or an end
+  recommendation.
+- `POST /api/mvp1/sessions/:id/end`: ends only on explicit user action and
+  returns a cautious status with evidence and remaining gaps.
+- `GET /api/mvp1/sessions/:id`: reads the current in-memory evaluation session.
+
+Configure `OPENAI_RESEARCH_MODEL` for the Responses API `web_search` call. The
+research request has a 45-second timeout and fails visibly when no cited source
+is returned. Current sessions are intentionally in memory; durable persistence
+is deferred until the eval-first quality gate is accepted.
+
+With the API running, execute all three real-project fixtures:
+
+```bash
+npm run test:mvp1
+```
+
+Run one fixture while tuning quality:
+
+```bash
+MVP1_EVAL_SAMPLE=g2-webview-request npm run test:mvp1
+```
+
+Results are written to `tmp/mvp1-eval-results.json` by default.
+
 ## Package
 
 Build and package the current version with:

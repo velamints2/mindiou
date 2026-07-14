@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:cards": "vitest run src/learning/*.test.ts",
     "test:desktop": "npm run check && npm run test:cards",
+    "test:mvp1": "node scripts/mvp1-eval.mjs",
     "test:voice": "node scripts/voice-smoke-test.mjs",
     "test:spiral": "node scripts/spiral-smoke-test.mjs",
     "test:rokid": "node scripts/rokid-smoke-test.mjs",

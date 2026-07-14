@@ -5,6 +5,15 @@ import { createMvp0Store } from "./mvp0-store.js";
 import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport } from "./mvp0-report.js";
 import { feynmanFollowUp } from "./mvp0-followup.js";
+import {
+  endClearanceSession,
+  getClearanceAnalysisPrompt,
+  getResearchStructuringPrompt,
+  publicSession,
+  startClearanceSession,
+  submitClearanceAnswer
+} from "./mvp1-clearance.js";
+import { createOpenAiWebResearch } from "./mvp1-openai.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -13,6 +22,7 @@ const openAiApiKey = process.env.OPENAI_API_KEY || "";
 const disableAi = process.env.SPIRAL_DISABLE_AI === "1";
 const openAiBaseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
 const chatModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const researchModel = process.env.OPENAI_RESEARCH_MODEL || chatModel;
 const sttModel = process.env.OPENAI_STT_MODEL || "gpt-4o-mini-transcribe";
 const sttPrompt = process.env.OPENAI_STT_PROMPT || [
   "Learn Coach vocabulary study in Mandarin and English.",
@@ -26,6 +36,12 @@ const spiralStore = createSpiralStore(learningStorePath);
 await spiralStore.load();
 const mvp0Store = createMvp0Store(mvp0StorePath);
 await mvp0Store.load();
+const mvp1Sessions = new Map();
+const rawWebResearch = createOpenAiWebResearch({
+  apiKey: openAiApiKey,
+  baseUrl: openAiBaseUrl,
+  model: researchModel
+});
 
 const learningCoachSystemPrompt = [
   "You are Learn Coach, a rigorous but patient AI teacher for smart glasses including Even G2 and Rokid AIUI devices.",
@@ -351,6 +367,48 @@ async function chatJson(messages, fallback) {
   if (!response.ok) throw new Error(payload.error?.message || `OpenAI HTTP ${response.status}`);
   const content = payload.choices?.[0]?.message?.content || "{}";
   return parseJsonObject(content);
+}
+
+async function analyzeClearanceAnswer(input) {
+  const result = await chatJson([
+    { role: "system", content: getClearanceAnalysisPrompt() },
+    { role: "user", content: JSON.stringify(input) }
+  ], () => ({
+    status: "needs_verification",
+    coverage: 0,
+    demonstrated: [],
+    missing: ["AI answer analysis was unavailable."],
+    misconceptions: [],
+    evidence: [],
+    materialSourceIds: [],
+    feedback: "Your answer was recorded, but the system could not evaluate it.",
+    teaching: "Review the cited sources and compare them with your explanation.",
+    nextQuestion: input.question,
+    recommendation: "continue"
+  }));
+  return result;
+}
+
+async function researchClearanceContext(request) {
+  const evidence = await rawWebResearch(request);
+  const structured = await chatJson([
+    { role: "system", content: getResearchStructuringPrompt() },
+    {
+      role: "user",
+      content: JSON.stringify({
+        request,
+        researchText: evidence.researchText,
+        sources: evidence.sources
+      })
+    }
+  ], () => ({ rewrittenQuestion: request.originalQuestion, summary: "", scaffold: [] }));
+  const referencedSourceIds = new Set(
+    (structured.scaffold || []).flatMap(point => Array.isArray(point.sourceIds) ? point.sourceIds : [])
+  );
+  return {
+    ...structured,
+    sources: evidence.sources.filter(source => referencedSourceIds.has(source.id))
+  };
 }
 
 async function checkOpenAiConnectivity() {
@@ -1083,6 +1141,16 @@ const server = createServer(async (req, res) => {
       jsonResponse(res, 200, { ok: true, reports: mvp0Store.listReports() });
       return;
     }
+    const mvp1SessionMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)$/);
+    if (req.method === "GET" && mvp1SessionMatch) {
+      const session = mvp1Sessions.get(decodeURIComponent(mvp1SessionMatch[1]));
+      if (!session) {
+        jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
+        return;
+      }
+      jsonResponse(res, 200, { ok: true, session: publicSession(session, { revealScaffold: session.attempts.length > 0 }) });
+      return;
+    }
     const mvp0ReportMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)$/);
     if (req.method === "GET" && mvp0ReportMatch) {
       try {
@@ -1100,6 +1168,71 @@ const server = createServer(async (req, res) => {
     }
 
     const payload = parseJson(await readBody(req));
+
+    // ── MVP-1: source-grounded debt clearance ──
+
+    if (url.pathname === "/api/mvp1/sessions") {
+      try {
+        if (!openAiApiKey || disableAi) {
+          jsonResponse(res, 503, { ok: false, error: "MVP-1 external research requires an active OpenAI API configuration" });
+          return;
+        }
+        const reportId = clean(payload.reportId || "");
+        const cardId = clean(payload.cardId || "");
+        if (!reportId || !cardId) {
+          jsonResponse(res, 400, { ok: false, error: "Missing reportId or cardId" });
+          return;
+        }
+        const report = mvp0Store.getReport(reportId);
+        const session = await startClearanceSession({ report, cardId, researchFn: researchClearanceContext });
+        mvp1Sessions.set(session.id, session);
+        jsonResponse(res, 200, { ok: true, session: publicSession(session) });
+      } catch (error) {
+        const status = /not found/i.test(String(error.message)) ? 404 : 502;
+        jsonResponse(res, status, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    const mvp1AnswerMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/answers$/);
+    if (mvp1AnswerMatch) {
+      try {
+        const session = mvp1Sessions.get(decodeURIComponent(mvp1AnswerMatch[1]));
+        if (!session) {
+          jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
+          return;
+        }
+        const attempt = await submitClearanceAnswer({
+          session,
+          answer: payload.answer,
+          analyzeFn: analyzeClearanceAnswer
+        });
+        jsonResponse(res, 200, {
+          ok: true,
+          attempt,
+          session: publicSession(session, { revealScaffold: true })
+        });
+      } catch (error) {
+        jsonResponse(res, 400, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    const mvp1EndMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/end$/);
+    if (mvp1EndMatch) {
+      const session = mvp1Sessions.get(decodeURIComponent(mvp1EndMatch[1]));
+      if (!session) {
+        jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
+        return;
+      }
+      const result = endClearanceSession(session);
+      jsonResponse(res, 200, {
+        ok: true,
+        result,
+        session: publicSession(session, { revealScaffold: true })
+      });
+      return;
+    }
 
     // ── MVP-0: cognitive-debt clearance report ──
 

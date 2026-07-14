@@ -1,0 +1,26 @@
+[
+  {
+    "id": "phone-deck-api26",
+    "title": "Phone Deck HarmonyOS API 26",
+    "artifactType": "codex",
+    "artifactText": "用户要求把 Phone Deck 在 HarmonyOS 模拟器上跑通。AI 最初尝试 API 24，遇到 SDK、构建和运行兼容问题后改选 API 26，并调整权限和配置。最终日志显示 BUILD SUCCESSFUL、install bundle successfully、start ability successfully。用户批准了路线，但没有解释为什么 API 26 VM 的构建安装启动通过，仍然不能证明真实设备兼容，也没有说明权限收缩和 API 版本选择的验收边界。",
+    "insufficientAnswer": "因为 API 26 更新，所以能跑就说明修好了。",
+    "goodAnswer": "已验证部分：BUILD SUCCESSFUL 只证明当前 SDK/API 26 配置下构建成功；install bundle successfully 证明 HAP 能装进该 VM；start ability successfully 证明 Ability 在该 VM 能启动。未验证部分：simulator 与 real device 是不同验收对象，尚未证明真实设备上的硬件能力、系统权限、网络策略、核心功能、UI 显示、前后台切换、异常路径、稳定性、性能和功耗。补充验证：用至少一台目标 HarmonyOS 真机或 AGC 云端真机按机型和系统版本执行安装、启动、核心功能、权限拒绝、前后台、卸载与长时间稳定性用例，并记录日志和屏幕结果；权限应保持最小化。"
+  },
+  {
+    "id": "g2-webview-request",
+    "title": "G2 WebView request failure",
+    "artifactType": "codex",
+    "artifactText": "Learn Coach 在桌面浏览器能打开，但 Even App 的 G2 WebView 首次显示 failed to fetch。AI 先检查 CORS，随后发现客户端配置了 localhost，而手机 WebView 的 localhost 指向手机自身，不是 Mac。改成局域网地址并补充网络白名单和连接测试后，API 请求成功。用户看到结果，但没有解释网络可达、域名或地址白名单、CORS 响应读取和 G2 图片渲染分别属于哪一段，也无法判断修复是否覆盖真实设备链路。",
+    "insufficientAnswer": "这是 CORS 问题，把跨域打开就可以。",
+    "goodAnswer": "第一段是设备到开发机可达：localhost 在手机上指向手机自己，地址错、端口不通或不在同一网络时通常是连接失败、超时或 failed to fetch，服务端没有请求日志。第二段是应用/系统白名单：网络本来可达但 WebView 策略不放行时，请求会被容器拦截，现象也像连接失败，但系统或 WebView 日志会显示策略拒绝。第三段是服务端响应：请求已到服务端，若服务崩溃、超时或返回 404/500，应在服务端日志和 HTTP 状态中看到证据。第四段是前端读取：服务端可能已经正常回包，但 CORS 不允许 JavaScript 读取时，控制台有明确 CORS 报错。第五段是 G2 渲染：前端已拿到数据但图片生成、SDK 传输或眼镜显示失败时，API 测试成功而画面仍空白或停在旧图。failed to fetch 只表示 fetch promise 被拒绝，可能来自地址、网络或策略，不能直接等于 CORS，更不能证明服务端返回了 500。"
+  },
+  {
+    "id": "rollout-structured-compression",
+    "title": "MVP-0 rollout structured compression",
+    "artifactType": "codex",
+    "artifactText": "用户把一个 6.2MB 的 Codex/Trae rollout JSONL 输入 MVP-0。旧策略按前 30000 字符顺序截断，报告只看到早期 API 24 调查，遗漏最终 API 26 决策、测试和用户确认。AI 增加结构化预处理，优先抽取最终结果、验证输出、用户决策、关键工具调用和补丁证据，过滤 system prompt、tool schema、encrypted reasoning 和事件遥测。真实 smoke 解析 1389 条记录并生成非 fallback 报告，测试全部通过。用户尚未解释为什么扩大上下文窗口不能解决证据偏置，以及如何验收压缩没有删掉影响认知债务判断的反证。",
+    "insufficientAnswer": "输入太长，所以压短一点就好了。",
+    "goodAnswer": "大窗口只解决放得下，不保证找得到。第一，顺序和位置偏置仍然存在：即使最终 API 26 决策已进入长上下文，它处在不利位置或离当前任务太远时仍可能比早期重复内容更难被调用，所以不能把问题只理解成截断。第二，system prompt、tool schema、事件遥测和样板输出数量巨大，会降低最终测试、用户确认与反证的信号密度；新增内容还会与关键证据竞争模型有限且非均匀分配的注意力和推理预算。第三，因此根因是证据选择、排序和上下文装配造成的偏置，不只是容量。结构化压缩应按最终结果、验证、用户决定、失败反证和关键取舍抽取并保留来源；验收要用已知结论样本检查这些证据是否保留，而不是只看压缩率或报告能否生成。"
+  }
+]
