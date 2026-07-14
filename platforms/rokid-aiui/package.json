@@ -1,9 +1,9 @@
 {
   "name": "learn-coach-rokid-aiui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Rokid AIUI client for Learn Coach and Spiral",
+  "description": "MindIOU source-grounded cognitive-debt clearance for Rokid AIUI glasses",
   "main": "app.js",
   "scripts": {
     "check": "node scripts/check-agent.mjs",

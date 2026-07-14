@@ -65,7 +65,8 @@ label {
   font-size: 12px;
 }
 
-.meta span:first-child {
+.meta span:first-child,
+#target {
   color: #b8f0dc;
   font-weight: 700;
 }
@@ -77,6 +78,11 @@ article {
   justify-content: center;
   min-height: 0;
   overflow: hidden;
+}
+
+#target {
+  margin: 0 0 12px;
+  font-size: 18px;
 }
 
 h1 {
@@ -96,15 +102,6 @@ h1.compact {
   line-height: 1.12;
 }
 
-#question {
-  width: min(780px, 92%);
-  margin: 24px 0 0;
-  font-size: 28px;
-  line-height: 1.35;
-  max-height: 114px;
-  overflow: hidden;
-}
-
 #feedback {
   margin: 22px 0 0;
   padding: 12px 16px;
@@ -113,6 +110,15 @@ h1.compact {
   color: #d9f7ec;
   font-size: 20px;
   max-height: 78px;
+  overflow: hidden;
+}
+
+#follow-up {
+  margin: 10px 0 0;
+  color: #fff;
+  font-size: 18px;
+  line-height: 1.35;
+  max-height: 52px;
   overflow: hidden;
 }
 
@@ -198,12 +204,59 @@ button.primary {
     font-size: 36px;
   }
 
-  #question {
-    font-size: 22px;
-  }
-
   nav {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 700px) and (max-height: 500px) {
+  .display {
+    padding: 14px 18px 10px;
+  }
+
+  .meta {
+    margin-top: 8px;
+    padding-top: 7px;
+  }
+
+  h1 {
+    font-size: 48px;
+  }
+
+  #answer-form {
+    margin-top: 8px;
+  }
+
+  #answer-form label {
+    margin-bottom: 3px;
+  }
+
+  button,
+  input {
+    height: 38px;
+  }
+
+  .has-feedback h1 {
+    font-size: 34px;
+    line-height: 1.05;
+  }
+
+  .has-feedback #target {
+    margin-bottom: 5px;
+    font-size: 15px;
+  }
+
+  .has-feedback #feedback {
+    margin-top: 10px;
+    padding: 8px 12px;
+    font-size: 16px;
+    max-height: 58px;
+  }
+
+  .has-feedback #follow-up {
+    margin-top: 6px;
+    font-size: 15px;
+    max-height: 40px;
   }
 }

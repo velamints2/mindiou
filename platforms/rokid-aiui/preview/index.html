@@ -3,35 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Learn Coach Rokid Preview</title>
+    <title>MindIOU Rokid Preview</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="device">
-      <section class="display" aria-label="Rokid Learn Coach preview">
+      <section class="display" aria-label="MindIOU Rokid optical-waveguide preview">
         <header>
-          <strong>LEARN COACH</strong>
-          <span id="progress">1 / 1</span>
+          <strong>MINDIOU</strong>
+          <span id="progress">— / —</span>
         </header>
         <div class="meta">
-          <span id="priority">ACTIVE RECALL</span>
-          <span id="status">同步学习队列</span>
+          <span id="domain">认知债务</span>
+          <span id="status">读取认知欠条</span>
         </div>
         <article>
-          <h1 id="concept">CORS</h1>
-          <p id="question">用自己的话解释：CORS 和网络白名单有什么区别？</p>
+          <p id="target">准备清偿</p>
+          <h1 id="question">正在寻找最近一次 AI 实践留下的理解缺口。</h1>
           <p id="feedback" hidden></p>
+          <p id="follow-up" hidden></p>
         </article>
         <nav aria-label="Study controls">
-          <button id="hint" type="button">提示</button>
-          <button id="known" type="button">会了</button>
-          <button id="next" class="primary" type="button">下一题</button>
+          <button id="restart" type="button">重试</button>
+          <button id="source" type="button" disabled>来源</button>
+          <button id="end" class="primary" type="button" disabled>结束</button>
         </nav>
         <form id="answer-form">
           <label for="answer">语音回答模拟</label>
           <div>
-            <input id="answer" placeholder="用自己的话解释当前概念" />
-            <button class="primary" type="submit">提交</button>
+            <input id="answer" placeholder="模拟眼镜上的口述回答" />
+            <button class="primary" type="submit" disabled>回答</button>
           </div>
         </form>
       </section>

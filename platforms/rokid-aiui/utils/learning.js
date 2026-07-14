@@ -7,7 +7,22 @@ export function commandFromUtterance(value) {
   if (["提问", "问我", "ask"].includes(text)) return "ask";
   if (["会了", "懂了", "got it", "known"].includes(text)) return "known";
   if (["跳过", "skip"].includes(text)) return "skip";
+  if (["结束清偿", "结束学习", "完成清偿", "结束", "end", "stop"].includes(text)) return "end";
   return "answer";
+}
+
+export function clearanceStatusLabel(status) {
+  const labels = {
+    provisionally_cleared: "暂时清偿",
+    needs_practice: "继续练习",
+    needs_verification: "需要查证",
+    no_valid_attempt: "尚未作答"
+  };
+  return labels[status] || "继续解释";
+}
+
+export function conciseClearanceText(analysis) {
+  return String(analysis?.feedback || analysis?.teaching || "请再用自己的话解释一次。").slice(0, 96);
 }
 
 export function assessmentToReview(assessment) {

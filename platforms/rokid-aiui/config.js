@@ -3,7 +3,8 @@ export const DEFAULT_SESSION_DURATION = 60;
 export const STORAGE_KEYS = {
   apiBaseUrl: "learnCoachRokidApiBaseUrl",
   apiToken: "learnCoachRokidApiToken",
-  currentCard: "learnCoachRokidCurrentCard"
+  currentCard: "learnCoachRokidCurrentCard",
+  clearanceSession: "mindIouRokidClearanceSession"
 };
 
 export const DEMO_CARD = {

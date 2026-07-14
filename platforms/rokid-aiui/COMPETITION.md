@@ -1,91 +1,93 @@
-# Competition Brief: Spiral Learn Coach
+# Competition Brief: MindIOU on Rokid Glasses
 
 ## One-Line Pitch
 
-Spiral Learn Coach turns the work AI completed for you into the understanding
-you can reproduce without AI, using short voice-first recall sessions on Rokid
-glasses.
+MindIOU turns the understanding AI skipped for you into a source-grounded,
+voice-first debt-clearance session on Rokid optical-waveguide glasses.
 
 ## User Problem
 
-AI helps people finish work faster, but completion is not the same as learning.
-After an AI-assisted coding, research, or writing session, users often cannot
-explain the principle, reproduce the result, or recognize the same failure
-later. Traditional courses and flashcard tools require manual organization and
-are disconnected from the user's real work.
+AI helps people finish coding, research, writing, and product work faster, but
+completion does not prove understanding. Users can ship a result while still
+being unable to explain the technical choice, verify the AI's fix, or recognize
+an incomplete solution. Generic courses are too far from the work that created
+the gap.
 
-## Product Loop
+## Demonstrable Loop
 
 ```text
-Real work or imported material
+AI-assisted work or conversation
         |
         v
-Spiral cognitive compiler
+MindIOU cognitive-debt report
         |
         v
-Knowledge atom + learning debt + source trace
+Latest Feynman debt selected for Rokid
         |
         v
-One large Rokid recall question
+External research with cited sources
         |
         v
-Spoken explanation
+One large question on the waveguide display
         |
         v
-AI evaluation + one missing point + one follow-up
+Learner explains aloud
         |
         v
-Debt cleared or scheduled for review
+AI checks reasoning + teaches one missing point + asks one follow-up
+        |
+        v
+User explicitly ends with a cautious clearance status
 ```
 
-## Why Glasses
+## Why Optical-Waveguide Glasses
 
-- The prompt appears when the learner has 15 seconds to 3 minutes.
-- The user answers aloud instead of opening a phone and typing.
-- One-concept display reduces visual load and discourages passive reading.
-- Voice and AI feedback create a complete learning loop without a course UI.
+- One large question fits a glanceable, eyes-up display better than a course UI.
+- Speaking an explanation is closer to the Feynman method than tapping a quiz.
+- The answer is hidden before recall, so the display does not become a cheat sheet.
+- The learner can repair an understanding gap immediately after AI-assisted work.
 
 ## AI-Native Behavior
 
-AI is not used only to generate prose. It decides:
+The model does more than generate prose. It researches the minimum external
+knowledge needed to judge one debt, cites the sources, builds a hidden checking
+scaffold, analyzes the learner's demonstrated reasoning, and selects one useful
+follow-up. The UI remains stable and developer-controlled.
 
-- whether a source contains a real reusable learning increment;
-- which concepts deserve zero to three durable knowledge atoms;
-- which AI-assisted task represents a capability gap;
-- the learning debt score and no-AI micro exercise;
-- whether the spoken explanation is correct, partial, or incorrect;
-- the single best follow-up question for the current misunderstanding.
-
-The UI remains controlled and predictable: the model supplies structured data,
-while AIUI renders stable concept, feedback, and follow-up surfaces.
+MindIOU never declares permanent mastery. Its outcomes are intentionally
+cautious: provisionally cleared, needs practice, needs verification, or no
+valid attempt. Ordinary web sources that materially affect a positive result
+trigger a verification requirement.
 
 ## 90-Second Demonstration
 
-1. Explain the problem: AI fixed a CORS bug, but completion did not prove understanding.
-2. Say: "把这段工作记录转成学习卡片：请求能发出但浏览器不能读取响应。网络白名单控制能否发送，CORS 控制浏览器能否读取跨域响应。"
-3. Show the import tool producing a concise `CORS` card and reporting AI or fallback.
-4. Say: "开始学习。"
-5. Answer incorrectly: "CORS 就是允许请求发到另一个域名。"
-6. Show a partial assessment, the missing idea, and one follow-up.
-7. Answer the follow-up, then say: "这题我会了。"
-8. Show the debt becoming cleared and the next concept appearing.
+1. Show an MVP-0 report from an AI-assisted WebView networking fix.
+2. Open MindIOU on Rokid Glasses; the latest debt appears as one large question.
+3. Point out the source count and that no answer or scaffold is visible.
+4. Give an incomplete spoken explanation that merges reachability and CORS.
+5. Show the AI recognizing the valid part, teaching one boundary, and asking one
+   concrete follow-up.
+6. Answer again in your own words, including how you would verify the AI's fix.
+7. Say `结束清偿` and show the cautious final status.
+8. Briefly show the same report and evidence on desktop to prove cross-device
+   continuity.
 
-## Judging Evidence
+## Implemented Evidence
 
-- Real OpenAI import and tutor contracts run in the shared backend.
-- Every generated knowledge card retains project and source identity.
-- Review outcomes update an explicit scheduler and learning-debt lifecycle.
-- Voice commands use conservative whole-utterance matching.
-- AI fallback is visible and never presented as real AI output.
-- The Rokid package has structure, secret, API, behavior, and size gates.
-- The same cognitive system already has an Even G2 client, demonstrating a
-  hardware-independent product rather than a one-device demo.
+- Current Rokid AIUI / Ink immersive-agent structure and ES module app entry.
+- Shared MVP-1 source-grounded research and answer-analysis backend.
+- Compact latest-report endpoint for the glasses.
+- Hidden scaffold before first answer.
+- Conservative whole-utterance command matching.
+- API key isolation: secrets stay on the backend.
+- Platform unit tests, backend contract tests, smoke tests, package checks, and
+  640x480 plus 480x640 visual overflow checks.
+- Browser acceptance harness for deterministic demos and real backend sessions.
 
-## Submission Assets Still Needed
+## Remaining Submission Work
 
-- Craft import screenshot and target-device screenshot.
-- A 60-90 second hardware demo video.
-- Public HTTPS deployment of the Learn Coach backend.
-- Competition-specific app ID, author metadata, icon, and privacy URL.
-- Confirmation of whether the target contest expects AIUI Studio, GPASS
-  workflow, or a native Glasses SDK APK.
+- Import the `0.2.0` archive into the competition's current Rokid Craft account.
+- Validate microphone Tool Rendering and layout on the exact target firmware.
+- Deploy the backend to HTTPS for judging outside the local network.
+- Add competition app ID, author metadata, icon, privacy URL, screenshots, and
+  a 60-90 second hardware demo video.

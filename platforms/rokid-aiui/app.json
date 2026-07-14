@@ -1,12 +1,13 @@
 {
   "pages": [
+    "pages/clearance/index",
     "pages/index/index",
     "pages/voice-action/index",
     "pages/import/index",
     "pages/settings/index"
   ],
   "window": {
-    "navigationBarTitleText": "Learn Coach",
+    "navigationBarTitleText": "MindIOU",
     "backgroundColor": "#000000",
     "navigationBarBackgroundColor": "#000000",
     "navigationBarTextStyle": "white"

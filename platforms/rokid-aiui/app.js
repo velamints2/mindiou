@@ -1,4 +1,4 @@
-App({
+export default {
   globalData: {
     apiBaseUrl: "http://192.168.1.10:8793",
     apiToken: "",
@@ -11,4 +11,4 @@ App({
     if (query.token) this.globalData.apiToken = decodeURIComponent(query.token);
     console.log("Learn Coach for Rokid launched");
   }
-});
+};

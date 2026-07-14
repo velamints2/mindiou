@@ -102,6 +102,20 @@ afterAll(async () => {
 });
 
 describe("MVP-1 HTTP vertical slice", () => {
+  it("exposes a compact latest-report entry for Rokid glasses", async () => {
+    const response = await fetch(`${BASE}/api/rokid/clearance-entry`);
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.platform).toBe("rokid-aiui");
+    expect(data.entry).toMatchObject({
+      reportId: seededReport.id,
+      cardId: "mvp1-card",
+      cardNumber: 1,
+      cardCount: 1
+    });
+    expect(data.entry.prompt).toContain("reachable API");
+  });
+
   it("starts from a persisted card without exposing the hidden scaffold", async () => {
     const response = await fetch(`${BASE}/api/mvp1/sessions`, {
       method: "POST",

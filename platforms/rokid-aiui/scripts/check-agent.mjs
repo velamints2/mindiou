@@ -8,6 +8,7 @@ const required = [
   "app.json",
   "app.wxss",
   "config.js",
+  "pages/clearance/index.ink",
   "pages/index/index.ink",
   "pages/voice-action/index.ink",
   "pages/import/index.ink",
@@ -26,6 +27,10 @@ for (const relativePath of required) {
 }
 
 const app = JSON.parse(await readFile(path.join(root, "app.json"), "utf8"));
+const appSource = await readFile(path.join(root, "app.js"), "utf8");
+if (!/export\s+default\s+\{/.test(appSource)) {
+  failures.push("app.js must use the current AIUI export default application format");
+}
 for (const page of app.pages || []) {
   const inkPath = path.join(root, `${page}.ink`);
   try {

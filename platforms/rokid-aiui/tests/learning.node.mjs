@@ -2,15 +2,55 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assessmentToReview,
+  clearanceStatusLabel,
   commandFromUtterance,
+  conciseClearanceText,
   conciseFeedback
 } from "../utils/learning.js";
+import {
+  fetchClearanceEntry,
+  loadClearanceSession,
+  saveClearanceSession,
+  startClearance,
+  submitClearanceAnswer
+} from "../utils/api.js";
 
 test("short explicit commands are classified conservatively", () => {
   assert.equal(commandFromUtterance("下一题"), "next");
   assert.equal(commandFromUtterance("上一张。"), "previous");
   assert.equal(commandFromUtterance("会了"), "known");
   assert.equal(commandFromUtterance("再说一遍"), "repeat");
+  assert.equal(commandFromUtterance("结束清偿"), "end");
+});
+
+test("clearance feedback stays short and uses cautious labels", () => {
+  assert.equal(clearanceStatusLabel("provisionally_cleared"), "暂时清偿");
+  assert.equal(clearanceStatusLabel("needs_verification"), "需要查证");
+  assert.equal(conciseClearanceText({ feedback: "a".repeat(120) }).length, 96);
+});
+
+test("Rokid clearance API uses the shared MVP-1 contract and local session storage", async () => {
+  const calls = [];
+  const storage = new Map();
+  globalThis.wx = {
+    getStorageSync(key) { return storage.get(key); },
+    setStorageSync(key, value) { storage.set(key, value); },
+    async request(options) {
+      calls.push(options);
+      return { statusCode: 200, data: { ok: true, session: { id: "session-1" } } };
+    }
+  };
+  const config = { apiBaseUrl: "http://127.0.0.1:8793", apiToken: "", duration: 60 };
+  await fetchClearanceEntry(config);
+  await startClearance(config, "report one", "card/one");
+  await submitClearanceAnswer(config, "session/1", "我的解释");
+  saveClearanceSession({ id: "session-1", state: "awaiting_answer" });
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8793/api/rokid/clearance-entry");
+  assert.deepEqual(calls[1].data, { reportId: "report one", cardId: "card/one" });
+  assert.match(calls[2].url, /session%2F1\/answers$/);
+  assert.equal(loadClearanceSession().id, "session-1");
+  delete globalThis.wx;
 });
 
 test("long explanations remain answers even when they contain command words", () => {

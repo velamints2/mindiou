@@ -1134,6 +1134,30 @@ const server = createServer(async (req, res) => {
       );
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/rokid/clearance-entry") {
+      const report = mvp0Store.listReports().find(item => item.sections?.feynmanCards?.length);
+      if (!report) {
+        jsonResponse(res, 200, { ok: true, platform: "rokid-aiui", entry: null });
+        return;
+      }
+      const cards = report.sections.feynmanCards;
+      const card = cards.find(item => !item.userAnswer) || cards[0];
+      jsonResponse(res, 200, {
+        ok: true,
+        platform: "rokid-aiui",
+        entry: {
+          reportId: report.id,
+          cardId: card.id,
+          createdAt: report.createdAt,
+          domain: clean(report.analysis?.userCapability?.currentDomain || "认知债务"),
+          target: clean(card.target || "理解缺口"),
+          prompt: clean(card.prompt || "请用自己的话解释这个问题。"),
+          cardNumber: cards.findIndex(item => item.id === card.id) + 1,
+          cardCount: cards.length
+        }
+      });
+      return;
+    }
 
     // ── MVP-0: cognitive-debt clearance report ──
 

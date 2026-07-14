@@ -14,7 +14,8 @@ const server = spawn(process.execPath, ["server.js"], {
     HOST: "127.0.0.1",
     SPIRAL_DISABLE_AI: "1",
     LEARNING_API_TOKEN: "",
-    LEARNING_STORE_PATH: path.join(temporaryDir, "store.json")
+    LEARNING_STORE_PATH: path.join(temporaryDir, "store.json"),
+    MVP0_STORE_PATH: path.join(temporaryDir, "mvp0-store.json")
   },
   stdio: ["ignore", "pipe", "pipe"]
 });
@@ -121,6 +122,19 @@ try {
     throw new Error("Rokid import fallback contract failed");
   }
 
+  const report = await json("/api/mvp0/report", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      artifactType: "codex",
+      artifactText: "AI selected a WebView networking fix. I cannot explain whether the failure was transport, CORS, or an application network policy."
+    })
+  });
+  const clearanceEntry = await json("/api/rokid/clearance-entry");
+  if (clearanceEntry.platform !== "rokid-aiui" || clearanceEntry.entry?.reportId !== report.report.id) {
+    throw new Error("Rokid clearance entry did not select the latest MVP-0 report");
+  }
+
   console.log(JSON.stringify({
     ok: true,
     demoCards: demo.session.cards.length,
@@ -128,7 +142,8 @@ try {
     tutorAssessment: tutor.tutor.assessment,
     reviewSource: review.review.source,
     importCards: imported.cards.length,
-    importFallbackVisible: imported.fallback
+    importFallbackVisible: imported.fallback,
+    clearanceEntry: clearanceEntry.entry.cardId
   }, null, 2));
 } finally {
   server.kill("SIGTERM");

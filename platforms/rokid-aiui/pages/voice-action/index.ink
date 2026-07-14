@@ -12,7 +12,7 @@
         },
         "action": {
           "type": "string",
-          "enum": ["auto", "answer", "next", "previous", "repeat", "ask", "known", "skip"],
+          "enum": ["auto", "answer", "next", "previous", "repeat", "ask", "known", "skip", "end"],
           "description": "Use auto unless the command intent is already certain."
         },
         "api": {
@@ -29,14 +29,20 @@
 <script setup>
 import { DEMO_CARD } from "../../config.js";
 import {
+  endClearance,
   getRuntimeConfig,
+  loadClearanceSession,
   loadCurrentCard,
+  saveClearanceSession,
   sendReview,
-  sendTutorAction
+  sendTutorAction,
+  submitClearanceAnswer
 } from "../../utils/api.js";
 import {
   assessmentToReview,
+  clearanceStatusLabel,
   commandFromUtterance,
+  conciseClearanceText,
   conciseFeedback
 } from "../../utils/learning.js";
 
@@ -58,6 +64,11 @@ export default {
     const action = query.action && query.action !== "auto"
       ? query.action
       : commandFromUtterance(utterance);
+    const clearance = loadClearanceSession();
+    if (clearance?.id && clearance.state !== "ended" && ["answer", "end"].includes(action)) {
+      await this.handleClearance(config, clearance, utterance, action);
+      return;
+    }
     this.setData({ concept: card.front, utterance, state: "AI 评估中" });
 
     if (["known", "skip"].includes(action) && !card.id.startsWith("demo-")) {
@@ -109,6 +120,49 @@ export default {
         followUp: "这个概念在你的工作中何时会用到？"
       });
     }
+  },
+
+  async handleClearance(config, clearance, utterance, action) {
+    this.setData({
+      concept: clearance.originalCard?.target || "认知债务清偿",
+      utterance,
+      state: action === "end" ? "正在结算" : "分析你的解释",
+      resultLabel: "MINDIOU"
+    });
+    try {
+      if (action === "end") {
+        const payload = await endClearance(config, clearance.id);
+        saveClearanceSession(payload.session);
+        this.setData({
+          state: "本轮结束",
+          assessment: payload.result.status,
+          resultLabel: clearanceStatusLabel(payload.result.status),
+          feedback: payload.result.sourceReviewRequired
+            ? "关键判断包含普通网页来源，需要进一步查证。"
+            : "已记录本轮证据，结果不等于永久掌握。",
+          followUp: payload.result.nextRecommendation || ""
+        });
+        return;
+      }
+
+      const payload = await submitClearanceAnswer(config, clearance.id, utterance);
+      saveClearanceSession(payload.session);
+      const analysis = payload.attempt.analysis;
+      this.setData({
+        state: analysis.recommendation === "end" ? "可以结束" : "继续解释",
+        assessment: analysis.status,
+        resultLabel: clearanceStatusLabel(analysis.status),
+        feedback: conciseClearanceText(analysis),
+        followUp: analysis.nextQuestion || analysis.teaching || ""
+      });
+    } catch (error) {
+      this.setData({
+        state: "分析失败",
+        resultLabel: "RETRY",
+        feedback: String(error.message || error),
+        followUp: "回答没有被标记为掌握，请稍后重试。"
+      });
+    }
   }
 }
 </script>
@@ -125,7 +179,7 @@ export default {
     <view class="follow-up" ink:if="{{ followUp }}">
       <text>{{ followUp }}</text>
     </view>
-    <text class="return-hint">说“继续学习”返回主会话</text>
+    <text class="return-hint">继续解释，或说“结束清偿”</text>
   </view>
 </page>
 

@@ -68,6 +68,14 @@ export function loadCurrentCard() {
   return storageGet(STORAGE_KEYS.currentCard, null);
 }
 
+export function saveClearanceSession(session) {
+  storageSet(STORAGE_KEYS.clearanceSession, session || "");
+}
+
+export function loadClearanceSession() {
+  return storageGet(STORAGE_KEYS.clearanceSession, null);
+}
+
 async function request(config, path, method = "GET", data) {
   const headers = {
     "content-type": "application/json",
@@ -119,4 +127,20 @@ export function importMaterial(config, text, projectId = "rokid-import") {
     projectId,
     maxCards: 5
   });
+}
+
+export function fetchClearanceEntry(config) {
+  return request(config, "/api/rokid/clearance-entry");
+}
+
+export function startClearance(config, reportId, cardId) {
+  return request(config, "/api/mvp1/sessions", "POST", { reportId, cardId });
+}
+
+export function submitClearanceAnswer(config, sessionId, answer) {
+  return request(config, `/api/mvp1/sessions/${encodeURIComponent(sessionId)}/answers`, "POST", { answer });
+}
+
+export function endClearance(config, sessionId) {
+  return request(config, `/api/mvp1/sessions/${encodeURIComponent(sessionId)}/end`, "POST");
 }
