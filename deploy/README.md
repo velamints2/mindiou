@@ -5,8 +5,8 @@ The public deployment keeps the existing server website intact and mounts:
 - `/mindiou/`: MVP-0 report experience;
 - `/mindiou/mvp1/`: one report/card-scoped MVP-1 clearance session;
 - `/mindiou-api/`: rate-limited Node API reverse proxy.
-- `https://launch-wonder-construction-unto.trycloudflare.com/mindiou/`: current
-  public TLS demo and Rokid AIUI backend origin.
+- `https://114.67.169.78/mindiou/`: stable public TLS demo and Rokid AIUI
+  backend origin, using a trusted short-lived IP certificate.
 
 Runtime state is stored outside the release directory:
 
@@ -24,11 +24,13 @@ the UI warns visitors not to submit secrets or private customer data.
 For small demo servers, `journald-mindiou-limits.conf` bounds system journal
 retention so old logs cannot consume multiple gigabytes of the root disk.
 
-The current cloud provider intercepts unregistered hostnames before Nginx, so
-`mindiou-quick-tunnel.service` provides the HTTPS hostname used by remote judges
-and the Rokid companion-phone network proxy. The raw IP HTTP site remains
-available for diagnostics only. Quick-tunnel hostnames are process-scoped and
-must be replaced by a named tunnel or an owned domain before long-term release.
+The server uses a Let's Encrypt short-lived IP certificate because the current
+cloud provider intercepts unregistered hostnames before Nginx. Install Certbot
+5.4 or newer in `/opt/certbot-ip-venv`, deploy
+`nginx-mindiou-ip-https.conf`, and enable `mindiou-ip-cert-renew.timer` so the
+six-day certificate is checked twice daily. `mindiou-quick-tunnel.service` is
+kept only as an emergency fallback; its process-scoped hostname must not be
+embedded in release packages.
 
 The public demo enables `MVP1_DEMO_FALLBACK=1`. Live AI research remains the
 first choice. If the server cannot reach the model provider, only the curated

@@ -45,6 +45,17 @@ export function conciseQuestion(value, maxLength = 48) {
   return `${safeCandidate.trim()}…`;
 }
 
+export function conciseRuntimeError(error) {
+  const message = String(error?.message || error || "").trim();
+  if (/fetch failed|request failed|network|socket|dns|timeout|timed out/i.test(message)) {
+    return "网络暂时不可用，请检查手机网络后重试。";
+  }
+  if (/HTTP 429|too many requests|rate limit/i.test(message)) {
+    return "请求过于频繁，请稍等片刻再重试。";
+  }
+  return conciseQuestion(message || "暂时无法开始学习。", 36);
+}
+
 export function assessmentToReview(assessment) {
   if (assessment === "correct") return "mastered";
   if (assessment === "incorrect") return "incorrect";

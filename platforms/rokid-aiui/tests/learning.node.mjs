@@ -6,15 +6,44 @@ import {
   commandFromUtterance,
   conciseClearanceText,
   conciseFeedback,
-  conciseQuestion
+  conciseQuestion,
+  conciseRuntimeError
 } from "../utils/learning.js";
 import {
   fetchClearanceEntry,
+  getRuntimeConfig,
   loadClearanceSession,
   saveClearanceSession,
   startClearance,
   submitClearanceAnswer
 } from "../utils/api.js";
+
+test("legacy quick-tunnel settings migrate to the stable HTTPS IP", () => {
+  const originalStorage = globalThis.localStorage;
+  delete globalThis.wx;
+  globalThis.localStorage = {
+    getItem(key) {
+      return key === "learnCoachRokidApiBaseUrl"
+        ? JSON.stringify("https://launch-wonder-construction-unto.trycloudflare.com/mindiou-api")
+        : null;
+    },
+    setItem() {}
+  };
+
+  try {
+    assert.equal(getRuntimeConfig().apiBaseUrl, "https://114.67.169.78/mindiou-api");
+  } finally {
+    if (originalStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = originalStorage;
+  }
+});
+
+test("runtime network errors are short and localized for glasses", () => {
+  assert.equal(
+    conciseRuntimeError(new Error("Request failed: fetch failed")),
+    "网络暂时不可用，请检查手机网络后重试。"
+  );
+});
 
 test("short explicit commands are classified conservatively", () => {
   assert.equal(commandFromUtterance("下一题"), "next");

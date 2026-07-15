@@ -146,4 +146,7 @@ document.querySelectorAll('input[name="viewport"]').forEach(input => {
 });
 window.addEventListener("beforeunload", destroyView);
 
+const requestedApi = new URLSearchParams(location.search).get("api");
+if (requestedApi) apiInput.value = requestedApi;
+
 loadInkApp();

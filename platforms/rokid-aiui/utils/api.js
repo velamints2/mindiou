@@ -1,6 +1,7 @@
 import {
   DEFAULT_API_BASE_URL,
   DEFAULT_CARD_ID,
+  LEGACY_API_BASE_URLS,
   DEFAULT_REPORT_ID,
   DEFAULT_SESSION_DURATION,
   STORAGE_KEYS
@@ -8,6 +9,11 @@ import {
 
 function normalizeBaseUrl(value) {
   return String(value || DEFAULT_API_BASE_URL).trim().replace(/\/+$/, "");
+}
+
+function migrateLegacyBaseUrl(value) {
+  const normalized = normalizeBaseUrl(value);
+  return LEGACY_API_BASE_URLS.includes(normalized) ? DEFAULT_API_BASE_URL : normalized;
 }
 
 function storageGet(key, fallback = "") {
@@ -43,7 +49,7 @@ function storageSet(key, value) {
 
 export function getRuntimeConfig(query = {}) {
   const appData = typeof getApp === "function" ? getApp()?.globalData || {} : {};
-  const apiBaseUrl = normalizeBaseUrl(
+  const apiBaseUrl = migrateLegacyBaseUrl(
     query.api
       ? decodeURIComponent(query.api)
       : storageGet(STORAGE_KEYS.apiBaseUrl, appData.apiBaseUrl || DEFAULT_API_BASE_URL)
@@ -166,7 +172,7 @@ async function request(config, path, method = "GET", data) {
 }
 
 export function checkConnection(config) {
-  return request(config, "/health?live=1");
+  return request(config, "/health");
 }
 
 export function fetchSession(config, duration = config.duration || DEFAULT_SESSION_DURATION, demo = false) {

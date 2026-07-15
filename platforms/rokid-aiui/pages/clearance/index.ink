@@ -13,7 +13,11 @@ import {
   saveClearanceSession,
   startClearance
 } from "../../utils/api.js";
-import { clearanceStatusLabel, conciseQuestion } from "../../utils/learning.js";
+import {
+  clearanceStatusLabel,
+  conciseQuestion,
+  conciseRuntimeError
+} from "../../utils/learning.js";
 
 export default {
   data: {
@@ -83,7 +87,7 @@ export default {
         ready: false,
         state: "暂时无法开始",
         target: "连接或 AI 研究失败",
-        question: String(error.message || error),
+        question: conciseRuntimeError(error),
         resultText: "检查网络和后端状态后重试；文本 AI 与研究服务是独立配置。",
         resultClass: "result result-warning"
       });

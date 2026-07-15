@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew the MindIOU short-lived IP TLS certificate
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/certbot-ip-venv/bin/certbot renew --cert-name 114.67.169.78 --quiet --deploy-hook "/usr/sbin/nginx -t && /bin/systemctl reload nginx"
