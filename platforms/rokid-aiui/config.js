@@ -1,4 +1,4 @@
-export const DEFAULT_API_BASE_URL = "http://192.168.1.10:8793";
+export const DEFAULT_API_BASE_URL = "http://192.168.5.119:8793";
 export const DEFAULT_SESSION_DURATION = 60;
 export const STORAGE_KEYS = {
   apiBaseUrl: "learnCoachRokidApiBaseUrl",

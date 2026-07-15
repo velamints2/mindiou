@@ -1,6 +1,6 @@
 export default {
   globalData: {
-    apiBaseUrl: "http://192.168.1.10:8793",
+    apiBaseUrl: "http://192.168.5.119:8793",
     apiToken: "",
     sessionDuration: 60
   },

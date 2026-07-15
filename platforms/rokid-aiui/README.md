@@ -66,7 +66,7 @@ npm run api
 Set the glasses API URL to the Mac LAN address, for example:
 
 ```text
-http://192.168.1.10:8793
+http://192.168.5.119:8793
 ```
 
 During AIUI hardware use, Rokid proxies network traffic through the companion
@@ -87,7 +87,7 @@ npm run pack
 The Craft-importable source archive is:
 
 ```text
-release/learn-coach-rokid-aiui-0.2.0.zip
+release/learn-coach-rokid-aiui-0.2.1.zip
 ```
 
 The package gate checks all manifest pages, required `.ink` sections, common
@@ -136,7 +136,7 @@ http://localhost:5186/preview/?api=http://localhost:8793
 
 ## Optical-Waveguide Acceptance
 
-1. Import `release/learn-coach-rokid-aiui-0.2.0.zip` into Rokid Craft.
+1. Import `release/learn-coach-rokid-aiui-0.2.1.zip` into Rokid Craft.
 2. Set `api` to a backend URL reachable from the glasses.
 3. Open MindIOU and confirm a single large question fits without scrolling.
 4. Confirm the screen shows a source count but no answer before recall.
