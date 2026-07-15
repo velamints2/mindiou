@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>MindIOU Ink Preview</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">ROKID AIUI / INK RUNTIME</p>
+          <h1>MindIOU Local Preview</h1>
+        </div>
+        <div class="runtime-status" aria-live="polite">
+          <span id="status-dot" class="status-dot"></span>
+          <span id="status-text">Starting Ink</span>
+        </div>
+      </header>
+
+      <section class="controls" aria-label="Preview controls">
+        <label>
+          <span>Page</span>
+          <select id="page-route">
+            <option value="pages/clearance/index">Clearance</option>
+            <option value="pages/index/index">Review queue</option>
+            <option value="pages/voice-action/index">Voice action</option>
+            <option value="pages/import/index">Import</option>
+            <option value="pages/settings/index">Settings</option>
+          </select>
+        </label>
+
+        <label class="api-control">
+          <span>Learning API</span>
+          <input id="api-url" type="url" value="http://localhost:8793" spellcheck="false" />
+        </label>
+
+        <fieldset class="viewport-control">
+          <legend>Viewport</legend>
+          <label><input type="radio" name="viewport" value="640x480" checked /> 640 x 480</label>
+          <label><input type="radio" name="viewport" value="480x640" /> 480 x 640</label>
+        </fieldset>
+
+        <button id="reload" class="icon-button" type="button" title="Reload Ink bundle" aria-label="Reload Ink bundle">&#8635;</button>
+      </section>
+
+      <section class="stage-band">
+        <div class="stage-copy">
+          <strong id="page-label">Clearance</strong>
+          <span id="viewport-label">640 x 480 logical pixels</span>
+        </div>
+        <div id="device-frame" class="device-frame">
+          <canvas id="ink-root" tabindex="0" aria-label="Rokid Ink application preview"></canvas>
+          <div id="error-panel" class="error-panel" hidden></div>
+        </div>
+      </section>
+
+      <footer>
+        This canvas runs the real Ink WebAssembly renderer. Craft and glasses remain the final device checks.
+      </footer>
+    </main>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

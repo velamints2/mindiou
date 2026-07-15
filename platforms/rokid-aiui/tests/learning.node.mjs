@@ -5,7 +5,8 @@ import {
   clearanceStatusLabel,
   commandFromUtterance,
   conciseClearanceText,
-  conciseFeedback
+  conciseFeedback,
+  conciseQuestion
 } from "../utils/learning.js";
 import {
   fetchClearanceEntry,
@@ -29,6 +30,12 @@ test("clearance feedback stays short and uses cautious labels", () => {
   assert.equal(conciseClearanceText({ feedback: "a".repeat(120) }).length, 96);
 });
 
+test("glasses questions are compact without shrinking the display type", () => {
+  const question = conciseQuestion(`  ${"问题".repeat(50)}  `);
+  assert.equal(question.length, 72);
+  assert.ok(question.endsWith("…"));
+});
+
 test("Rokid clearance API uses the shared MVP-1 contract and local session storage", async () => {
   const calls = [];
   const storage = new Map();
@@ -50,6 +57,44 @@ test("Rokid clearance API uses the shared MVP-1 contract and local session stora
   assert.deepEqual(calls[1].data, { reportId: "report one", cardId: "card/one" });
   assert.match(calls[2].url, /session%2F1\/answers$/);
   assert.equal(loadClearanceSession().id, "session-1");
+  delete globalThis.wx;
+});
+
+test("Rokid API accepts the browser Ink runtime Response shape", async () => {
+  globalThis.wx = {
+    async request() {
+      return new Response(JSON.stringify({ ok: true, entry: { cardId: "card-1" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }
+  };
+
+  const payload = await fetchClearanceEntry({
+    apiBaseUrl: "http://127.0.0.1:8793",
+    apiToken: ""
+  });
+
+  assert.equal(payload.entry.cardId, "card-1");
+  delete globalThis.wx;
+});
+
+test("Rokid API accepts the callback-based wx.request shape", async () => {
+  globalThis.wx = {
+    request(options) {
+      queueMicrotask(() => options.success({
+        statusCode: 200,
+        data: { ok: true, entry: { cardId: "callback-card" } }
+      }));
+    }
+  };
+
+  const payload = await fetchClearanceEntry({
+    apiBaseUrl: "http://127.0.0.1:8793",
+    apiToken: ""
+  });
+
+  assert.equal(payload.entry.cardId, "callback-card");
   delete globalThis.wx;
 });
 

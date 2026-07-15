@@ -8,7 +8,12 @@
   "scripts": {
     "check": "node scripts/check-agent.mjs",
     "test": "node --test tests/*.node.mjs",
-    "pack": "node scripts/pack-agent.mjs"
+    "pack": "node scripts/pack-agent.mjs",
+    "preview:ink": "vite ink-preview --config vite.config.js --host 127.0.0.1 --port 5187",
+    "build:ink-preview": "vite build ink-preview --config vite.config.js"
   },
-  "dependencies": {}
+  "devDependencies": {
+    "@yodaos-pkg/ink": "0.14.0",
+    "vite": "^7.3.6"
+  }
 }

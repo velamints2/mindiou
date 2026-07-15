@@ -13,7 +13,7 @@ import {
   saveClearanceSession,
   startClearance
 } from "../../utils/api.js";
-import { clearanceStatusLabel } from "../../utils/learning.js";
+import { clearanceStatusLabel, conciseQuestion } from "../../utils/learning.js";
 
 export default {
   data: {
@@ -63,7 +63,7 @@ export default {
         state: "检索外部证据",
         domain: entry.domain || "认知债务",
         target: entry.target,
-        question: entry.prompt,
+        question: conciseQuestion(entry.prompt),
         progressText: `${entry.cardNumber} / ${entry.cardCount}`
       });
       const started = await startClearance(this.config, entry.reportId, entry.cardId);
@@ -73,7 +73,7 @@ export default {
         ready: true,
         canEnd: true,
         state: "请直接口述回答",
-        question: started.session.clearanceQuestion,
+        question: conciseQuestion(started.session.clearanceQuestion),
         sourceText: `${started.session.sources?.length || 0} 个来源已核对`
       });
     } catch (error) {

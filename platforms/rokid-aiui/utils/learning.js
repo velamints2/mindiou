@@ -25,6 +25,12 @@ export function conciseClearanceText(analysis) {
   return String(analysis?.feedback || analysis?.teaching || "请再用自己的话解释一次。").slice(0, 96);
 }
 
+export function conciseQuestion(value, maxLength = 72) {
+  const text = String(value || "").trim().replace(/\s+/g, " ");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1).trim()}…`;
+}
+
 export function assessmentToReview(assessment) {
   if (assessment === "correct") return "mastered";
   if (assessment === "incorrect") return "incorrect";

@@ -76,20 +76,59 @@ export function loadClearanceSession() {
   return storageGet(STORAGE_KEYS.clearanceSession, null);
 }
 
+async function normalizeResponse(response) {
+  if (response && typeof response.json === "function") {
+    return {
+      statusCode: Number(response.status || 0),
+      payload: await response.json()
+    };
+  }
+
+  let payload = response?.data ?? {};
+  if (typeof payload === "string") {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      payload = { error: payload };
+    }
+  }
+  return {
+    statusCode: Number(response?.statusCode || response?.status || 0),
+    payload
+  };
+}
+
 async function request(config, path, method = "GET", data) {
   const headers = {
     "content-type": "application/json",
     "accept": "application/json"
   };
   if (config.apiToken) headers.authorization = `Bearer ${config.apiToken}`;
-  const response = await wx.request({
-    url: `${normalizeBaseUrl(config.apiBaseUrl)}${path}`,
-    method,
-    header: headers,
-    data
+  const response = await new Promise((resolve, reject) => {
+    const requestResult = wx.request({
+      url: `${normalizeBaseUrl(config.apiBaseUrl)}${path}`,
+      method,
+      header: headers,
+      data,
+      dataType: "json",
+      responseType: "text",
+      success: resolve,
+      fail: reject
+    });
+    if (requestResult && typeof requestResult.then === "function") {
+      requestResult.then(resolve, reject);
+    } else if (
+      requestResult &&
+      (
+        typeof requestResult.json === "function" ||
+        "statusCode" in requestResult ||
+        "status" in requestResult
+      )
+    ) {
+      resolve(requestResult);
+    }
   });
-  const statusCode = Number(response.statusCode || response.status || 0);
-  const payload = response.data || {};
+  const { statusCode, payload } = await normalizeResponse(response);
   if (statusCode < 200 || statusCode >= 300 || payload.ok === false) {
     throw new Error(payload.error || `Learn Coach HTTP ${statusCode || "error"}`);
   }

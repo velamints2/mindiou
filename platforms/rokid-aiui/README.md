@@ -120,7 +120,31 @@ the competition account, target glasses, and matching firmware.
 Only a complete short utterance is treated as a command. A longer explanation
 containing command words remains a learning answer.
 
-## Local Preview
+## Local Ink Preview
+
+Install the browser Ink runtime once, then start the real `.ink` bundle in the
+official WebAssembly renderer:
+
+```bash
+cd platforms/rokid-aiui
+npm install
+npm run preview:ink
+```
+
+Open:
+
+```text
+http://localhost:5187/
+```
+
+This preview loads the same `app.json`, `.ink`, application modules, and utility
+modules that are packaged for Craft. It supports page switching, 640x480 and
+480x640 logical viewports, and a configurable Learning API URL. It is a much
+stronger layout and runtime check than the legacy HTML harness, but Craft and
+target glasses are still required for phone-proxied networking, voice routing,
+and optical-waveguide acceptance.
+
+## Legacy Visual Harness
 
 ```bash
 cd platforms/rokid-aiui
