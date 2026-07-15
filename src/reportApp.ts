@@ -139,7 +139,19 @@ function detectArtifactType(text: string): string {
   return 'other'
 }
 
-const API_BASE = ''
+const runtimeParams = new URLSearchParams(location.search)
+const isPublicDeployment = location.pathname.startsWith('/mindiou/')
+const API_BASE = runtimeParams.get('api') || (isPublicDeployment ? '/mindiou-api' : '')
+
+function mvp1Url(reportId: string, cardId: string): string {
+  const url = isPublicDeployment
+    ? new URL('/mindiou/mvp1/', location.origin)
+    : new URL('http://localhost:5186/preview/')
+  url.searchParams.set('reportId', reportId)
+  url.searchParams.set('cardId', cardId)
+  if (!isPublicDeployment) url.searchParams.set('api', 'http://localhost:8793')
+  return url.toString()
+}
 
 // ── State ──
 
@@ -253,6 +265,14 @@ function render(): void {
 
 function renderInputForm(): HTMLElement {
   const form = el('div', 'input-form')
+
+  if (isPublicDeployment) {
+    form.appendChild(el(
+      'p',
+      'public-privacy-notice',
+      '公开体验环境：请勿粘贴密码、密钥、客户隐私或其他敏感内容。报告仅凭当前浏览器保存的随机 ID 恢复。'
+    ))
+  }
 
   const textarea = document.createElement('textarea')
   textarea.placeholder = '粘贴 AI 辅助工作的材料：ChatGPT/Claude 对话、AI 生成的方案、黑客松记录、会议纪要…'
@@ -523,6 +543,15 @@ function renderFeynmanCards(cards: FeynmanCard[], reportId: string): HTMLElement
 
     cardEl.appendChild(el('div', 'card-target', `针对缺口：${card.target}`))
     cardEl.appendChild(el('span', 'card-prompt', card.prompt))
+
+    const clearanceBtn = document.createElement('button')
+    clearanceBtn.className = 'btn-start-clearance'
+    clearanceBtn.textContent = '开始 MVP-1 清偿'
+    clearanceBtn.onclick = event => {
+      event.stopPropagation()
+      location.href = mvp1Url(reportId, card.id)
+    }
+    cardEl.appendChild(clearanceBtn)
 
     if (card.userAnswer) {
       // Answered state

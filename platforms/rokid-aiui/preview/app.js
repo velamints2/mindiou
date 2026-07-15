@@ -1,6 +1,12 @@
 const params = new URL(location.href).searchParams;
-const apiBaseUrl = (params.get("api") || "http://localhost:8793").replace(/\/+$/, "");
+const publicDeployment = location.pathname.startsWith('/mindiou/');
+const apiBaseUrl = (
+  params.get("api")
+    || (publicDeployment ? `${location.origin}/mindiou-api` : "http://localhost:8793")
+).replace(/\/+$/, "");
 const staticDemo = params.get("demo") === "1";
+const directReportId = params.get("reportId") || "";
+const directCardId = params.get("cardId") || "";
 
 const elements = {
   progress: document.querySelector("#progress"),
@@ -60,6 +66,31 @@ async function load() {
     return;
   }
   try {
+    if (directReportId && directCardId) {
+      elements.progress.textContent = "1 / 1";
+      elements.domain.textContent = "MVP-1 清偿";
+      elements.target.textContent = "正在准备你的费曼问题";
+      elements.status.textContent = "检索外部证据";
+      const started = await request("/api/mvp1/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reportId: directReportId, cardId: directCardId })
+      });
+      session = started.session;
+      elements.target.textContent = session.originalCard.target || "认知债务";
+      elements.question.textContent = session.clearanceQuestion;
+      elements.status.textContent = "请直接口述回答";
+      elements.source.textContent = `${session.sources.length} 个来源`;
+      elements.source.disabled = false;
+      setReady(true);
+      return;
+    }
+    if (publicDeployment) {
+      elements.status.textContent = "请从报告进入";
+      elements.target.textContent = "缺少当前报告 ID";
+      elements.question.textContent = "请先返回 MVP-0 生成认知欠条报告，再点击费曼卡中的“开始 MVP-1 清偿”。";
+      return;
+    }
     const entryPayload = await request("/api/rokid/clearance-entry");
     const entry = entryPayload.entry;
     if (!entry) {

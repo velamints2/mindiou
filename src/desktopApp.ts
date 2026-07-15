@@ -108,11 +108,13 @@ function saveState() {
 }
 
 const desktopParams = new URLSearchParams(location.search)
-const apiBase = desktopParams.get('api') || 'http://localhost:8793'
+const apiBase = desktopParams.get('api') || (location.pathname.startsWith('/mindiou/')
+  ? `${location.origin}/mindiou-api/`
+  : 'http://localhost:8793')
 const desktopApiToken = desktopParams.get('token') || localStorage.getItem('g2LearningApiToken') || ''
 
 async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(new URL(path, apiBase), {
+  const response = await fetch(new URL(path.replace(/^\/+/, ''), apiBase.endsWith('/') ? apiBase : `${apiBase}/`), {
     ...options,
     headers: {
       'content-type': 'application/json',

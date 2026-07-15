@@ -55,6 +55,16 @@ button, input, textarea, select {
   margin-bottom: 32px;
 }
 
+.public-privacy-notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #d8b45c;
+  background: #271f0f;
+  color: #f1d58b;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 .input-form textarea {
   width: 100%;
   min-height: 160px;
@@ -353,7 +363,8 @@ button, input, textarea, select {
   border-color: #3d8b7a;
 }
 
-.btn-submit-answer {
+.btn-submit-answer,
+.btn-start-clearance {
   padding: 6px 18px;
   border: none;
   border-radius: 6px;
@@ -363,7 +374,13 @@ button, input, textarea, select {
   font-size: 0.85rem;
 }
 
-.btn-submit-answer:hover:not(:disabled) {
+.btn-start-clearance {
+  margin: 0 0 10px;
+  background: #2e6f5f;
+}
+
+.btn-submit-answer:hover:not(:disabled),
+.btn-start-clearance:hover:not(:disabled) {
   background: #237a8a;
 }
 

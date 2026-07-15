@@ -1,0 +1,23 @@
+[Unit]
+Description=MindIOU MVP-0 and MVP-1 API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mindiou
+Group=mindiou
+WorkingDirectory=/opt/mindiou/current
+EnvironmentFile=/etc/mindiou.env
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mindiou
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

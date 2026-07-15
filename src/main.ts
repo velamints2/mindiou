@@ -213,7 +213,10 @@ let voiceEnabled = false;
 let speechRecognition: SpeechRecognitionLike | null = null;
 let cards: LearningCard[] = simulatorTestMode ? sampleCards() : loadCards();
 let cardIndex = simulatorTestMode ? 0 : Number(localStorage.getItem("g2LearningIndex") || "0");
-let apiBaseUrl = readSetting("g2LearningApiBaseUrl", "api", "http://localhost:8793");
+const publicApiBaseUrl = window.location.pathname.startsWith('/mindiou/')
+  ? `${window.location.origin}/mindiou-api/`
+  : 'http://localhost:8793'
+let apiBaseUrl = readSetting("g2LearningApiBaseUrl", "api", publicApiBaseUrl);
 let apiToken = readSetting("g2LearningApiToken", "token", "");
 let audioChunks: Uint8Array[] = [];
 let lastAudioSendAt = 0;
@@ -860,7 +863,7 @@ function localImport(text: string): LearningCard[] {
 }
 
 function apiUrl(path: string): string {
-  const url = new URL(path, apiBaseUrl.endsWith("/") ? apiBaseUrl : `${apiBaseUrl}/`);
+  const url = new URL(path.replace(/^\/+/, ""), apiBaseUrl.endsWith("/") ? apiBaseUrl : `${apiBaseUrl}/`);
   return url.toString();
 }
 
