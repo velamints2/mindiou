@@ -45,6 +45,8 @@ Example utterances:
 12. External research and answer analysis run on the shared backend.
 13. Never expose the hidden evaluation scaffold before the first answer.
 14. Use only the backend's cautious clearance status.
+15. On glasses, show the AI feedback first after a learner answers. Do not show the
+    next follow-up question in the large text area until the learner clicks `继续`.
 
 ## Tool Routing
 

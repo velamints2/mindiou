@@ -37,6 +37,8 @@ export default {
     resultClass: "feedback-text",
     canEnd: false,
     ended: false,
+    phase: "question",
+    pendingQuestion: "",
     working: false,
     listening: false,
     selectedAction: 0,
@@ -92,12 +94,20 @@ export default {
   },
 
   actionLabels() {
+    if (this.data.phase === "feedback" && !this.data.ended) return ["继续", "重试", "结束"];
     return this.data.ended ? ["回顾", "重学", "下一张"] : ["解释", "重试", "结束"];
   },
 
   handlePrimary() {
-    if (this.data.ended) this.showResultSummary();
-    else this.startListening();
+    if (this.data.ended) {
+      this.showResultSummary();
+      return;
+    }
+    if (this.data.phase === "feedback") {
+      this.showFollowupQuestion();
+      return;
+    }
+    this.startListening();
   },
 
   handleTertiary() {
@@ -107,6 +117,7 @@ export default {
 
   async onVoiceWakeup() {
     if (this.data.ended) this.showResultSummary();
+    else if (this.data.phase === "feedback") this.showFollowupQuestion();
     else this.startListening();
   },
 
@@ -212,13 +223,26 @@ export default {
       this.currentSession = payload.session;
       saveClearanceSession(payload.session);
       const analysis = payload.attempt.analysis;
+      const feedbackText = conciseQuestion(conciseClearanceText(analysis), 40);
+      const nextQuestion = conciseQuestion(
+        analysis.nextQuestion || analysis.teaching || "请再补充一个例子。",
+        48
+      );
       this.setData({
         working: false,
-        state: analysis.recommendation === "end" ? "可以结束" : "继续解释",
+        phase: "feedback",
+        pendingQuestion: nextQuestion,
+        selectedAction: 0,
+        actionPrimary: "继续",
+        actionSecondary: "重试",
+        actionTertiary: "结束",
+        state: "AI 已给出反馈",
         target: clearanceStatusLabel(analysis.status),
-        question: conciseQuestion(analysis.nextQuestion || analysis.teaching || "请再补充一个例子。", 30),
-        resultText: conciseQuestion(conciseClearanceText(analysis), 34),
-        sourceHint: "AI 已给出反馈",
+        question: feedbackText,
+        resultText: "",
+        sourceHint: analysis.recommendation === "end"
+          ? "可结束，也可继续"
+          : "继续查看追问",
         resultClass: analysis.status === "provisionally_cleared"
           ? "feedback-text feedback-good"
           : "feedback-text feedback-warning"
@@ -247,6 +271,8 @@ export default {
       loading: true,
       ready: false,
       ended: false,
+      phase: "question",
+      pendingQuestion: "",
       working: false,
       listening: false,
       canEnd: false,
@@ -292,6 +318,7 @@ export default {
         loading: false,
         ready: true,
         canEnd: true,
+        phase: "question",
         state: "请直接口述回答",
         question: conciseQuestion(started.session.clearanceQuestion),
         sourceText: `${started.session.sources?.length || 0} 个来源已核对`
@@ -332,6 +359,8 @@ export default {
         ready: false,
         canEnd: false,
         ended: true,
+        phase: "ended",
+        pendingQuestion: "",
         working: false,
         selectedAction: 2,
         actionPrimary: "回顾",
@@ -372,6 +401,20 @@ export default {
       state: "本轮结束",
       resultText: "结果是阶段性证据，不等于永久掌握。",
       resultClass: "feedback-text feedback-warning"
+    });
+  },
+
+  showFollowupQuestion() {
+    this.setData({
+      phase: "question",
+      selectedAction: 0,
+      actionPrimary: "解释",
+      actionSecondary: "重试",
+      actionTertiary: "结束",
+      state: "继续解释",
+      question: this.data.pendingQuestion || "请再补充一个具体例子。",
+      resultText: "",
+      sourceHint: "回答前不显示答案"
     });
   },
 
@@ -469,8 +512,8 @@ export default {
 }
 
 .meta {
-  margin-top: 4rpx;
-  padding-top: 4rpx;
+  margin-top: 2rpx;
+  padding-top: 2rpx;
   border-top: 1rpx solid #39423f;
 }
 
@@ -490,25 +533,25 @@ export default {
 }
 
 .target {
-  font-size: 23rpx;
-  line-height: 29rpx;
+  font-size: 20rpx;
+  line-height: 24rpx;
   color: #b8f0dc;
 }
 
 .question {
   display: block;
-  margin-top: 6rpx;
-  max-height: 96rpx;
+  margin-top: 2rpx;
+  max-height: 84rpx;
   overflow: hidden;
-  font-size: 36rpx;
-  line-height: 44rpx;
+  font-size: 34rpx;
+  line-height: 40rpx;
   font-weight: 700;
   color: #ffffff;
   overflow-wrap: anywhere;
 }
 
 .source-row {
-  padding: 4rpx 0;
+  padding: 3rpx 0;
   border-top: 1rpx solid #27302d;
 }
 
@@ -530,10 +573,10 @@ export default {
 .actions button {
   flex: 1;
   min-width: 0;
-  height: 52rpx;
+  height: 48rpx;
   padding: 0 6rpx;
-  font-size: 20rpx;
-  line-height: 50rpx;
+  font-size: 19rpx;
+  line-height: 46rpx;
   border: 1rpx solid #65716d;
   background: #000000;
   color: #ffffff;
