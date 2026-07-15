@@ -87,6 +87,16 @@ trigger a verification requirement.
 - Curated, source-cited server-diagnostics fallback when the demo server cannot
   reach the model provider; it never reports a heuristic result as cleared.
 
+## Submission Documents
+
+- [Technical Documentation](../../docs/competition/technical-documentation.md):
+  workflow design, endpoint/cloud plugin usage, wearable-client integration,
+  GPASS / 百宝箱 workflow mapping, API contract, security boundary, and validation
+  status.
+- [User Guide](../../docs/competition/user-guide.md): judge-facing usage flow,
+  Rokid controls, voice interaction, GPASS workflow guidance, hardware
+  acceptance checklist, and troubleshooting.
+
 ## Remaining Submission Work
 
 - Import the clean `0.2.12` local source folder into the competition's Rokid Craft account.
