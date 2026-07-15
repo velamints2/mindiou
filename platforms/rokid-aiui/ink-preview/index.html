@@ -39,17 +39,25 @@
 
         <fieldset class="viewport-control">
           <legend>Viewport</legend>
-          <label><input type="radio" name="viewport" value="640x480" checked /> 640 x 480</label>
+          <label><input type="radio" name="viewport" value="896x300" checked /> 896 x 300</label>
+          <label><input type="radio" name="viewport" value="640x480" /> 640 x 480</label>
           <label><input type="radio" name="viewport" value="480x640" /> 480 x 640</label>
         </fieldset>
 
         <button id="reload" class="icon-button" type="button" title="Reload Ink bundle" aria-label="Reload Ink bundle">&#8635;</button>
       </section>
 
+      <section class="speech-controls" aria-label="Speech recognition simulator">
+        <button id="voice-wakeup" type="button">Wake ASR</button>
+        <input id="speech-result" type="text" value="重启 Nginx 只缓解症状，还要检查 D 状态进程和底层 I/O。" />
+        <button id="submit-speech" type="button" disabled>Submit transcript</button>
+        <span id="speech-status">ASR idle</span>
+      </section>
+
       <section class="stage-band">
         <div class="stage-copy">
           <strong id="page-label">Clearance</strong>
-          <span id="viewport-label">640 x 480 logical pixels</span>
+          <span id="viewport-label">896 x 300 logical pixels</span>
         </div>
         <div id="device-frame" class="device-frame">
           <canvas id="ink-root" tabindex="0" aria-label="Rokid Ink application preview"></canvas>

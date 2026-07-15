@@ -2,13 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assessmentToReview,
+  clearanceEntryFromReport,
   clearanceStatusLabel,
   commandFromUtterance,
   conciseClearanceText,
   conciseFeedback,
   conciseQuestion,
   conciseRuntimeError,
-  hardwareControlFromKey
+  hardwareControlFromKey,
+  transcriptFromSpeechEvent
 } from "../utils/learning.js";
 import {
   fetchClearanceEntry,
@@ -63,6 +65,40 @@ test("Rokid four-control input maps to selection, confirmation, and exit", () =>
   assert.equal(hardwareControlFromKey("Select"), "confirm");
   assert.equal(hardwareControlFromKey("BrowserBack"), "exit");
   assert.equal(hardwareControlFromKey("UnrelatedKey"), "");
+});
+
+test("Rokid speech recognition accepts final transcripts only", () => {
+  const finalResult = { 0: { transcript: "  我认为重启只缓解了症状  " }, isFinal: true };
+  const interimResult = { 0: { transcript: "还在说" }, isFinal: false };
+  assert.equal(
+    transcriptFromSpeechEvent({ results: { 0: finalResult, length: 1 }, resultIndex: 0 }),
+    "我认为重启只缓解了症状"
+  );
+  assert.equal(
+    transcriptFromSpeechEvent({ results: { 0: interimResult, length: 1 }, resultIndex: 0 }),
+    ""
+  );
+});
+
+test("configured reports expose the next Feynman card in sequence", () => {
+  const entry = clearanceEntryFromReport({
+    id: "report-1",
+    createdAt: "2026-07-15T00:00:00.000Z",
+    analysis: { userCapability: { currentDomain: "Linux server operations" } },
+    sections: {
+      feynmanCards: [
+        { id: "card-1", target: "Page cache", prompt: "解释 page cache。" },
+        { id: "card-2", target: "I/O wait", prompt: "解释 I/O wait。" },
+        { id: "card-3", target: "Verification", prompt: "解释如何验收。" }
+      ]
+    }
+  }, "card-2");
+
+  assert.equal(entry.cardId, "card-2");
+  assert.equal(entry.nextCardId, "card-3");
+  assert.equal(entry.cardNumber, 2);
+  assert.equal(entry.cardCount, 3);
+  assert.equal(entry.domain, "服务器部署与运维");
 });
 
 test("clearance feedback stays short and uses cautious labels", () => {

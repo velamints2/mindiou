@@ -6,6 +6,7 @@ import {
   DEFAULT_SESSION_DURATION,
   STORAGE_KEYS
 } from "../config.js";
+import { clearanceEntryFromReport } from "./learning.js";
 
 function normalizeBaseUrl(value) {
   return String(value || DEFAULT_API_BASE_URL).trim().replace(/\/+$/, "");
@@ -204,30 +205,18 @@ export function importMaterial(config, text, projectId = "rokid-import") {
   });
 }
 
-export function fetchClearanceEntry(config) {
+export function fetchClearanceEntry(config, requestedCardId = config.cardId) {
   if (config.reportId && config.cardId) {
     return request(config, `/api/mvp0/reports/${encodeURIComponent(config.reportId)}`).then(payload => {
       const report = payload.report;
-      const cards = report?.sections?.feynmanCards || [];
-      const card = cards.find(item => item.id === config.cardId);
-      if (!card) throw new Error("Configured cognitive debt card was not found");
-      const rawDomain = report.analysis?.userCapability?.currentDomain || "认知债务";
-      const domain = /server|linux|nginx|systemd|cloudflare/i.test(rawDomain)
-        ? "服务器部署与运维"
-        : String(rawDomain).slice(0, 18);
+      const entry = clearanceEntryFromReport(report, requestedCardId);
+      if (!entry || entry.cardId !== requestedCardId) {
+        throw new Error("Configured cognitive debt card was not found");
+      }
       return {
         ok: true,
         platform: "rokid-aiui",
-        entry: {
-          reportId: report.id,
-          cardId: card.id,
-          createdAt: report.createdAt,
-          domain,
-          target: card.target || "理解缺口",
-          prompt: card.prompt || "请用自己的话解释这个问题。",
-          cardNumber: cards.findIndex(item => item.id === card.id) + 1,
-          cardCount: cards.length
-        }
+        entry
       };
     });
   }

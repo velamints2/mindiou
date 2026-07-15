@@ -91,7 +91,7 @@ npm run pack
 The portable source archive is:
 
 ```text
-release/learn-coach-rokid-aiui-0.2.7.zip
+release/learn-coach-rokid-aiui-0.2.8.zip
 ```
 
 ## Glasses controls
@@ -103,16 +103,23 @@ The immersive clearance page follows the four controls available on Rokid glasse
 - Click: run the highlighted action.
 - Exit: return to the previous Rokid view.
 
-The three actions cycle in this order: `复习 -> 重试 -> 结束`. Pointer taps remain
+The three actions cycle in this order: `解释 -> 重试 -> 结束`; after settlement they
+become `回顾 -> 重学 -> 下一张`. Pointer taps remain
 available in Craft and the browser preview, but they are not the acceptance path for
 the glasses build.
+
+Version `0.2.8` uses the immersive Ink speech path directly. A `voicewakeup` event
+creates `SpeechRecognition` immediately, and the final transcript is submitted to the
+active MVP-1 clearance session. After settlement, the third action becomes `下一张`
+and advances through the configured report. The bounded `896 x 300` viewport is the
+primary layout acceptance target; the page cannot grow or scroll when feedback appears.
 
 Craft imports a local folder, a local `.aix`, or a publicly readable GitHub
 subdirectory. This repository is private, so Craft's anonymous GitHub importer
 returns `repository not found`. Use the clean extracted local folder:
 
 ```text
-/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.7
+/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.8
 ```
 
 Craft generates the final `.aix` from the imported project.
@@ -187,7 +194,7 @@ http://localhost:5186/preview/?api=http://localhost:8793
 
 ## Optical-Waveguide Acceptance
 
-1. Import `release/rokid-craft-project-0.2.7` as a local folder in Rokid Craft.
+1. Import `release/rokid-craft-project-0.2.8` as a local folder in Rokid Craft.
 2. Set `api` to a backend URL reachable from the glasses.
 3. Open MindIOU and confirm a single large question fits without scrolling.
 4. Confirm the screen shows a source count but no answer before recall.

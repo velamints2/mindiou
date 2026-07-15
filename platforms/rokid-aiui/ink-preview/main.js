@@ -39,9 +39,14 @@ const statusText = document.querySelector("#status-text");
 const errorPanel = document.querySelector("#error-panel");
 const viewportLabel = document.querySelector("#viewport-label");
 const pageLabel = document.querySelector("#page-label");
+const voiceWakeupButton = document.querySelector("#voice-wakeup");
+const speechResultInput = document.querySelector("#speech-result");
+const submitSpeechButton = document.querySelector("#submit-speech");
+const speechStatus = document.querySelector("#speech-status");
 
 let inkView = null;
 let removeDomBindings = null;
+let speechRequest = null;
 
 function selectedViewport() {
   const selected = document.querySelector('input[name="viewport"]:checked');
@@ -90,6 +95,49 @@ function destroyView() {
   removeDomBindings = null;
   if (inkView) inkView.destroy();
   inkView = null;
+  speechRequest = null;
+  submitSpeechButton.disabled = true;
+  speechStatus.textContent = "ASR idle";
+}
+
+function emitSpeechEvent(type, request, extra = {}) {
+  if (!inkView || !request) return;
+  inkView.hostCapabilitiesTarget.dispatchEvent(new CustomEvent(type, {
+    detail: {
+      targetId: request.targetId,
+      sessionId: request.sessionId,
+      ...extra
+    }
+  }));
+}
+
+function stopSpeechSession(request) {
+  if (!request || speechRequest?.sessionId !== request.sessionId) return;
+  emitSpeechEvent("speech.speechend", request);
+  emitSpeechEvent("speech.soundend", request);
+  emitSpeechEvent("speech.audioend", request);
+  emitSpeechEvent("speech.end", request);
+  speechRequest = null;
+  submitSpeechButton.disabled = true;
+  speechStatus.textContent = "ASR ended";
+}
+
+function speechHostCapabilities() {
+  return {
+    speech: {
+      startRecognition(request) {
+        speechRequest = request;
+        submitSpeechButton.disabled = false;
+        speechStatus.textContent = "ASR listening";
+        emitSpeechEvent("speech.start", request);
+        emitSpeechEvent("speech.audiostart", request);
+        emitSpeechEvent("speech.soundstart", request);
+        emitSpeechEvent("speech.speechstart", request);
+      },
+      stopRecognition: stopSpeechSession,
+      abortRecognition: stopSpeechSession
+    }
+  };
 }
 
 async function loadInkApp() {
@@ -117,6 +165,7 @@ async function loadInkApp() {
       canvas,
       wasm: { wasmUrl: inkWasmUrl }
     });
+    inkView.setHostCapabilities(speechHostCapabilities());
     removeDomBindings = inkView.bindDomEvents({ canvas, focusTarget: canvas });
     inkView.openBundle({
       appId: "mindiou-local-preview",
@@ -145,6 +194,36 @@ document.querySelectorAll('input[name="viewport"]').forEach(input => {
   input.addEventListener("change", loadInkApp);
 });
 window.addEventListener("beforeunload", destroyView);
+
+voiceWakeupButton.addEventListener("click", () => {
+  if (!inkView) return;
+  inkView.notifyUserInteraction();
+  inkView.dispatchVoiceWakeup("leqi");
+  speechStatus.textContent = "Wakeup sent";
+  canvas.focus();
+});
+
+submitSpeechButton.addEventListener("click", () => {
+  const transcript = speechResultInput.value.trim();
+  if (!speechRequest || !transcript) return;
+  emitSpeechEvent("speech.result", speechRequest, {
+    resultIndex: 0,
+    isFinal: true,
+    alternatives: [{ transcript, confidence: 0.96 }]
+  });
+  speechStatus.textContent = "Transcript sent";
+  canvas.focus();
+});
+
+speechResultInput.addEventListener("keydown", event => {
+  if (event.key === "Enter" && !submitSpeechButton.disabled) submitSpeechButton.click();
+});
+
+window.addEventListener("keydown", event => {
+  if (document.activeElement === canvas && ["ArrowUp", "ArrowDown", "Enter", " "].includes(event.key)) {
+    event.preventDefault();
+  }
+}, { capture: true });
 
 const requestedApi = new URLSearchParams(location.search).get("api");
 if (requestedApi) apiInput.value = requestedApi;

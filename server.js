@@ -14,7 +14,11 @@ import {
   submitClearanceAnswer
 } from "./mvp1-clearance.js";
 import { createOpenAiWebResearch } from "./mvp1-openai.js";
-import { createDemoAnswerFallback, createDemoResearchFallback } from "./mvp1-demo-fallback.js";
+import {
+  createDemoAnswerFallback,
+  createDemoResearchFallback,
+  ensureLearnerFacingLanguage
+} from "./mvp1-demo-fallback.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -394,13 +398,14 @@ async function chatJson(messages, fallback) {
 
 async function analyzeClearanceAnswer(input) {
   try {
-    return await chatJson([
+    const result = await chatJson([
       { role: "system", content: getClearanceAnalysisPrompt() },
       { role: "user", content: JSON.stringify(input) }
     ], () => createDemoAnswerFallback(input));
+    return ensureLearnerFacingLanguage(result, input);
   } catch (error) {
     if (!mvp1DemoFallback) throw error;
-    return createDemoAnswerFallback(input);
+    return ensureLearnerFacingLanguage(createDemoAnswerFallback(input), input);
   }
 }
 
@@ -1168,17 +1173,19 @@ const server = createServer(async (req, res) => {
       }
       const cards = report.sections.feynmanCards;
       const card = cards.find(item => !item.userAnswer) || cards[0];
+      const cardIndex = cards.findIndex(item => item.id === card.id);
       jsonResponse(res, 200, {
         ok: true,
         platform: "rokid-aiui",
         entry: {
           reportId: report.id,
           cardId: card.id,
+          nextCardId: cards.length > 1 ? cards[(cardIndex + 1) % cards.length].id : "",
           createdAt: report.createdAt,
           domain: clean(report.analysis?.userCapability?.currentDomain || "认知债务"),
           target: clean(card.target || "理解缺口"),
           prompt: clean(card.prompt || "请用自己的话解释这个问题。"),
-          cardNumber: cards.findIndex(item => item.id === card.id) + 1,
+          cardNumber: cardIndex + 1,
           cardCount: cards.length
         }
       });

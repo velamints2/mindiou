@@ -33,10 +33,10 @@ kept only as an emergency fallback; its process-scoped hostname must not be
 embedded in release packages.
 
 The public demo enables `MVP1_DEMO_FALLBACK=1`. Live AI research remains the
-first choice. If the server cannot reach the model provider, only the curated
-server-diagnostics debt uses a source-cited deterministic scaffold and a
-conservative `needs_verification` evaluation. Other debts still fail visibly
-instead of fabricating research.
+first choice. If live research is unavailable, only the four cards in the controlled
+public server-diagnostics report use source-cited deterministic scaffolds. The mode is
+reported as `curated_demo_fallback`, and heuristic evaluation never claims clearance.
+Unrelated debts still fail visibly instead of fabricating research.
 
 Text generation can use a provider independently from research and speech. The
 current mainland deployment uses `AI_PROVIDER=deepseek`,

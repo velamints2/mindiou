@@ -2,38 +2,151 @@ function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+export function ensureLearnerFacingLanguage(result, input) {
+  const answer = clean(input?.answer);
+  const learnerFacing = clean(`${result?.feedback || ""} ${result?.teaching || ""} ${result?.nextQuestion || ""}`);
+  const learnerUsedChinese = /[\u3400-\u9fff]/.test(answer);
+  const responseUsedChinese = /[\u3400-\u9fff]/.test(learnerFacing);
+  if (!learnerUsedChinese || responseUsedChinese) return result;
+
+  const status = clean(result?.status);
+  const feedback = status === "provisionally_cleared"
+    ? "你已经说明了主要验证链，但还需要用重复负载确认结果。"
+    : status === "needs_verification"
+      ? "回答覆盖了关键证据，仍需核对来源并用真实负载验证。"
+      : "你已经提出了一部分判断，还需要补充基线、反证和复现结果。";
+  return {
+    ...result,
+    feedback,
+    teaching: "完整验收应对比修复前后指标，复现原始负载，并检查问题是否再次出现。",
+    nextQuestion: "哪一项反证会说明这次修复仍不完整？"
+  };
+}
+
 export function createDemoResearchFallback(request, error) {
   const topic = clean(request?.targetDebt || request?.originalQuestion);
   const serverIncident = /i\/o wait|d-state|nginx|systemd/i.test(topic);
+  const pageCache = /page cache|页缓存/i.test(topic);
+  const verification = /验证|验收|工具链|完整性/i.test(topic);
+  const rootCause = /根因|症状|缓解/i.test(topic);
 
-  if (!serverIncident) {
+  if (!serverIncident && !pageCache && !verification && !rootCause) {
     throw error instanceof Error ? error : new Error("External research is unavailable");
+  }
+
+  const commonSources = [
+    {
+      id: "source-kernel-proc",
+      url: "https://docs.kernel.org/filesystems/proc.html",
+      title: "Linux kernel documentation: the /proc filesystem",
+      claim: "The kernel exposes process state, memory, and system activity through /proc for diagnosis and verification."
+    },
+    {
+      id: "source-kernel-psi",
+      url: "https://docs.kernel.org/accounting/psi.html",
+      title: "Linux kernel documentation: PSI",
+      claim: "Pressure Stall Information quantifies time lost to CPU, memory, and I/O resource contention."
+    },
+    {
+      id: "source-systemd-resource",
+      url: "https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html",
+      title: "systemd.resource-control",
+      claim: "systemd units can be inspected and constrained through cgroup-backed resource controls."
+    }
+  ];
+
+  if (pageCache) {
+    return {
+      researchMode: "curated_demo_fallback",
+      rewrittenQuestion: "Page cache 为什么会让 used 很高，却不一定代表内存泄漏？",
+      summary: "Curated Linux memory scaffold for the public demo report; it is not live web research.",
+      sources: commonSources,
+      scaffold: [
+        {
+          id: "point-cache-role",
+          point: "Linux uses otherwise idle memory as page cache to reduce storage reads, and can reclaim that cache when applications need memory.",
+          whyItMatters: "High used memory is not sufficient evidence of a leak.",
+          sourceIds: ["source-kernel-proc"]
+        },
+        {
+          id: "point-available",
+          point: "Available memory, reclaimability, swap activity, and memory pressure are more useful than the used number alone.",
+          whyItMatters: "A diagnosis should distinguish useful cache from unreclaimable growth.",
+          sourceIds: ["source-kernel-proc", "source-kernel-psi"]
+        },
+        {
+          id: "point-verify-memory",
+          point: "Verify a suspected leak by observing process RSS, cgroup memory, reclaim behavior, swap, and pressure across repeated workloads.",
+          whyItMatters: "A time series and repeatable workload can falsify a leak hypothesis.",
+          sourceIds: ["source-kernel-proc", "source-kernel-psi", "source-systemd-resource"]
+        }
+      ]
+    };
+  }
+
+  if (verification) {
+    return {
+      researchMode: "curated_demo_fallback",
+      rewrittenQuestion: "AI 修复服务器后，哪些证据能证明问题真的解决？",
+      summary: "Curated verification scaffold for the public demo report; it is not live web research.",
+      sources: commonSources,
+      scaffold: [
+        {
+          id: "point-baseline",
+          point: "Define the original failure signal and capture a before-change baseline before judging a repair.",
+          whyItMatters: "A successful command or restart does not prove the user-visible failure disappeared.",
+          sourceIds: ["source-kernel-proc", "source-kernel-psi"]
+        },
+        {
+          id: "point-cross-layer",
+          point: "Check service status, process state, logs, resource pressure, I/O latency, and the user request path together.",
+          whyItMatters: "Cross-layer evidence prevents one healthy metric from hiding another failing dependency.",
+          sourceIds: ["source-kernel-proc", "source-kernel-psi", "source-systemd-resource"]
+        },
+        {
+          id: "point-repeat",
+          point: "Repeat the triggering workload and observe the system long enough to test recurrence and side effects.",
+          whyItMatters: "A repair is more credible when the original failure cannot be reproduced under comparable load.",
+          sourceIds: ["source-kernel-psi", "source-systemd-resource"]
+        }
+      ]
+    };
+  }
+
+  if (rootCause && !serverIncident) {
+    return {
+      researchMode: "curated_demo_fallback",
+      rewrittenQuestion: "如何区分症状暂时缓解和真正的根因修复？",
+      summary: "Curated root-cause verification scaffold for the public demo report; it is not live web research.",
+      sources: commonSources,
+      scaffold: [
+        {
+          id: "point-symptom",
+          point: "A restart can clear queues, reset connections, or replace a blocked process without removing the condition that caused the failure.",
+          whyItMatters: "Temporary recovery is evidence of symptom relief, not a complete causal explanation.",
+          sourceIds: ["source-kernel-proc", "source-systemd-resource"]
+        },
+        {
+          id: "point-causal-change",
+          point: "A root-cause repair changes the failing dependency or condition and predicts which metrics and logs should improve.",
+          whyItMatters: "The prediction makes the repair falsifiable rather than narrative-only.",
+          sourceIds: ["source-kernel-proc", "source-kernel-psi"]
+        },
+        {
+          id: "point-regression",
+          point: "Re-run the original workload, monitor recurrence, and check adjacent failure modes after the change.",
+          whyItMatters: "Regression evidence tests both completeness and unintended consequences.",
+          sourceIds: ["source-kernel-psi", "source-systemd-resource"]
+        }
+      ]
+    };
   }
 
   return {
     researchMode: "curated_demo_fallback",
     rewrittenQuestion: "D 状态和高 I/O wait 说明什么？为什么重启 Nginx 不等于修复根因？",
     summary: "Curated incident-response scaffold used because live external research was unavailable. It is limited to the public server-diagnostics demo debt.",
-    sources: [
-      {
-        id: "source-kernel-proc",
-        url: "https://docs.kernel.org/filesystems/proc.html",
-        title: "Linux kernel documentation: the /proc filesystem",
-        claim: "The kernel exposes process state and system activity through /proc, including the process state code used to identify uninterruptible sleep."
-      },
-      {
-        id: "source-systemd-resource",
-        url: "https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html",
-        title: "systemd.resource-control",
-        claim: "systemd units can be inspected and constrained through cgroup-backed resource controls."
-      },
-      {
-        id: "source-kernel-cgroup",
-        url: "https://docs.kernel.org/admin-guide/cgroup-v2.html",
-        title: "Linux kernel documentation: Control Group v2",
-        claim: "Cgroup v2 exposes resource accounting and control for groups of processes."
-      }
-    ],
+    sources: commonSources,
     scaffold: [
       {
         id: "point-state",
@@ -51,13 +164,13 @@ export function createDemoResearchFallback(request, error) {
         id: "point-boundary",
         point: "Nginx and systemd may reveal or contain the problem without causing it: systemd supervises units, while Nginx can be blocked by upstreams, logging, or filesystem activity.",
         whyItMatters: "A restart can clear symptoms temporarily without proving the repair is complete.",
-        sourceIds: ["source-systemd-resource", "source-kernel-cgroup"]
+        sourceIds: ["source-systemd-resource", "source-kernel-psi"]
       },
       {
         id: "point-verification",
         point: "Verify the repair with process state, per-unit resource usage, I/O latency or pressure, service and kernel logs, and a repeated workload after the change.",
         whyItMatters: "The debt is cleared only when the learner can explain both the causal hypothesis and the evidence that could falsify it.",
-        sourceIds: ["source-kernel-proc", "source-systemd-resource", "source-kernel-cgroup"]
+        sourceIds: ["source-kernel-proc", "source-systemd-resource", "source-kernel-psi"]
       }
     ]
   };
@@ -90,7 +203,7 @@ export function createDemoAnswerFallback(input) {
     missing,
     misconceptions: [],
     evidence: ["Demo fallback checked the answer for four required explanation boundaries; live AI evaluation was unavailable."],
-    materialSourceIds: ["source-kernel-proc", "source-systemd-resource", "source-kernel-cgroup"],
+    materialSourceIds: ["source-kernel-proc", "source-systemd-resource", "source-kernel-psi"],
     feedback: coverage >= 0.75
       ? "你已经覆盖了主要诊断链。当前缺少实时 AI 评价，因此仍需查证。"
       : "回答已记录。请补充进程状态、I/O wait、根因和验证证据之间的关系。",

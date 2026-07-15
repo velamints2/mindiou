@@ -20,6 +20,41 @@ export function hardwareControlFromKey(value) {
   return "";
 }
 
+export function transcriptFromSpeechEvent(event) {
+  const results = event?.results;
+  if (!results || !Number(results.length)) return "";
+  const requestedIndex = Number(event?.resultIndex);
+  const index = Number.isFinite(requestedIndex)
+    ? Math.max(0, Math.min(results.length - 1, requestedIndex))
+    : results.length - 1;
+  const result = results[index];
+  if (!result || result.isFinal === false) return "";
+  return String(result[0]?.transcript || "").trim();
+}
+
+export function clearanceEntryFromReport(report, requestedCardId) {
+  const cards = report?.sections?.feynmanCards || [];
+  if (!cards.length) return null;
+  const cardIndex = Math.max(0, cards.findIndex(item => item.id === requestedCardId));
+  const card = cards[cardIndex];
+  const nextCard = cards.length > 1 ? cards[(cardIndex + 1) % cards.length] : null;
+  const rawDomain = report.analysis?.userCapability?.currentDomain || "认知债务";
+  const domain = /server|linux|nginx|systemd|cloudflare/i.test(rawDomain)
+    ? "服务器部署与运维"
+    : String(rawDomain).slice(0, 18);
+  return {
+    reportId: report.id,
+    cardId: card.id,
+    nextCardId: nextCard?.id || "",
+    createdAt: report.createdAt,
+    domain,
+    target: card.target || "理解缺口",
+    prompt: card.prompt || "请用自己的话解释这个问题。",
+    cardNumber: cardIndex + 1,
+    cardCount: cards.length
+  };
+}
+
 export function clearanceStatusLabel(status) {
   const labels = {
     provisionally_cleared: "暂时清偿",

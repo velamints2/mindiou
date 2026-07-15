@@ -79,6 +79,40 @@ h1 {
   flex-wrap: wrap;
 }
 
+.speech-controls {
+  display: grid;
+  grid-template-columns: auto minmax(240px, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 0 0 18px;
+}
+
+.speech-controls button,
+.speech-controls input {
+  height: 38px;
+  border: 1px solid #bec5c1;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #111111;
+  padding: 0 12px;
+}
+
+.speech-controls button {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.speech-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+#speech-status {
+  color: #52615b;
+  font-size: 12px;
+  min-width: 86px;
+}
+
 .controls label,
 .viewport-control {
   display: flex;
@@ -160,8 +194,8 @@ h1 {
 }
 
 .device-frame {
-  --ink-width: 640;
-  --ink-height: 480;
+  --ink-width: 896;
+  --ink-height: 300;
   position: relative;
   width: min(calc(var(--ink-width) * 1px), 100%);
   aspect-ratio: var(--ink-width) / var(--ink-height);
@@ -206,5 +240,6 @@ footer {
   .controls > label,
   .viewport-control { width: 100%; }
   .api-control { min-width: 100%; }
+  .speech-controls { grid-template-columns: 1fr; }
   .stage-band { min-height: 520px; }
 }
