@@ -11,6 +11,15 @@ export function commandFromUtterance(value) {
   return "answer";
 }
 
+export function hardwareControlFromKey(value) {
+  const key = String(value || "").trim();
+  if (["ArrowUp", "Up", "SwipeUp"].includes(key)) return "up";
+  if (["ArrowDown", "Down", "SwipeDown"].includes(key)) return "down";
+  if (["Enter", "NumpadEnter", "Space", "Select", "OK"].includes(key)) return "confirm";
+  if (["Escape", "Back", "BrowserBack"].includes(key)) return "exit";
+  return "";
+}
+
 export function clearanceStatusLabel(status) {
   const labels = {
     provisionally_cleared: "暂时清偿",

@@ -7,7 +7,8 @@ import {
   conciseClearanceText,
   conciseFeedback,
   conciseQuestion,
-  conciseRuntimeError
+  conciseRuntimeError,
+  hardwareControlFromKey
 } from "../utils/learning.js";
 import {
   fetchClearanceEntry,
@@ -51,6 +52,17 @@ test("short explicit commands are classified conservatively", () => {
   assert.equal(commandFromUtterance("会了"), "known");
   assert.equal(commandFromUtterance("再说一遍"), "repeat");
   assert.equal(commandFromUtterance("结束清偿"), "end");
+});
+
+test("Rokid four-control input maps to selection, confirmation, and exit", () => {
+  assert.equal(hardwareControlFromKey("ArrowUp"), "up");
+  assert.equal(hardwareControlFromKey("SwipeUp"), "up");
+  assert.equal(hardwareControlFromKey("ArrowDown"), "down");
+  assert.equal(hardwareControlFromKey("SwipeDown"), "down");
+  assert.equal(hardwareControlFromKey("Enter"), "confirm");
+  assert.equal(hardwareControlFromKey("Select"), "confirm");
+  assert.equal(hardwareControlFromKey("BrowserBack"), "exit");
+  assert.equal(hardwareControlFromKey("UnrelatedKey"), "");
 });
 
 test("clearance feedback stays short and uses cautious labels", () => {

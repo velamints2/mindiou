@@ -16,7 +16,8 @@ import {
 import {
   clearanceStatusLabel,
   conciseQuestion,
-  conciseRuntimeError
+  conciseRuntimeError,
+  hardwareControlFromKey
 } from "../../utils/learning.js";
 
 export default {
@@ -31,7 +32,11 @@ export default {
     progressText: "— / —",
     resultText: "",
     resultClass: "result",
-    canEnd: false
+    canEnd: false,
+    ended: false,
+    working: false,
+    selectedAction: 0,
+    selectedActionText: "复习"
   },
 
   async onLoad(query = {}) {
@@ -39,10 +44,58 @@ export default {
     await this.begin();
   },
 
+  async onKeyDown(event = {}) {
+    const key = String(event.code || event.key || event.detail?.code || event.detail?.key || "");
+    const control = hardwareControlFromKey(key);
+    if (control === "up") {
+      this.moveSelection(-1);
+      return;
+    }
+    if (control === "down") {
+      this.moveSelection(1);
+      return;
+    }
+    if (control === "confirm") {
+      await this.activateSelectedAction();
+      return;
+    }
+    if (control === "exit") {
+      this.exitView();
+    }
+  },
+
+  moveSelection(delta) {
+    const labels = ["复习", "重试", "结束"];
+    const selectedAction = (this.data.selectedAction + delta + labels.length) % labels.length;
+    this.setData({ selectedAction, selectedActionText: labels[selectedAction] });
+  },
+
+  async activateSelectedAction() {
+    if (this.data.selectedAction === 0) {
+      this.openReview();
+      return;
+    }
+    if (this.data.selectedAction === 1) {
+      await this.retry();
+      return;
+    }
+    await this.finish();
+  },
+
+  exitView() {
+    const runtimeWx = globalThis.wx;
+    if (runtimeWx?.navigateBack) runtimeWx.navigateBack({ delta: 1 });
+  },
+
   async begin() {
     this.setData({
       loading: true,
       ready: false,
+      ended: false,
+      working: false,
+      canEnd: false,
+      selectedAction: 0,
+      selectedActionText: "复习",
       state: "读取认知欠条",
       resultText: "",
       question: "正在寻找最近一次 AI 实践留下的理解缺口。"
@@ -71,6 +124,7 @@ export default {
         progressText: `${entry.cardNumber} / ${entry.cardCount}`
       });
       const started = await startClearance(this.config, entry.reportId, entry.cardId);
+      this.currentSession = started.session;
       saveClearanceSession(started.session);
       this.setData({
         loading: false,
@@ -95,16 +149,30 @@ export default {
   },
 
   async finish() {
-    const session = this.data.canEnd ? this.sessionFromStorage() : null;
-    if (!session?.id) return;
-    this.setData({ state: "正在结算" });
+    const session = this.data.canEnd
+      ? this.currentSession || this.sessionFromStorage()
+      : null;
+    if (!session?.id) {
+      this.setData({ state: "会话已失效", resultText: "请点击重试，重新开始本轮清偿。" });
+      return;
+    }
+    this.setData({
+      working: true,
+      state: "正在结算",
+      resultText: "操作已收到，请稍候。"
+    });
     try {
       const payload = await endClearance(this.config, session.id);
+      this.currentSession = payload.session;
       saveClearanceSession(payload.session);
       this.setData({
         state: "本轮结束",
         ready: false,
         canEnd: false,
+        ended: true,
+        working: false,
+        selectedAction: 0,
+        selectedActionText: "复习",
         target: clearanceStatusLabel(payload.result.status),
         question: payload.result.nextRecommendation,
         resultText: payload.result.sourceReviewRequired
@@ -113,7 +181,11 @@ export default {
         resultClass: payload.result.status === "provisionally_cleared" ? "result result-good" : "result result-warning"
       });
     } catch (error) {
-      this.setData({ state: "结算失败", resultText: String(error.message || error) });
+      this.setData({
+        working: false,
+        state: "结算失败",
+        resultText: conciseRuntimeError(error)
+      });
     }
   },
 
@@ -121,11 +193,24 @@ export default {
     return loadClearanceSession();
   },
 
+  async retry() {
+    this.currentSession = null;
+    saveClearanceSession(null);
+    this.setData({ state: "正在重试", resultText: "操作已收到，正在重新连接。" });
+    await this.begin();
+  },
+
   openReview() {
     const runtimeWx = globalThis.wx;
     if (runtimeWx?.navigateTo) {
       runtimeWx.navigateTo({ url: "/pages/index/index" });
+      return;
     }
+    this.setData({
+      state: "复习提示",
+      resultText: "先说现象，再说可能根因、验证证据和反证。",
+      resultClass: "result result-warning"
+    });
   }
 }
 </script>
@@ -142,7 +227,7 @@ export default {
       <text class="state">{{ state }}</text>
     </view>
 
-    <view class="question-area">
+    <view class="question-area {{ ended ? 'question-area-ended' : '' }}">
       <text class="target">{{ target }}</text>
       <text class="question">{{ question }}</text>
     </view>
@@ -156,13 +241,13 @@ export default {
       <text>{{ resultText }}</text>
     </view>
 
-    <view class="actions">
-      <button class="quiet" bindtap="openReview">复习</button>
-      <button class="quiet" bindtap="begin">重试</button>
-      <button class="primary" bindtap="finish" disabled="{{ !canEnd }}">结束</button>
+    <view class="actions" ink:if="{{ !working }}">
+      <button class="quiet {{ selectedAction === 0 ? 'selected' : '' }}" bindtap="openReview">复习</button>
+      <button class="quiet {{ selectedAction === 1 ? 'selected' : '' }}" bindtap="retry">重试</button>
+      <button class="quiet {{ selectedAction === 2 ? 'selected' : '' }}" bindtap="finish" disabled="{{ !canEnd }}">结束</button>
     </view>
 
-    <text class="voice-hint" ink:if="{{ ready }}">直接解释；完成时说“结束清偿”</text>
+    <text class="voice-hint" ink:if="{{ ready && !working }}">上下滑：{{ selectedActionText }} · 点击确认 · 退出返回</text>
   </view>
 </page>
 
@@ -231,6 +316,10 @@ export default {
   padding: 18rpx 0;
 }
 
+.question-area-ended {
+  min-height: 170rpx;
+}
+
 .target {
   font-size: 27rpx;
   line-height: 36rpx;
@@ -273,18 +362,19 @@ export default {
 .actions button {
   flex: 1;
   min-width: 0;
-  height: 58rpx;
+  height: 72rpx;
   padding: 0 6rpx;
   font-size: 20rpx;
-  line-height: 56rpx;
+  line-height: 70rpx;
   border: 1rpx solid #65716d;
   background: #000000;
   color: #ffffff;
 }
 
-.actions .primary {
+.actions .selected {
+  border-width: 3rpx;
   border-color: #ffffff;
-  background: #ffffff;
+  background: #f4f7f5;
   color: #000000;
   font-weight: 700;
 }

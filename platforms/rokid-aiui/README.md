@@ -91,15 +91,28 @@ npm run pack
 The portable source archive is:
 
 ```text
-release/learn-coach-rokid-aiui-0.2.6.zip
+release/learn-coach-rokid-aiui-0.2.7.zip
 ```
+
+## Glasses controls
+
+The immersive clearance page follows the four controls available on Rokid glasses:
+
+- Swipe up: move the white selection highlight to the previous action.
+- Swipe down: move the white selection highlight to the next action.
+- Click: run the highlighted action.
+- Exit: return to the previous Rokid view.
+
+The three actions cycle in this order: `复习 -> 重试 -> 结束`. Pointer taps remain
+available in Craft and the browser preview, but they are not the acceptance path for
+the glasses build.
 
 Craft imports a local folder, a local `.aix`, or a publicly readable GitHub
 subdirectory. This repository is private, so Craft's anonymous GitHub importer
 returns `repository not found`. Use the clean extracted local folder:
 
 ```text
-/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.6
+/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.7
 ```
 
 Craft generates the final `.aix` from the imported project.
@@ -174,7 +187,7 @@ http://localhost:5186/preview/?api=http://localhost:8793
 
 ## Optical-Waveguide Acceptance
 
-1. Import `release/rokid-craft-project-0.2.6` as a local folder in Rokid Craft.
+1. Import `release/rokid-craft-project-0.2.7` as a local folder in Rokid Craft.
 2. Set `api` to a backend URL reachable from the glasses.
 3. Open MindIOU and confirm a single large question fits without scrolling.
 4. Confirm the screen shows a source count but no answer before recall.

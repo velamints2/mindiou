@@ -89,7 +89,9 @@ trigger a verification requirement.
 
 ## Remaining Submission Work
 
-- Import the clean `0.2.6` local source folder into the competition's Rokid Craft account.
+- Import the clean `0.2.7` local source folder into the competition's Rokid Craft account.
+- On glasses, verify the native four-control path: swipe up/down changes the white
+  selection, click executes it, and exit returns to the previous view.
 - Validate microphone Tool Rendering and layout on the exact target firmware.
 - Add competition app ID, author metadata, icon, privacy URL, screenshots, and
   a 60-90 second hardware demo video.
