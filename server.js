@@ -19,15 +19,24 @@ import { createDemoAnswerFallback, createDemoResearchFallback } from "./mvp1-dem
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
 const apiToken = process.env.LEARNING_API_TOKEN || "";
-const openAiApiKey = process.env.OPENAI_API_KEY || "";
+const configuredEnv = (name, fallback = "") => Object.hasOwn(process.env, name)
+  ? process.env[name] || ""
+  : fallback;
+const aiProvider = configuredEnv("AI_PROVIDER", "openai");
+const aiApiKey = configuredEnv("AI_API_KEY", process.env.OPENAI_API_KEY || "");
 const disableAi = process.env.SPIRAL_DISABLE_AI === "1";
 const mvp1DemoFallback = process.env.MVP1_DEMO_FALLBACK === "1";
-const openAiBaseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-const chatModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
-const researchModel = process.env.OPENAI_RESEARCH_MODEL || chatModel;
+const aiBaseUrl = configuredEnv("AI_BASE_URL", process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+const chatModel = configuredEnv("AI_MODEL", process.env.OPENAI_MODEL || "gpt-4o-mini");
+const researchProvider = configuredEnv("RESEARCH_PROVIDER", aiProvider);
+const researchApiKey = configuredEnv("RESEARCH_API_KEY", aiProvider === "openai" ? aiApiKey : "");
+const researchBaseUrl = configuredEnv("RESEARCH_BASE_URL", aiProvider === "openai" ? aiBaseUrl : "").replace(/\/+$/, "");
+const researchModel = configuredEnv("RESEARCH_MODEL", process.env.OPENAI_RESEARCH_MODEL || chatModel);
 const openAiChatTimeoutMs = Number(process.env.OPENAI_CHAT_TIMEOUT_MS || 30000);
 const openAiResearchTimeoutMs = Number(process.env.OPENAI_RESEARCH_TIMEOUT_MS || 45000);
-const sttModel = process.env.OPENAI_STT_MODEL || "gpt-4o-mini-transcribe";
+const sttApiKey = configuredEnv("STT_API_KEY", aiProvider === "openai" ? aiApiKey : "");
+const sttBaseUrl = configuredEnv("STT_BASE_URL", aiProvider === "openai" ? aiBaseUrl : "").replace(/\/+$/, "");
+const sttModel = configuredEnv("STT_MODEL", process.env.OPENAI_STT_MODEL || "gpt-4o-mini-transcribe");
 const sttPrompt = process.env.OPENAI_STT_PROMPT || [
   "Learn Coach vocabulary study in Mandarin and English.",
   "Likely commands: 下一张, 下一个, 重复, 再说一遍, 提问, 问我, 会了, next, repeat, ask me, got it.",
@@ -42,8 +51,8 @@ const mvp0Store = createMvp0Store(mvp0StorePath);
 await mvp0Store.load();
 const mvp1Sessions = new Map();
 const rawWebResearch = createOpenAiWebResearch({
-  apiKey: openAiApiKey,
-  baseUrl: openAiBaseUrl,
+  apiKey: researchApiKey,
+  baseUrl: researchBaseUrl,
   model: researchModel,
   timeoutMs: openAiResearchTimeoutMs
 });
@@ -346,21 +355,21 @@ function fallbackPlan(subject, level, maxUnits = 8) {
 }
 
 async function chatJson(messages, fallback) {
-  if (!openAiApiKey || disableAi) {
+  if (!aiApiKey || disableAi) {
     return {
       ...fallback(),
       __fallback: true,
-      __fallbackError: disableAi ? "SPIRAL_DISABLE_AI=1" : "OPENAI_API_KEY is not set"
+      __fallbackError: disableAi ? "SPIRAL_DISABLE_AI=1" : "AI_API_KEY is not set"
     };
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), openAiChatTimeoutMs);
   let response;
   try {
-    response = await fetch(`${openAiBaseUrl}/chat/completions`, {
+    response = await fetch(`${aiBaseUrl}/chat/completions`, {
       method: "POST",
       headers: {
-        "authorization": `Bearer ${openAiApiKey}`,
+        "authorization": `Bearer ${aiApiKey}`,
         "content-type": "application/json",
         "accept": "application/json"
       },
@@ -368,6 +377,7 @@ async function chatJson(messages, fallback) {
         model: chatModel,
         temperature: 0.2,
         response_format: { type: "json_object" },
+        ...(aiProvider === "deepseek" ? { thinking: { type: "disabled" } } : {}),
         messages
       }),
       signal: controller.signal
@@ -396,6 +406,9 @@ async function analyzeClearanceAnswer(input) {
 
 async function researchClearanceContext(request) {
   try {
+    if (researchProvider !== "openai" || !researchApiKey || !researchBaseUrl) {
+      throw new Error(`Live web research is not configured for provider: ${researchProvider}`);
+    }
     const evidence = await rawWebResearch(request);
     const structured = await chatJson([
       { role: "system", content: getResearchStructuringPrompt() },
@@ -422,20 +435,20 @@ async function researchClearanceContext(request) {
   }
 }
 
-async function checkOpenAiConnectivity() {
-  if (!openAiApiKey || disableAi) {
+async function checkAiConnectivity() {
+  if (!aiApiKey || disableAi) {
     return {
       reachable: false,
-      error: disableAi ? "SPIRAL_DISABLE_AI=1" : "OPENAI_API_KEY is not set"
+      error: disableAi ? "SPIRAL_DISABLE_AI=1" : "AI_API_KEY is not set"
     };
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(`${openAiBaseUrl}/models`, {
+    const response = await fetch(`${aiBaseUrl}/models`, {
       headers: {
-        "authorization": `Bearer ${openAiApiKey}`,
+        "authorization": `Bearer ${aiApiKey}`,
         "accept": "application/json"
       },
       signal: controller.signal
@@ -1042,7 +1055,7 @@ function wavFromPcm16(base64, sampleRate = 16000) {
 async function transcribe(payload) {
   const audioBase64 = clean(payload.audioBase64);
   if (!audioBase64) return { ok: false, error: "Missing audioBase64" };
-  if (!openAiApiKey) return { ok: false, text: "", error: "OPENAI_API_KEY is not set" };
+  if (!sttApiKey || !sttBaseUrl) return { ok: false, text: "", error: "STT_API_KEY is not set" };
 
   const startedAt = Date.now();
   const wav = wavFromPcm16(audioBase64, Number(payload.sampleRate || 16000));
@@ -1051,9 +1064,9 @@ async function transcribe(payload) {
   form.append("prompt", clean(sttPrompt).slice(0, 500));
   form.append("file", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "g2-audio.wav");
 
-  const response = await fetch(`${openAiBaseUrl}/audio/transcriptions`, {
+  const response = await fetch(`${sttBaseUrl}/audio/transcriptions`, {
     method: "POST",
-    headers: { "authorization": `Bearer ${openAiApiKey}` },
+    headers: { "authorization": `Bearer ${sttApiKey}` },
     body: form
   });
   const result = await response.json();
@@ -1087,10 +1100,12 @@ const server = createServer(async (req, res) => {
       const live = url.searchParams.get("live") === "1";
       jsonResponse(res, 200, {
         ok: true,
-        ai: Boolean(openAiApiKey) && !disableAi,
+        ai: Boolean(aiApiKey) && !disableAi,
+        provider: aiProvider,
         model: chatModel,
+        stt: Boolean(sttApiKey && sttBaseUrl),
         sttModel,
-        ...(live ? { openai: await checkOpenAiConnectivity() } : {})
+        ...(live ? { providerStatus: await checkAiConnectivity() } : {})
       });
       return;
     }
@@ -1208,7 +1223,7 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/api/mvp1/sessions") {
       try {
-        if (!openAiApiKey || disableAi) {
+        if (!aiApiKey || disableAi) {
           jsonResponse(res, 503, { ok: false, error: "MVP-1 external research requires an active OpenAI API configuration" });
           return;
         }
@@ -1282,7 +1297,7 @@ const server = createServer(async (req, res) => {
       if (!artifactType) {
         artifactType = detectArtifactType(artifactText);
       }
-      const chatFn = (!openAiApiKey || disableAi) ? null : chatJson;
+      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
       const report = await generateClearanceReport(artifactText, artifactType, chatFn);
       const saved = await mvp0Store.saveReport(report);
       const isFallback = Boolean(saved.generation?.fallback);
@@ -1314,7 +1329,7 @@ const server = createServer(async (req, res) => {
           jsonResponse(res, 404, { ok: false, error: `Feynman card not found: ${cardId} in report ${reportId}` });
           return;
         }
-        const chatFn = (!openAiApiKey || disableAi) ? null : chatJson;
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
         const followUpResult = await feynmanFollowUp(card, answer, chatFn);
         const aiFollowUp = followUpResult.shouldFollowUp
           ? followUpResult.followUp
@@ -1324,7 +1339,7 @@ const server = createServer(async (req, res) => {
           ok: true,
           card: result.card,
           shouldFollowUp: followUpResult.shouldFollowUp,
-          fallback: (!openAiApiKey || disableAi)
+          fallback: (!aiApiKey || disableAi)
         });
       } catch (error) {
         jsonResponse(res, 404, { ok: false, error: error.message });

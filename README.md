@@ -73,7 +73,11 @@ More detailed card generation rules are documented in
 - `GET /api/learn/events`: returns recent in-memory telemetry.
 - `GET /health`: checks server and AI configuration.
 
-The API uses `OPENAI_API_KEY` when present. Without it, import and tutor endpoints return fallback content; transcription returns an explicit missing-key error.
+The text model uses provider-neutral `AI_PROVIDER`, `AI_API_KEY`, `AI_BASE_URL`,
+and `AI_MODEL` settings. Legacy `OPENAI_*` values remain supported. External
+Responses web research and audio transcription use independent `RESEARCH_*`
+and `STT_*` credentials, so a DeepSeek key is never sent to OpenAI-only APIs.
+Without a text-model key, import and tutor endpoints return fallback content.
 
 ## MindIOU MVP-1 eval-first loop
 

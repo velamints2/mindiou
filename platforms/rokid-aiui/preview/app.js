@@ -122,7 +122,7 @@ async function load() {
     elements.status.textContent = "暂时无法开始";
     elements.target.textContent = "连接或 AI 研究失败";
     elements.question.textContent = error.message;
-    showFeedback("检查后端地址、OPENAI_API_KEY 与网络后重试。");
+    showFeedback("检查后端地址、AI_API_KEY 与模型服务网络后重试。");
   }
 }
 

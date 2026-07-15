@@ -52,6 +52,10 @@ beforeAll(async () => {
   fakeOpenAi = createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
+    if (req.url === "/v1/models") {
+      json(res, 200, { object: "list", data: [{ id: "deepseek-v4-flash", object: "model", owned_by: "deepseek" }] });
+      return;
+    }
     if (req.url === "/v1/responses") {
       json(res, 200, { output: [{ type: "message", content: [{ type: "output_text", text: "Reachability comes before CORS. CORS controls whether JavaScript can read a cross-origin response.", annotations: [{ type: "url_citation", url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS", title: "Cross-Origin Resource Sharing" }] }] }] });
       return;
@@ -85,9 +89,15 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(API_PORT),
       MVP0_STORE_PATH: STORE,
-      OPENAI_API_KEY: "test-key",
-      OPENAI_BASE_URL: `http://127.0.0.1:${OPENAI_PORT}/v1`,
-      OPENAI_RESEARCH_MODEL: "gpt-5.5",
+      AI_PROVIDER: "deepseek",
+      AI_API_KEY: "test-key",
+      AI_BASE_URL: `http://127.0.0.1:${OPENAI_PORT}/v1`,
+      AI_MODEL: "deepseek-v4-flash",
+      RESEARCH_PROVIDER: "openai",
+      RESEARCH_API_KEY: "test-key",
+      RESEARCH_BASE_URL: `http://127.0.0.1:${OPENAI_PORT}/v1`,
+      RESEARCH_MODEL: "gpt-5.5",
+      STT_API_KEY: "",
       LEARNING_API_TOKEN: ""
     },
     stdio: "pipe"
@@ -102,6 +112,19 @@ afterAll(async () => {
 });
 
 describe("MVP-1 HTTP vertical slice", () => {
+  it("reports the configured text provider independently from STT", async () => {
+    const response = await fetch(`${BASE}/health?live=1`);
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data).toMatchObject({
+      ai: true,
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      stt: false,
+      providerStatus: { reachable: true, status: 200 }
+    });
+  });
+
   it("exposes a compact latest-report entry for Rokid glasses", async () => {
     const response = await fetch(`${BASE}/api/rokid/clearance-entry`);
     expect(response.status).toBe(200);

@@ -35,3 +35,10 @@ first choice. If the server cannot reach the model provider, only the curated
 server-diagnostics debt uses a source-cited deterministic scaffold and a
 conservative `needs_verification` evaluation. Other debts still fail visibly
 instead of fabricating research.
+
+Text generation can use a provider independently from research and speech. The
+current mainland deployment uses `AI_PROVIDER=deepseek`,
+`AI_BASE_URL=https://api.deepseek.com`, and `AI_MODEL=deepseek-v4-flash`.
+`AI_API_KEY` must be set directly in `/etc/mindiou.env`; do not put it in this
+repository or a client package. `RESEARCH_*` and `STT_*` remain empty until
+separate compatible providers are configured.

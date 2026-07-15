@@ -121,9 +121,11 @@ type TranscriptResponse = {
 type HealthResponse = {
   ok: boolean;
   ai: boolean;
+  provider?: string;
   model: string;
+  stt?: boolean;
   sttModel: string;
-  openai?: {
+  providerStatus?: {
     reachable: boolean;
     status?: number;
     error?: string;
@@ -421,17 +423,17 @@ function showApiAddressHint(): void {
 
 async function testAiConnection(): Promise<boolean> {
   testAiConnectionButton.disabled = true;
-  aiConnectionStatusEl.textContent = "正在检查学习 API 和 OpenAI...";
+  aiConnectionStatusEl.textContent = "正在检查学习 API 和模型服务...";
   aiConnectionStatusEl.dataset.state = "checking";
   try {
     const payload = await apiGet<HealthResponse>("/health?live=1");
     if (!payload.ai) {
-      throw new Error("学习 API 已连接，但后端没有启用 OPENAI_API_KEY。");
+      throw new Error("学习 API 已连接，但后端没有启用 AI_API_KEY。");
     }
-    if (!payload.openai?.reachable) {
-      throw new Error(payload.openai?.error || "学习 API 已连接，但 OpenAI 不可达。");
+    if (!payload.providerStatus?.reachable) {
+      throw new Error(payload.providerStatus?.error || "学习 API 已连接，但模型服务不可达。");
     }
-    aiConnectionStatusEl.textContent = `AI 可用 · ${payload.model} · OpenAI HTTP ${payload.openai.status || 200}`;
+    aiConnectionStatusEl.textContent = `AI 可用 · ${payload.provider || "compatible"} · ${payload.model} · HTTP ${payload.providerStatus.status || 200}`;
     aiConnectionStatusEl.dataset.state = "success";
     return true;
   } catch (error) {

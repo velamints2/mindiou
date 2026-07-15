@@ -34,12 +34,12 @@ export default {
     this.setData({ state: "正在连接", detail: apiBaseUrl, healthy: false });
     try {
       const payload = await checkConnection(this.config);
-      const reachable = Boolean(payload.ai && payload.openai?.reachable);
+      const reachable = Boolean(payload.ai && payload.providerStatus?.reachable);
       this.setData({
         state: reachable ? "AI 可用" : "API 可用，AI 不可用",
         detail: reachable
-          ? `${payload.model} · OpenAI HTTP ${payload.openai.status || 200}`
-          : payload.openai?.error || "检查 OPENAI_API_KEY 和网络代理",
+          ? `${payload.provider || "compatible"} · ${payload.model} · HTTP ${payload.providerStatus.status || 200}`
+          : payload.providerStatus?.error || "检查 AI_API_KEY 和模型服务网络",
         healthy: reachable
       });
     } catch (error) {

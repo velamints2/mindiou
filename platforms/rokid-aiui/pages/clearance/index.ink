@@ -84,7 +84,7 @@ export default {
         state: "暂时无法开始",
         target: "连接或 AI 研究失败",
         question: String(error.message || error),
-        resultText: "检查后端地址、OPENAI_API_KEY 与网络后重试。",
+        resultText: "检查后端地址、AI_API_KEY 与模型服务网络后重试。",
         resultClass: "result result-warning"
       });
     }
