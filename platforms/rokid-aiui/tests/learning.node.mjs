@@ -78,6 +78,28 @@ test("Rokid speech recognition accepts final transcripts only", () => {
     transcriptFromSpeechEvent({ results: { 0: interimResult, length: 1 }, resultIndex: 0 }),
     ""
   );
+  assert.equal(
+    transcriptFromSpeechEvent({
+      resultIndex: 0,
+      isFinal: true,
+      alternatives: [{ transcript: "通过冒烟测试", confidence: 0.96 }]
+    }),
+    "通过冒烟测试"
+  );
+  assert.equal(
+    transcriptFromSpeechEvent({
+      detail: {
+        resultIndex: 0,
+        isFinal: true,
+        alternatives: [{ transcript: "我不太清楚", confidence: 0.93 }]
+      }
+    }),
+    "我不太清楚"
+  );
+  assert.equal(
+    transcriptFromSpeechEvent({ isFinal: false, alternatives: [{ transcript: "还在说" }] }),
+    ""
+  );
 });
 
 test("configured reports expose the next Feynman card in sequence", () => {

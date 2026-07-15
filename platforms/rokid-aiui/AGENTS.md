@@ -52,6 +52,8 @@ Example utterances:
 - The immersive clearance page owns its speech loop: `onVoiceWakeup` must start
   `SpeechRecognition` immediately and submit the final transcript to the active
   MVP-1 session.
+- Speech events are host-dependent. Preserve support for Web Speech `results`, Rokid
+  `alternatives`, direct `transcript`, and `detail`-wrapped payloads.
 - Launch `pages/index/index` only for the legacy active-recall queue.
 - Use `pages/voice-action/index` when the user gives a spoken action or answer.
 - Use `pages/import/index` when the user asks to convert supplied material into cards.

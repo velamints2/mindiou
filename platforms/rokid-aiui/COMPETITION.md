@@ -89,10 +89,12 @@ trigger a verification requirement.
 
 ## Remaining Submission Work
 
-- Import the clean `0.2.8` local source folder into the competition's Rokid Craft account.
+- Import the clean `0.2.9` local source folder into the competition's Rokid Craft account.
 - On glasses, verify the native four-control path: swipe up/down changes the white
   selection, click executes it, and exit returns to the previous view.
-- Verify `leqi -> ASR -> Chinese transcript -> AI feedback`, then end the card and
+- Verify the log continues from `Speech recognition started` to
+  `MindIOU received final ASR transcript` and `MindIOU submitting answer`, then
+  confirm Chinese AI feedback. End the card and
   click the highlighted `下一张` action to confirm progress changes from `2 / 4` to
   `3 / 4` without changing the bounded `896 x 300` page height.
 - Validate microphone Tool Rendering and layout on the exact target firmware.

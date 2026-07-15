@@ -21,15 +21,29 @@ export function hardwareControlFromKey(value) {
 }
 
 export function transcriptFromSpeechEvent(event) {
-  const results = event?.results;
-  if (!results || !Number(results.length)) return "";
-  const requestedIndex = Number(event?.resultIndex);
-  const index = Number.isFinite(requestedIndex)
-    ? Math.max(0, Math.min(results.length - 1, requestedIndex))
-    : results.length - 1;
-  const result = results[index];
-  if (!result || result.isFinal === false) return "";
-  return String(result[0]?.transcript || "").trim();
+  const payloads = [event, event?.detail, event?.data, event?.detail?.data].filter(Boolean);
+  for (const payload of payloads) {
+    if (payload.isFinal === false) continue;
+
+    const directTranscript = String(
+      payload.transcript || payload.alternatives?.[0]?.transcript || ""
+    ).trim();
+    if (directTranscript) return directTranscript;
+
+    const results = payload.results;
+    if (!results || !Number(results.length)) continue;
+    const requestedIndex = Number(payload.resultIndex);
+    const index = Number.isFinite(requestedIndex)
+      ? Math.max(0, Math.min(results.length - 1, requestedIndex))
+      : results.length - 1;
+    const result = results[index];
+    if (!result || result.isFinal === false) continue;
+    const resultTranscript = String(
+      result[0]?.transcript || result.alternatives?.[0]?.transcript || result.transcript || ""
+    ).trim();
+    if (resultTranscript) return resultTranscript;
+  }
+  return "";
 }
 
 export function clearanceEntryFromReport(report, requestedCardId) {

@@ -91,7 +91,7 @@ npm run pack
 The portable source archive is:
 
 ```text
-release/learn-coach-rokid-aiui-0.2.8.zip
+release/learn-coach-rokid-aiui-0.2.9.zip
 ```
 
 ## Glasses controls
@@ -108,9 +108,11 @@ become `回顾 -> 重学 -> 下一张`. Pointer taps remain
 available in Craft and the browser preview, but they are not the acceptance path for
 the glasses build.
 
-Version `0.2.8` uses the immersive Ink speech path directly. A `voicewakeup` event
+Version `0.2.9` uses the immersive Ink speech path directly. A `voicewakeup` event
 creates `SpeechRecognition` immediately, and the final transcript is submitted to the
-active MVP-1 clearance session. After settlement, the third action becomes `下一张`
+active MVP-1 clearance session. The transcript parser accepts both standard Web Speech
+`results` and Rokid host `alternatives` events, including events wrapped in `detail`.
+After settlement, the third action becomes `下一张`
 and advances through the configured report. The bounded `896 x 300` viewport is the
 primary layout acceptance target; the page cannot grow or scroll when feedback appears.
 
@@ -119,7 +121,7 @@ subdirectory. This repository is private, so Craft's anonymous GitHub importer
 returns `repository not found`. Use the clean extracted local folder:
 
 ```text
-/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.8
+/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.9
 ```
 
 Craft generates the final `.aix` from the imported project.

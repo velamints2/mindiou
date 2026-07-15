@@ -138,7 +138,12 @@ export default {
     };
     recognition.onresult = event => {
       const transcript = transcriptFromSpeechEvent(event);
-      if (!transcript || this.processingAnswer) return;
+      if (!transcript) {
+        console.warn("MindIOU ASR result had no readable transcript");
+        return;
+      }
+      if (this.processingAnswer) return;
+      console.log(`MindIOU received final ASR transcript (${transcript.length} chars)`);
       this.processingAnswer = true;
       this.stopRecognition(false);
       void this.submitSpokenAnswer(transcript);
@@ -202,6 +207,7 @@ export default {
       resultClass: "feedback-text"
     });
     try {
+      console.log(`MindIOU submitting answer for session ${session.id}`);
       const payload = await submitClearanceAnswer(this.config, session.id, transcript);
       this.currentSession = payload.session;
       saveClearanceSession(payload.session);
