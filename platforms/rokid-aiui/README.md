@@ -91,7 +91,7 @@ npm run pack
 The portable source archive is:
 
 ```text
-release/learn-coach-rokid-aiui-0.2.10.zip
+release/learn-coach-rokid-aiui-0.2.11.zip
 ```
 
 ## Glasses controls
@@ -108,23 +108,25 @@ become `回顾 -> 重学 -> 下一张`. Pointer taps remain
 available in Craft and the browser preview, but they are not the acceptance path for
 the glasses build.
 
-Version `0.2.10` uses the immersive Ink speech path directly. A `voicewakeup` event
+Version `0.2.11` uses the immersive Ink speech path directly. A `voicewakeup` event
 creates `SpeechRecognition` immediately, and the final transcript is submitted to the
 active MVP-1 clearance session. The transcript parser accepts both standard Web Speech
 `results` and Rokid host `alternatives` events, including events wrapped in `detail`.
-After an answer, the page enters a feedback-first state: the large text area displays
-the AI's response to the learner's explanation, and the follow-up question appears only
-after the learner clicks `继续`. After settlement, the third action becomes `下一张`
-and advances through the configured report. The bounded `896 x 300` viewport is the
-primary layout acceptance target; the page cannot grow or scroll when feedback or a
-follow-up appears.
+After an answer, the page enters a feedback-first state with a smaller teaching font,
+so the AI's response can fit as a useful paragraph instead of one oversized headline.
+The follow-up question appears only after the learner clicks `继续`. After settlement,
+the page reveals a concise reference answer from the teaching feedback or revealed
+scaffold before the learner advances. The third action becomes `下一张` and advances
+through the configured report. The bounded `896 x 300` viewport is the primary layout
+acceptance target; the page cannot grow or scroll when feedback, a reference answer,
+or a follow-up appears.
 
 Craft imports a local folder, a local `.aix`, or a publicly readable GitHub
 subdirectory. This repository is private, so Craft's anonymous GitHub importer
 returns `repository not found`. Use the clean extracted local folder:
 
 ```text
-/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.10
+/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.11
 ```
 
 Craft generates the final `.aix` from the imported project.
@@ -199,14 +201,16 @@ http://localhost:5186/preview/?api=http://localhost:8793
 
 ## Optical-Waveguide Acceptance
 
-1. Import `release/rokid-craft-project-0.2.10` as a local folder in Rokid Craft.
+1. Import `release/rokid-craft-project-0.2.11` as a local folder in Rokid Craft.
 2. Set `api` to a backend URL reachable from the glasses.
 3. Open MindIOU and confirm a single large question fits without scrolling.
 4. Confirm the screen shows a source count but no answer before recall.
 5. Speak a full explanation and confirm it is analyzed as an answer.
 6. Confirm the large text area shows AI feedback first, not the next question.
-7. Click `继续` and confirm the follow-up question appears only after that action.
-8. Include `下一题` inside a long explanation and confirm it remains an answer.
-9. Say `结束清偿` and confirm a cautious result appears.
-10. Disconnect the backend and confirm a retryable error appears without any
+7. Confirm the AI feedback uses the smaller teaching font and does not truncate after one short phrase.
+8. Click `继续` and confirm the follow-up question appears only after that action.
+9. Click `结束` and confirm the page shows a concise reference answer, not only a review instruction.
+10. Click `下一张` and confirm no previous large feedback text flashes during the transition.
+11. Include `下一题` inside a long explanation and confirm it remains an answer.
+12. Disconnect the backend and confirm a retryable error appears without any
    false cleared state.

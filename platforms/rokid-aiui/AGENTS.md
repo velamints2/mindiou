@@ -47,6 +47,9 @@ Example utterances:
 14. Use only the backend's cautious clearance status.
 15. On glasses, show the AI feedback first after a learner answers. Do not show the
     next follow-up question in the large text area until the learner clicks `继续`.
+16. Use smaller teaching text for AI feedback and reference answers. Keep the large
+    headline style for questions only.
+17. After the learner ends a card, reveal a concise reference answer before advancing.
 
 ## Tool Routing
 

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assessmentToReview,
+  conciseAnswerText,
   clearanceEntryFromReport,
   clearanceStatusLabel,
   commandFromUtterance,
@@ -127,6 +128,27 @@ test("clearance feedback stays short and uses cautious labels", () => {
   assert.equal(clearanceStatusLabel("provisionally_cleared"), "暂时清偿");
   assert.equal(clearanceStatusLabel("needs_verification"), "需要查证");
   assert.equal(conciseClearanceText({ feedback: "a".repeat(120) }).length, 96);
+});
+
+test("clearance final answer prefers teaching then revealed scaffold", () => {
+  assert.equal(
+    conciseAnswerText({
+      attempts: [{ analysis: { teaching: "D 状态通常表示进程卡在不可中断 I/O，重启 Nginx 只能缓解请求堆积，不能证明磁盘或网络 I/O 根因已恢复。" } }],
+      scaffold: [{ point: "unused" }]
+    }, {}).includes("D 状态"),
+    true
+  );
+
+  assert.equal(
+    conciseAnswerText({
+      attempts: [],
+      scaffold: [
+        { point: "先区分应用层重启和内核 I/O 阻塞。" },
+        { point: "再用日志、iostat 和复现请求验证根因。" }
+      ]
+    }, {}),
+    "先区分应用层重启和内核 I/O 阻塞。；再用日志、iostat 和复现请求验证根因。"
+  );
 });
 
 test("glasses questions are compact without shrinking the display type", () => {

@@ -83,6 +83,22 @@ export function conciseClearanceText(analysis) {
   return String(analysis?.feedback || analysis?.teaching || "请再用自己的话解释一次。").slice(0, 96);
 }
 
+export function conciseAnswerText(session, result) {
+  const latestAnalysis = session?.attempts?.[session.attempts.length - 1]?.analysis;
+  const teaching = String(latestAnalysis?.teaching || "").trim();
+  if (teaching) return conciseQuestion(teaching, 92);
+
+  const scaffoldPoints = Array.isArray(session?.scaffold)
+    ? session.scaffold.map(item => item?.point).filter(Boolean).slice(0, 2)
+    : [];
+  if (scaffoldPoints.length) return conciseQuestion(scaffoldPoints.join("；"), 92);
+
+  const gaps = Array.isArray(result?.remainingGaps) ? result.remainingGaps.filter(Boolean).slice(0, 2) : [];
+  if (gaps.length) return conciseQuestion(`还需要解释：${gaps.join("；")}`, 92);
+
+  return "参考答案暂不可用，请回到桌面端查看完整教学反馈。";
+}
+
 export function conciseQuestion(value, maxLength = 48) {
   const text = String(value || "").trim().replace(/\s+/g, " ");
   if (text.length <= maxLength) return text;

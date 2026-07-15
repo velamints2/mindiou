@@ -15,6 +15,7 @@ import {
   submitClearanceAnswer
 } from "../../utils/api.js";
 import {
+  conciseAnswerText,
   clearanceStatusLabel,
   conciseClearanceText,
   conciseQuestion,
@@ -30,6 +31,7 @@ export default {
     state: "读取认知欠条",
     target: "准备清偿",
     question: "正在寻找最近一次 AI 实践留下的理解缺口。",
+    questionClass: "question",
     sourceText: "",
     sourceHint: "回答前不显示答案",
     progressText: "— / —",
@@ -223,7 +225,7 @@ export default {
       this.currentSession = payload.session;
       saveClearanceSession(payload.session);
       const analysis = payload.attempt.analysis;
-      const feedbackText = conciseQuestion(conciseClearanceText(analysis), 40);
+      const feedbackText = conciseQuestion(conciseClearanceText(analysis), 72);
       const nextQuestion = conciseQuestion(
         analysis.nextQuestion || analysis.teaching || "请再补充一个例子。",
         48
@@ -239,6 +241,7 @@ export default {
         state: "AI 已给出反馈",
         target: clearanceStatusLabel(analysis.status),
         question: feedbackText,
+        questionClass: "question feedback-question",
         resultText: "",
         sourceHint: analysis.recommendation === "end"
           ? "可结束，也可继续"
@@ -285,7 +288,8 @@ export default {
       sourceHint: "回答前不显示答案",
       resultText: "",
       resultClass: "feedback-text",
-      question: "正在寻找最近一次 AI 实践留下的理解缺口。"
+      question: "",
+      questionClass: "question"
     });
     try {
       const payload = await fetchClearanceEntry(this.config, cardId);
@@ -297,6 +301,7 @@ export default {
           state: "暂无认知欠条",
           target: "先在电脑端生成报告",
           question: "导入一段 AI 对话并生成认知欠条报告后，再回到眼镜开始清偿。",
+          questionClass: "question",
           progressText: "0 / 0"
         });
         return;
@@ -309,6 +314,7 @@ export default {
         state: "检索外部证据",
         target: entry.target,
         question: conciseQuestion(entry.prompt),
+        questionClass: "question",
         progressText: `${entry.cardNumber} / ${entry.cardCount}`
       });
       const started = await startClearance(this.config, entry.reportId, entry.cardId);
@@ -321,6 +327,7 @@ export default {
         phase: "question",
         state: "请直接口述回答",
         question: conciseQuestion(started.session.clearanceQuestion),
+        questionClass: "question",
         sourceText: `${started.session.sources?.length || 0} 个来源已核对`
       });
     } catch (error) {
@@ -331,6 +338,7 @@ export default {
         state: "暂时无法开始",
         target: "连接或 AI 研究失败",
         question: conciseRuntimeError(error),
+        questionClass: "question",
         resultText: "检查网络和后端状态后重试；文本 AI 与研究服务是独立配置。",
         resultClass: "feedback-text feedback-warning"
       });
@@ -354,8 +362,9 @@ export default {
       const payload = await endClearance(this.config, session.id);
       this.currentSession = payload.session;
       saveClearanceSession(payload.session);
+      const answerText = conciseAnswerText(payload.session, payload.result);
       this.setData({
-        state: "本轮结束",
+        state: "参考答案",
         ready: false,
         canEnd: false,
         ended: true,
@@ -367,11 +376,12 @@ export default {
         actionSecondary: "重学",
         actionTertiary: "下一张",
         target: clearanceStatusLabel(payload.result.status),
-        question: conciseQuestion(payload.result.nextRecommendation, 32),
-        sourceHint: "本轮已结算",
+        question: answerText,
+        questionClass: "question answer-question",
+        sourceHint: "参考答案已显示",
         resultText: payload.result.sourceReviewRequired
           ? "普通网页来源参与了关键判断，需回到桌面端查证。"
-          : "结果已保留为谨慎判断，不等于永久掌握。",
+          : conciseQuestion(payload.result.nextRecommendation, 36),
         resultClass: payload.result.status === "provisionally_cleared"
           ? "feedback-text feedback-good"
           : "feedback-text feedback-warning"
@@ -413,6 +423,7 @@ export default {
       actionTertiary: "结束",
       state: "继续解释",
       question: this.data.pendingQuestion || "请再补充一个具体例子。",
+      questionClass: "question",
       resultText: "",
       sourceHint: "回答前不显示答案"
     });
@@ -424,7 +435,16 @@ export default {
       this.setData({ state: "本组完成", resultText: "当前没有更多卡片。" });
       return;
     }
-    this.setData({ working: true, state: "切换下一张", resultText: "操作已收到。" });
+    this.setData({
+      loading: true,
+      working: true,
+      state: "切换下一张",
+      question: "",
+      questionClass: "question",
+      resultText: "",
+      sourceText: "",
+      sourceHint: "回答前不显示答案"
+    });
     await this.begin(nextCardId);
   },
 
@@ -447,7 +467,7 @@ export default {
     </view>
 
     <view class="question-area">
-      <text class="question">{{ question }}</text>
+      <text class="{{ questionClass }}" ink:if="{{ question }}">{{ question }}</text>
       <text class="{{ resultClass }}" ink:if="{{ resultText }}">{{ resultText }}</text>
     </view>
 
@@ -548,6 +568,18 @@ export default {
   font-weight: 700;
   color: #ffffff;
   overflow-wrap: anywhere;
+}
+
+.feedback-question,
+.answer-question {
+  max-height: 116rpx;
+  font-size: 23rpx;
+  line-height: 29rpx;
+  font-weight: 600;
+}
+
+.answer-question {
+  color: #f4f7f5;
 }
 
 .source-row {
