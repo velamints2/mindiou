@@ -79,6 +79,57 @@ test("Rokid API accepts the browser Ink runtime Response shape", async () => {
   delete globalThis.wx;
 });
 
+test("Interactive InkView falls back to fetch when wx is not injected", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  delete globalThis.wx;
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ ok: true, session: { id: "fetch-session" } }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  try {
+    const payload = await startClearance({
+      apiBaseUrl: "https://demo.example/mindiou-api",
+      apiToken: ""
+    }, "report-id", "card-id");
+
+    assert.equal(payload.session.id, "fetch-session");
+    assert.equal(calls[0].url, "https://demo.example/mindiou-api/api/mvp1/sessions");
+    assert.equal(calls[0].options.method, "POST");
+    assert.deepEqual(JSON.parse(calls[0].options.body), {
+      reportId: "report-id",
+      cardId: "card-id"
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Interactive InkView uses localStorage when wx storage is unavailable", () => {
+  const values = new Map();
+  const originalStorage = globalThis.localStorage;
+  delete globalThis.wx;
+  globalThis.localStorage = {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(key, value); }
+  };
+
+  try {
+    saveClearanceSession({ id: "browser-session", state: "awaiting_answer" });
+    assert.deepEqual(loadClearanceSession(), {
+      id: "browser-session",
+      state: "awaiting_answer"
+    });
+  } finally {
+    if (originalStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = originalStorage;
+  }
+});
+
 test("Rokid API accepts the callback-based wx.request shape", async () => {
   globalThis.wx = {
     request(options) {

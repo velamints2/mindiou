@@ -12,8 +12,13 @@ function normalizeBaseUrl(value) {
 
 function storageGet(key, fallback = "") {
   try {
-    if (typeof wx !== "undefined" && wx.getStorageSync) {
-      return wx.getStorageSync(key) || fallback;
+    const runtimeWx = globalThis.wx;
+    if (runtimeWx?.getStorageSync) {
+      return runtimeWx.getStorageSync(key) || fallback;
+    }
+    if (globalThis.localStorage?.getItem) {
+      const stored = globalThis.localStorage.getItem(key);
+      return stored === null ? fallback : JSON.parse(stored);
     }
   } catch (error) {
     console.warn("Storage read failed", error);
@@ -23,8 +28,13 @@ function storageGet(key, fallback = "") {
 
 function storageSet(key, value) {
   try {
-    if (typeof wx !== "undefined" && wx.setStorageSync) {
-      wx.setStorageSync(key, value);
+    const runtimeWx = globalThis.wx;
+    if (runtimeWx?.setStorageSync) {
+      runtimeWx.setStorageSync(key, value);
+      return;
+    }
+    if (globalThis.localStorage?.setItem) {
+      globalThis.localStorage.setItem(key, JSON.stringify(value));
     }
   } catch (error) {
     console.warn("Storage write failed", error);
@@ -109,30 +119,45 @@ async function request(config, path, method = "GET", data) {
     "accept": "application/json"
   };
   if (config.apiToken) headers.authorization = `Bearer ${config.apiToken}`;
-  const response = await new Promise((resolve, reject) => {
-    const requestResult = wx.request({
-      url: `${normalizeBaseUrl(config.apiBaseUrl)}${path}`,
-      method,
-      header: headers,
-      data,
-      dataType: "json",
-      responseType: "text",
-      success: resolve,
-      fail: reject
+  const url = `${normalizeBaseUrl(config.apiBaseUrl)}${path}`;
+  const runtimeWx = globalThis.wx;
+  let response;
+
+  if (runtimeWx?.request) {
+    response = await new Promise((resolve, reject) => {
+      const requestResult = runtimeWx.request({
+        url,
+        method,
+        header: headers,
+        data,
+        dataType: "json",
+        responseType: "text",
+        success: resolve,
+        fail: reject
+      });
+      if (requestResult && typeof requestResult.then === "function") {
+        requestResult.then(resolve, reject);
+      } else if (
+        requestResult &&
+        (
+          typeof requestResult.json === "function" ||
+          "statusCode" in requestResult ||
+          "status" in requestResult
+        )
+      ) {
+        resolve(requestResult);
+      }
     });
-    if (requestResult && typeof requestResult.then === "function") {
-      requestResult.then(resolve, reject);
-    } else if (
-      requestResult &&
-      (
-        typeof requestResult.json === "function" ||
-        "statusCode" in requestResult ||
-        "status" in requestResult
-      )
-    ) {
-      resolve(requestResult);
-    }
-  });
+  } else if (typeof globalThis.fetch === "function") {
+    response = await globalThis.fetch(url, {
+      method,
+      headers,
+      ...(data === undefined ? {} : { body: JSON.stringify(data) })
+    });
+  } else {
+    throw new Error("This AIUI runtime provides neither wx.request nor fetch");
+  }
+
   const { statusCode, payload } = await normalizeResponse(response);
   if (statusCode < 200 || statusCode >= 300 || payload.ok === false) {
     throw new Error(payload.error || `Learn Coach HTTP ${statusCode || "error"}`);

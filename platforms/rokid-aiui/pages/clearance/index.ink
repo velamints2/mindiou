@@ -84,7 +84,7 @@ export default {
         state: "暂时无法开始",
         target: "连接或 AI 研究失败",
         question: String(error.message || error),
-        resultText: "检查后端地址、AI_API_KEY 与模型服务网络后重试。",
+        resultText: "检查网络和后端状态后重试；文本 AI 与研究服务是独立配置。",
         resultClass: "result result-warning"
       });
     }
@@ -118,8 +118,9 @@ export default {
   },
 
   openReview() {
-    if (typeof wx !== "undefined" && wx.navigateTo) {
-      wx.navigateTo({ url: "/pages/index/index" });
+    const runtimeWx = globalThis.wx;
+    if (runtimeWx?.navigateTo) {
+      runtimeWx.navigateTo({ url: "/pages/index/index" });
     }
   }
 }

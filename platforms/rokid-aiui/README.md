@@ -91,7 +91,7 @@ npm run pack
 The portable source archive is:
 
 ```text
-release/learn-coach-rokid-aiui-0.2.3.zip
+release/learn-coach-rokid-aiui-0.2.4.zip
 ```
 
 Craft imports a local folder, a local `.aix`, or a publicly readable GitHub
@@ -99,7 +99,7 @@ subdirectory. This repository is private, so Craft's anonymous GitHub importer
 returns `repository not found`. Use the clean extracted local folder:
 
 ```text
-/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.3
+/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.4
 ```
 
 Craft generates the final `.aix` from the imported project.
@@ -174,7 +174,7 @@ http://localhost:5186/preview/?api=http://localhost:8793
 
 ## Optical-Waveguide Acceptance
 
-1. Import `release/rokid-craft-project-0.2.3` as a local folder in Rokid Craft.
+1. Import `release/rokid-craft-project-0.2.4` as a local folder in Rokid Craft.
 2. Set `api` to a backend URL reachable from the glasses.
 3. Open MindIOU and confirm a single large question fits without scrolling.
 4. Confirm the screen shows a source count but no answer before recall.

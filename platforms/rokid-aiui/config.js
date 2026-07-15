@@ -1,6 +1,6 @@
 export const DEFAULT_API_BASE_URL = "https://launch-wonder-construction-unto.trycloudflare.com/mindiou-api";
-export const DEFAULT_REPORT_ID = "3419476b-5c6a-4fc8-883c-010f2ef68bfd";
-export const DEFAULT_CARD_ID = "14d58888-c176-42ed-bca9-643490a3f888";
+export const DEFAULT_REPORT_ID = "c18ecc67-6725-4b60-bc0a-a73e53150d5e";
+export const DEFAULT_CARD_ID = "card-2";
 export const DEFAULT_SESSION_DURATION = 60;
 export const STORAGE_KEYS = {
   apiBaseUrl: "learnCoachRokidApiBaseUrl",
