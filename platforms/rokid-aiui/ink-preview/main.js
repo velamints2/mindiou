@@ -124,7 +124,8 @@ async function loadInkApp() {
       initialPage: routeSelect.value,
       query: {
         api: apiInput.value.trim() || "http://localhost:8793",
-        duration: 60
+        duration: 60,
+        latest: 1
       }
     });
     inkView.startRendering();

@@ -98,6 +98,43 @@ test("Rokid API accepts the callback-based wx.request shape", async () => {
   delete globalThis.wx;
 });
 
+test("Rokid can load a configured report without using the global latest-report endpoint", async () => {
+  const calls = [];
+  globalThis.wx = {
+    async request(options) {
+      calls.push(options);
+      return {
+        statusCode: 200,
+        data: {
+          ok: true,
+          report: {
+            id: "private-report",
+            createdAt: "2026-07-15T00:00:00.000Z",
+            analysis: { userCapability: { currentDomain: "Server operations" } },
+            sections: {
+              feynmanCards: [
+                { id: "private-card", target: "I/O wait", prompt: "Explain I/O wait." }
+              ]
+            }
+          }
+        }
+      };
+    }
+  };
+
+  const payload = await fetchClearanceEntry({
+    apiBaseUrl: "https://demo.example/mindiou-api",
+    apiToken: "",
+    reportId: "private-report",
+    cardId: "private-card"
+  });
+
+  assert.equal(calls[0].url, "https://demo.example/mindiou-api/api/mvp0/reports/private-report");
+  assert.equal(payload.entry.cardId, "private-card");
+  assert.equal(payload.entry.domain, "Server operations");
+  delete globalThis.wx;
+});
+
 test("long explanations remain answers even when they contain command words", () => {
   assert.equal(
     commandFromUtterance("我认为下一题的核心不是切换，而是先解释当前概念"),

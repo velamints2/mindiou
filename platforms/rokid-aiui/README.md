@@ -63,14 +63,18 @@ cd /Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning
 npm run api
 ```
 
-Set the glasses API URL to the Mac LAN address, for example:
+The competition package uses the public HTTPS backend:
 
 ```text
-http://192.168.5.119:8793
+https://launch-wonder-construction-unto.trycloudflare.com/mindiou-api
 ```
 
+It is pinned to one random-ID demonstration report and card, so the glasses do
+not enumerate or read the newest anonymous visitor report. Launch queries may
+override `reportId` and `cardId` for another report owned by the tester.
+
 During AIUI hardware use, Rokid proxies network traffic through the companion
-phone over Bluetooth. The phone must be able to reach the Mac LAN URL.
+phone over Bluetooth. The phone must be able to reach the configured HTTPS URL.
 `OPENAI_API_KEY` stays on the backend and is never packaged in the glasses
 client. For distribution, deploy the backend behind HTTPS and replace the
 local address in `config.js` or pass `api` in the launch query.
@@ -84,11 +88,20 @@ npm test
 npm run pack
 ```
 
-The Craft-importable source archive is:
+The portable source archive is:
 
 ```text
-release/learn-coach-rokid-aiui-0.2.1.zip
+release/learn-coach-rokid-aiui-0.2.2.zip
 ```
+
+Craft imports a local folder, a local `.aix`, or a GitHub subdirectory. Unzip
+the archive before local-folder import, or import this repository subdirectory:
+
+```text
+https://github.com/velamints2/learn-coach-even-g2/tree/main/platforms/rokid-aiui
+```
+
+Craft generates the final `.aix` from the imported project.
 
 The package gate checks all manifest pages, required `.ink` sections, common
 secret patterns, and the 5 MB wearable package target.
@@ -160,7 +173,8 @@ http://localhost:5186/preview/?api=http://localhost:8793
 
 ## Optical-Waveguide Acceptance
 
-1. Import `release/learn-coach-rokid-aiui-0.2.1.zip` into Rokid Craft.
+1. Import the unzipped `release/learn-coach-rokid-aiui-0.2.2.zip` folder or the
+   GitHub subdirectory into Rokid Craft.
 2. Set `api` to a backend URL reachable from the glasses.
 3. Open MindIOU and confirm a single large question fits without scrolling.
 4. Confirm the screen shows a source count but no answer before recall.

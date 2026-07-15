@@ -1,5 +1,7 @@
 import {
   DEFAULT_API_BASE_URL,
+  DEFAULT_CARD_ID,
+  DEFAULT_REPORT_ID,
   DEFAULT_SESSION_DURATION,
   STORAGE_KEYS
 } from "../config.js";
@@ -44,7 +46,10 @@ export function getRuntimeConfig(query = {}) {
   const duration = [15, 60, 180].includes(Number(query.duration))
     ? Number(query.duration)
     : Number(appData.sessionDuration || DEFAULT_SESSION_DURATION);
-  return { apiBaseUrl, apiToken, duration };
+  const useLatestEntry = String(query.latest || "") === "1";
+  const reportId = useLatestEntry ? "" : String(query.reportId || appData.reportId || DEFAULT_REPORT_ID).trim();
+  const cardId = useLatestEntry ? "" : String(query.cardId || appData.cardId || DEFAULT_CARD_ID).trim();
+  return { apiBaseUrl, apiToken, duration, reportId, cardId };
 }
 
 export function saveRuntimeConfig(apiBaseUrl, apiToken = "") {
@@ -169,6 +174,28 @@ export function importMaterial(config, text, projectId = "rokid-import") {
 }
 
 export function fetchClearanceEntry(config) {
+  if (config.reportId && config.cardId) {
+    return request(config, `/api/mvp0/reports/${encodeURIComponent(config.reportId)}`).then(payload => {
+      const report = payload.report;
+      const cards = report?.sections?.feynmanCards || [];
+      const card = cards.find(item => item.id === config.cardId);
+      if (!card) throw new Error("Configured cognitive debt card was not found");
+      return {
+        ok: true,
+        platform: "rokid-aiui",
+        entry: {
+          reportId: report.id,
+          cardId: card.id,
+          createdAt: report.createdAt,
+          domain: report.analysis?.userCapability?.currentDomain || "认知债务",
+          target: card.target || "理解缺口",
+          prompt: card.prompt || "请用自己的话解释这个问题。",
+          cardNumber: cards.findIndex(item => item.id === card.id) + 1,
+          cardCount: cards.length
+        }
+      };
+    });
+  }
   return request(config, "/api/rokid/clearance-entry");
 }
 

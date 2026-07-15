@@ -61,8 +61,8 @@ trigger a verification requirement.
 
 ## 90-Second Demonstration
 
-1. Show an MVP-0 report from an AI-assisted WebView networking fix.
-2. Open MindIOU on Rokid Glasses; the latest debt appears as one large question.
+1. Show the public MVP-0 report from an AI-assisted server deployment.
+2. Open MindIOU on Rokid Glasses; the pinned demo debt appears as one large question.
 3. Point out the source count and that no answer or scaffold is visible.
 4. Give an incomplete spoken explanation that merges reachability and CORS.
 5. Show the AI recognizing the valid part, teaching one boundary, and asking one
@@ -76,18 +76,20 @@ trigger a verification requirement.
 
 - Current Rokid AIUI / Ink immersive-agent structure and ES module app entry.
 - Shared MVP-1 source-grounded research and answer-analysis backend.
-- Compact latest-report endpoint for the glasses.
+- Privacy-preserving report/card-scoped entry for the glasses.
 - Hidden scaffold before first answer.
 - Conservative whole-utterance command matching.
 - API key isolation: secrets stay on the backend.
 - Platform unit tests, backend contract tests, smoke tests, package checks, and
   640x480 plus 480x640 visual overflow checks.
 - Browser acceptance harness for deterministic demos and real backend sessions.
+- Public HTTPS deployment for judges outside the local network.
+- Curated, source-cited server-diagnostics fallback when the demo server cannot
+  reach the model provider; it never reports a heuristic result as cleared.
 
 ## Remaining Submission Work
 
-- Import the `0.2.0` archive into the competition's current Rokid Craft account.
+- Import the `0.2.2` source from GitHub into the competition's Rokid Craft account.
 - Validate microphone Tool Rendering and layout on the exact target firmware.
-- Deploy the backend to HTTPS for judging outside the local network.
 - Add competition app ID, author metadata, icon, privacy URL, screenshots, and
   a 60-90 second hardware demo video.

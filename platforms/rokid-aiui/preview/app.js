@@ -1,8 +1,9 @@
 const params = new URL(location.href).searchParams;
 const publicDeployment = location.pathname.startsWith('/mindiou/');
 const apiBaseUrl = (
-  params.get("api")
-    || (publicDeployment ? `${location.origin}/mindiou-api` : "http://localhost:8793")
+  publicDeployment
+    ? `${location.origin}/mindiou-api`
+    : params.get("api") || ""
 ).replace(/\/+$/, "");
 const staticDemo = params.get("demo") === "1";
 const directReportId = params.get("reportId") || "";
@@ -25,6 +26,7 @@ const elements = {
 let session = null;
 
 async function request(path, options) {
+  if (!apiBaseUrl) throw new Error("Learning API URL is required");
   const response = await fetch(`${apiBaseUrl}${path}`, options);
   const payload = await response.json();
   if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);

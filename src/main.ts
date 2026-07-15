@@ -215,8 +215,10 @@ let cards: LearningCard[] = simulatorTestMode ? sampleCards() : loadCards();
 let cardIndex = simulatorTestMode ? 0 : Number(localStorage.getItem("g2LearningIndex") || "0");
 const publicApiBaseUrl = window.location.pathname.startsWith('/mindiou/')
   ? `${window.location.origin}/mindiou-api/`
-  : 'http://localhost:8793'
-let apiBaseUrl = readSetting("g2LearningApiBaseUrl", "api", publicApiBaseUrl);
+  : '/'
+let apiBaseUrl = window.location.pathname.startsWith('/mindiou/')
+  ? publicApiBaseUrl
+  : readSetting("g2LearningApiBaseUrl", "api", publicApiBaseUrl);
 let apiToken = readSetting("g2LearningApiToken", "token", "");
 let audioChunks: Uint8Array[] = [];
 let lastAudioSendAt = 0;
@@ -398,7 +400,7 @@ function apiAddressWarning(): string {
     const apiHost = new URL(apiBaseUrl).hostname;
     const pageHost = window.location.hostname;
     if (isLoopbackHost(apiHost) && !isLoopbackHost(pageHost)) {
-      return "当前 API 使用 localhost。手机或 Even App 中必须改为 Mac 的局域网地址，例如 http://192.168.x.x:8793。";
+      return "当前 API 仅在本机可用。手机、眼镜或公开页面必须使用可访问的 HTTPS Learning API。";
     }
   } catch {
     return "Learning API 地址格式无效。";

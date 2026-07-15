@@ -139,6 +139,7 @@ export async function startClearanceSession({ report, cardId, researchFn, now = 
     },
     clearanceQuestion: fit(rawResearch?.rewrittenQuestion || card.prompt, 800),
     researchSummary: fit(rawResearch?.summary, 1600),
+    researchMode: clean(rawResearch?.researchMode || "live_ai"),
     sources,
     scaffold,
     attempts: [],

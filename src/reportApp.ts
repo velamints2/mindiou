@@ -141,15 +141,15 @@ function detectArtifactType(text: string): string {
 
 const runtimeParams = new URLSearchParams(location.search)
 const isPublicDeployment = location.pathname.startsWith('/mindiou/')
-const API_BASE = runtimeParams.get('api') || (isPublicDeployment ? '/mindiou-api' : '')
+const API_BASE = isPublicDeployment ? '/mindiou-api' : runtimeParams.get('api') || ''
 
 function mvp1Url(reportId: string, cardId: string): string {
   const url = isPublicDeployment
     ? new URL('/mindiou/mvp1/', location.origin)
-    : new URL('http://localhost:5186/preview/')
+    : new URL('/platforms/rokid-aiui/preview/', location.origin)
   url.searchParams.set('reportId', reportId)
   url.searchParams.set('cardId', cardId)
-  if (!isPublicDeployment) url.searchParams.set('api', 'http://localhost:8793')
+  if (!isPublicDeployment && API_BASE) url.searchParams.set('api', API_BASE)
   return url.toString()
 }
 

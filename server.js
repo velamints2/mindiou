@@ -14,15 +14,19 @@ import {
   submitClearanceAnswer
 } from "./mvp1-clearance.js";
 import { createOpenAiWebResearch } from "./mvp1-openai.js";
+import { createDemoAnswerFallback, createDemoResearchFallback } from "./mvp1-demo-fallback.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
 const apiToken = process.env.LEARNING_API_TOKEN || "";
 const openAiApiKey = process.env.OPENAI_API_KEY || "";
 const disableAi = process.env.SPIRAL_DISABLE_AI === "1";
+const mvp1DemoFallback = process.env.MVP1_DEMO_FALLBACK === "1";
 const openAiBaseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
 const chatModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const researchModel = process.env.OPENAI_RESEARCH_MODEL || chatModel;
+const openAiChatTimeoutMs = Number(process.env.OPENAI_CHAT_TIMEOUT_MS || 30000);
+const openAiResearchTimeoutMs = Number(process.env.OPENAI_RESEARCH_TIMEOUT_MS || 45000);
 const sttModel = process.env.OPENAI_STT_MODEL || "gpt-4o-mini-transcribe";
 const sttPrompt = process.env.OPENAI_STT_PROMPT || [
   "Learn Coach vocabulary study in Mandarin and English.",
@@ -40,7 +44,8 @@ const mvp1Sessions = new Map();
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: openAiApiKey,
   baseUrl: openAiBaseUrl,
-  model: researchModel
+  model: researchModel,
+  timeoutMs: openAiResearchTimeoutMs
 });
 
 const learningCoachSystemPrompt = [
@@ -348,20 +353,28 @@ async function chatJson(messages, fallback) {
       __fallbackError: disableAi ? "SPIRAL_DISABLE_AI=1" : "OPENAI_API_KEY is not set"
     };
   }
-  const response = await fetch(`${openAiBaseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "authorization": `Bearer ${openAiApiKey}`,
-      "content-type": "application/json",
-      "accept": "application/json"
-    },
-    body: JSON.stringify({
-      model: chatModel,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages
-    })
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), openAiChatTimeoutMs);
+  let response;
+  try {
+    response = await fetch(`${openAiBaseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${openAiApiKey}`,
+        "content-type": "application/json",
+        "accept": "application/json"
+      },
+      body: JSON.stringify({
+        model: chatModel,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages
+      }),
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error?.message || `OpenAI HTTP ${response.status}`);
@@ -370,45 +383,43 @@ async function chatJson(messages, fallback) {
 }
 
 async function analyzeClearanceAnswer(input) {
-  const result = await chatJson([
-    { role: "system", content: getClearanceAnalysisPrompt() },
-    { role: "user", content: JSON.stringify(input) }
-  ], () => ({
-    status: "needs_verification",
-    coverage: 0,
-    demonstrated: [],
-    missing: ["AI answer analysis was unavailable."],
-    misconceptions: [],
-    evidence: [],
-    materialSourceIds: [],
-    feedback: "Your answer was recorded, but the system could not evaluate it.",
-    teaching: "Review the cited sources and compare them with your explanation.",
-    nextQuestion: input.question,
-    recommendation: "continue"
-  }));
-  return result;
+  try {
+    return await chatJson([
+      { role: "system", content: getClearanceAnalysisPrompt() },
+      { role: "user", content: JSON.stringify(input) }
+    ], () => createDemoAnswerFallback(input));
+  } catch (error) {
+    if (!mvp1DemoFallback) throw error;
+    return createDemoAnswerFallback(input);
+  }
 }
 
 async function researchClearanceContext(request) {
-  const evidence = await rawWebResearch(request);
-  const structured = await chatJson([
-    { role: "system", content: getResearchStructuringPrompt() },
-    {
-      role: "user",
-      content: JSON.stringify({
-        request,
-        researchText: evidence.researchText,
-        sources: evidence.sources
-      })
-    }
-  ], () => ({ rewrittenQuestion: request.originalQuestion, summary: "", scaffold: [] }));
-  const referencedSourceIds = new Set(
-    (structured.scaffold || []).flatMap(point => Array.isArray(point.sourceIds) ? point.sourceIds : [])
-  );
-  return {
-    ...structured,
-    sources: evidence.sources.filter(source => referencedSourceIds.has(source.id))
-  };
+  try {
+    const evidence = await rawWebResearch(request);
+    const structured = await chatJson([
+      { role: "system", content: getResearchStructuringPrompt() },
+      {
+        role: "user",
+        content: JSON.stringify({
+          request,
+          researchText: evidence.researchText,
+          sources: evidence.sources
+        })
+      }
+    ], () => ({ rewrittenQuestion: request.originalQuestion, summary: "", scaffold: [] }));
+    const referencedSourceIds = new Set(
+      (structured.scaffold || []).flatMap(point => Array.isArray(point.sourceIds) ? point.sourceIds : [])
+    );
+    return {
+      ...structured,
+      researchMode: "live_ai",
+      sources: evidence.sources.filter(source => referencedSourceIds.has(source.id))
+    };
+  } catch (error) {
+    if (!mvp1DemoFallback) throw error;
+    return createDemoResearchFallback(request, error);
+  }
 }
 
 async function checkOpenAiConnectivity() {
