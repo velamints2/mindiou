@@ -25,10 +25,24 @@ export function conciseClearanceText(analysis) {
   return String(analysis?.feedback || analysis?.teaching || "请再用自己的话解释一次。").slice(0, 96);
 }
 
-export function conciseQuestion(value, maxLength = 72) {
+export function conciseQuestion(value, maxLength = 48) {
   const text = String(value || "").trim().replace(/\s+/g, " ");
   if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength - 1).trim()}…`;
+
+  const completeEndings = ["？", "?", "。", "！", "!"];
+  const completeBoundary = Array.from(text).reduce((last, char, index) => {
+    return completeEndings.includes(char) && index + 1 <= maxLength ? index + 1 : last;
+  }, 0);
+  if (completeBoundary >= Math.min(8, maxLength)) {
+    return text.slice(0, completeBoundary).trim();
+  }
+
+  const candidate = text.slice(0, maxLength - 1).trim();
+  const wordBoundary = candidate.lastIndexOf(" ");
+  const safeCandidate = wordBoundary >= Math.floor(maxLength * 0.6)
+    ? candidate.slice(0, wordBoundary)
+    : candidate;
+  return `${safeCandidate.trim()}…`;
 }
 
 export function assessmentToReview(assessment) {

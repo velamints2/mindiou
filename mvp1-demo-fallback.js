@@ -12,7 +12,7 @@ export function createDemoResearchFallback(request, error) {
 
   return {
     researchMode: "curated_demo_fallback",
-    rewrittenQuestion: "Explain what high I/O wait and D-state processes indicate, why restarting Nginx may not fix the root cause, and what evidence you would inspect next.",
+    rewrittenQuestion: "D 状态和高 I/O wait 说明什么？为什么重启 Nginx 不等于修复根因？",
     summary: "Curated incident-response scaffold used because live external research was unavailable. It is limited to the public server-diagnostics demo debt.",
     sources: [
       {
@@ -92,10 +92,10 @@ export function createDemoAnswerFallback(input) {
     evidence: ["Demo fallback checked the answer for four required explanation boundaries; live AI evaluation was unavailable."],
     materialSourceIds: ["source-kernel-proc", "source-systemd-resource", "source-kernel-cgroup"],
     feedback: coverage >= 0.75
-      ? "You covered most of the diagnostic chain. Live AI evaluation is unavailable, so this attempt still requires verification."
-      : "Your answer was recorded. Add the missing links between process state, I/O wait, root cause, and verification evidence.",
-    teaching: "D-state and I/O wait are observations. A complete explanation proposes a cause, names evidence that supports it, and says what result would disprove it.",
-    nextQuestion: "What evidence would let you distinguish a storage bottleneck from an Nginx or upstream-service problem?",
+      ? "你已经覆盖了主要诊断链。当前缺少实时 AI 评价，因此仍需查证。"
+      : "回答已记录。请补充进程状态、I/O wait、根因和验证证据之间的关系。",
+    teaching: "D 状态和 I/O wait 都是现象。完整解释需要提出原因、支持证据，以及能推翻该判断的结果。",
+    nextQuestion: "哪些证据可以区分存储瓶颈、Nginx 问题和上游服务故障？",
     recommendation: "continue"
   };
 }

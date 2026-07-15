@@ -220,10 +220,10 @@ export function endClearanceSession(session, { now = () => new Date().toISOStrin
     remainingGaps: latest?.missing || ["No valid learner attempt was recorded."],
     materialSourceIds: latest?.materialSourceIds || [],
     nextRecommendation: finalStatus === "provisionally_cleared"
-      ? "Apply the explanation in a new verification task before treating the debt as durable capability."
+      ? "请在新的验证任务中应用这段解释，再把它视为稳定能力。"
       : finalStatus === "needs_verification"
-        ? "Review the material sources or verify the claim against an official source before clearing this debt."
-        : "Review the teaching feedback and make another explanation attempt."
+        ? "请核对材料来源或官方文档，再决定是否清偿这笔认知欠条。"
+        : "请复习教学反馈，再用自己的话解释一次。"
   };
   return session.finalResult;
 }
@@ -235,6 +235,7 @@ export function getClearanceAnalysisPrompt() {
     "Use the hidden scaffold and cited sources as a checking aid, not as text the learner must repeat verbatim.",
     "Check causal reasoning, important boundaries, trade-offs, and ability to verify AI work.",
     "If the answer is weak, teach briefly and ask one concrete question that requires the learner to explain again.",
+    "Use the learner's language for all learner-facing fields. If the learner answers in Chinese, feedback, teaching, missing items, misconceptions, evidence, and nextQuestion must be Chinese.",
     "Never claim durable mastery. Use one cautious status: provisionally_cleared, needs_practice, needs_verification, no_valid_attempt.",
     "Only recommend end when the core explanation is substantially demonstrated.",
     "Return JSON with: status, coverage (0-1), demonstrated[], missing[], misconceptions[], evidence[], materialSourceIds[], feedback, teaching, nextQuestion, recommendation (continue|end)."
@@ -261,6 +262,7 @@ export function getResearchStructuringPrompt() {
     "Use only the supplied research text and source records. Do not add facts or URLs.",
     "Reject sources about a same-name but unrelated product; do not include their source IDs in the scaffold.",
     "Rewrite the original card into one precise clearance question.",
+    "Use the original card's language. Keep the rewritten question under 48 Chinese characters or 90 English characters so it fits on smart glasses.",
     "Build 3-6 hidden scaffold points. Each point must reference one or more supplied source IDs.",
     "Return JSON only:",
     '{"rewrittenQuestion":"","summary":"","scaffold":[{"id":"point-1","point":"","whyItMatters":"","sourceIds":["source-1"]}]}'

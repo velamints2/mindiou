@@ -89,7 +89,7 @@ trigger a verification requirement.
 
 ## Remaining Submission Work
 
-- Import the clean `0.2.4` local source folder into the competition's Rokid Craft account.
+- Import the clean `0.2.5` local source folder into the competition's Rokid Craft account.
 - Validate microphone Tool Rendering and layout on the exact target firmware.
 - Add competition app ID, author metadata, icon, privacy URL, screenshots, and
   a 60-90 second hardware demo video.

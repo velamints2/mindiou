@@ -205,6 +205,10 @@ export function fetchClearanceEntry(config) {
       const cards = report?.sections?.feynmanCards || [];
       const card = cards.find(item => item.id === config.cardId);
       if (!card) throw new Error("Configured cognitive debt card was not found");
+      const rawDomain = report.analysis?.userCapability?.currentDomain || "认知债务";
+      const domain = /server|linux|nginx|systemd|cloudflare/i.test(rawDomain)
+        ? "服务器部署与运维"
+        : String(rawDomain).slice(0, 18);
       return {
         ok: true,
         platform: "rokid-aiui",
@@ -212,7 +216,7 @@ export function fetchClearanceEntry(config) {
           reportId: report.id,
           cardId: card.id,
           createdAt: report.createdAt,
-          domain: report.analysis?.userCapability?.currentDomain || "认知债务",
+          domain,
           target: card.target || "理解缺口",
           prompt: card.prompt || "请用自己的话解释这个问题。",
           cardNumber: cards.findIndex(item => item.id === card.id) + 1,

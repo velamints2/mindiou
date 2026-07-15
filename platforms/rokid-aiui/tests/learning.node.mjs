@@ -32,8 +32,13 @@ test("clearance feedback stays short and uses cautious labels", () => {
 
 test("glasses questions are compact without shrinking the display type", () => {
   const question = conciseQuestion(`  ${"问题".repeat(50)}  `);
-  assert.equal(question.length, 72);
+  assert.equal(question.length, 48);
   assert.ok(question.endsWith("…"));
+});
+
+test("glasses questions prefer a complete sentence over a broken second clause", () => {
+  const question = conciseQuestion("为什么会出现 D 状态？请继续解释 I/O wait、设备延迟、日志与请求尾延迟之间的完整关系。", 32);
+  assert.equal(question, "为什么会出现 D 状态？");
 });
 
 test("Rokid clearance API uses the shared MVP-1 contract and local session storage", async () => {
@@ -182,7 +187,7 @@ test("Rokid can load a configured report without using the global latest-report 
 
   assert.equal(calls[0].url, "https://demo.example/mindiou-api/api/mvp0/reports/private-report");
   assert.equal(payload.entry.cardId, "private-card");
-  assert.equal(payload.entry.domain, "Server operations");
+  assert.equal(payload.entry.domain, "服务器部署与运维");
   delete globalThis.wx;
 });
 

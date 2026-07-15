@@ -10,6 +10,8 @@ describe("MVP-1 public demo fallback", () => {
     }, new Error("offline"));
 
     expect(result.researchMode).toBe("curated_demo_fallback");
+    expect(result.rewrittenQuestion).toBe("D 状态和高 I/O wait 说明什么？为什么重启 Nginx 不等于修复根因？");
+    expect(result.rewrittenQuestion.length).toBeLessThanOrEqual(48);
     expect(result.sources).toHaveLength(3);
     expect(result.scaffold).toHaveLength(4);
     expect(result.scaffold.every(point => point.sourceIds.length > 0)).toBe(true);
