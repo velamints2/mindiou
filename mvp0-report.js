@@ -16,6 +16,14 @@ import { prepareArtifactForReport } from "./mvp0-artifact-preprocess.js";
 
 const MAX_TEXT = 30000;
 
+function withGenerationStatus(report, fallback, error = "") {
+  report.generation = {
+    fallback: Boolean(fallback),
+    error: truncate(error, 300)
+  };
+  return report;
+}
+
 const VALID_ARTIFACT_TYPES = [
   "chatgpt", "claude", "cursor", "codex", "hackathon", "meeting", "article", "other"
 ];
@@ -261,7 +269,7 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
   if (!chatFn) {
     const fallbackReport = generateFallbackReport(text, type);
     fallbackReport.input.preprocess = preprocess;
-    return fallbackReport;
+    return withGenerationStatus(fallbackReport, true, "AI is not configured");
   }
 
   try {
@@ -280,7 +288,11 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
     if (result.__fallback || result.__useFallback) {
       const fallbackReport = generateFallbackReport(text, type);
       fallbackReport.input.preprocess = preprocess;
-      return fallbackReport;
+      return withGenerationStatus(
+        fallbackReport,
+        true,
+        result.__fallbackError || "AI generation was unavailable"
+      );
     }
 
     // AI succeeded: normalize the output through the schema enforcer.
@@ -296,12 +308,16 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
       }
     });
 
-    return report;
+    return withGenerationStatus(report, false);
   } catch (error) {
     // Any AI failure (network, parse, timeout) falls back to structural report
     const fallbackReport = generateFallbackReport(text, type);
     fallbackReport.input.preprocess = preprocess;
-    return fallbackReport;
+    return withGenerationStatus(
+      fallbackReport,
+      true,
+      error instanceof Error ? error.message : String(error)
+    );
   }
 }
 

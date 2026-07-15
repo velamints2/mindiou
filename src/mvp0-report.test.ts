@@ -167,6 +167,7 @@ describe("generateClearanceReport", () => {
       const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
       expect(report.status).toBe("generated");
+      expect(report.generation).toEqual({ fallback: false, error: "" });
     });
 
     it("generates a report id", async () => {
@@ -227,6 +228,7 @@ describe("generateClearanceReport", () => {
       const mockChatFn = vi.fn().mockRejectedValue(new Error("Network timeout"));
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
 
+      expect(report.generation).toEqual({ fallback: true, error: "Network timeout" });
       expect(report.sections.dangerousGaps).toHaveLength(5);
       expect(report.sections.feynmanCards.length).toBeGreaterThanOrEqual(3);
       expect(report.sections.nextActions.length).toBeGreaterThan(0);
@@ -243,6 +245,10 @@ describe("generateClearanceReport", () => {
       });
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
 
+      expect(report.generation).toEqual({
+        fallback: true,
+        error: "OPENAI_API_KEY is not set"
+      });
       expect(report.sections.dangerousGaps).toHaveLength(5);
       expect(report.sections.aiCompleted.length).toBeGreaterThan(0);
       expect(report.sections.aiCompleted[0].isInference).toBe(true);
@@ -269,12 +275,14 @@ describe("generateClearanceReport", () => {
   describe("without chatFn (fallback only)", () => {
     it("generates fallback report when chatFn is null", async () => {
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", null);
+      expect(report.generation.fallback).toBe(true);
       expect(report.sections.dangerousGaps).toHaveLength(5);
       expect(report.sections.feynmanCards.length).toBeGreaterThanOrEqual(3);
     });
 
     it("generates fallback report when chatFn is undefined", async () => {
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt");
+      expect(report.generation.fallback).toBe(true);
       expect(report.sections.dangerousGaps).toHaveLength(5);
     });
   });

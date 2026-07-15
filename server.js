@@ -1274,8 +1274,14 @@ const server = createServer(async (req, res) => {
       const chatFn = (!openAiApiKey || disableAi) ? null : chatJson;
       const report = await generateClearanceReport(artifactText, artifactType, chatFn);
       const saved = await mvp0Store.saveReport(report);
-      const isFallback = (!openAiApiKey || disableAi);
-      jsonResponse(res, 200, { ok: true, report: saved, fallback: isFallback, detectedType: artifactType });
+      const isFallback = Boolean(saved.generation?.fallback);
+      jsonResponse(res, 200, {
+        ok: true,
+        report: saved,
+        fallback: isFallback,
+        ...(isFallback && saved.generation?.error ? { error: saved.generation.error } : {}),
+        detectedType: artifactType
+      });
       return;
     }
 

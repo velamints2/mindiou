@@ -18,3 +18,6 @@ into the repository or web root. The anonymous deployment intentionally blocks
 the report-list endpoint and the Rokid latest-report endpoint to prevent obvious
 cross-visitor data disclosure. It is still a public beta without accounts, so
 the UI warns visitors not to submit secrets or private customer data.
+
+For small demo servers, `journald-mindiou-limits.conf` bounds system journal
+retention so old logs cannot consume multiple gigabytes of the root disk.

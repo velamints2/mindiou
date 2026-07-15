@@ -91,6 +91,10 @@ export function createMvp0Store(filePath) {
           recommendedCardLevel: "foundation"
         }
       },
+      generation: {
+        fallback: Boolean(report.generation?.fallback),
+        error: clean(report.generation?.error || "").slice(0, 300)
+      },
       sections: report.sections || {
         aiCompleted: [],
         userContributed: [],
