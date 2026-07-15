@@ -91,7 +91,7 @@ npm run pack
 The portable source archive is:
 
 ```text
-release/learn-coach-rokid-aiui-0.2.11.zip
+release/learn-coach-rokid-aiui-0.2.12.zip
 ```
 
 ## Glasses controls
@@ -108,7 +108,7 @@ become `回顾 -> 重学 -> 下一张`. Pointer taps remain
 available in Craft and the browser preview, but they are not the acceptance path for
 the glasses build.
 
-Version `0.2.11` uses the immersive Ink speech path directly. A `voicewakeup` event
+Version `0.2.12` uses the immersive Ink speech path directly. A `voicewakeup` event
 creates `SpeechRecognition` immediately, and the final transcript is submitted to the
 active MVP-1 clearance session. The transcript parser accepts both standard Web Speech
 `results` and Rokid host `alternatives` events, including events wrapped in `detail`.
@@ -120,13 +120,15 @@ scaffold before the learner advances. The third action becomes `下一张` and a
 through the configured report. The bounded `896 x 300` viewport is the primary layout
 acceptance target; the page cannot grow or scroll when feedback, a reference answer,
 or a follow-up appears.
+Internal flow state is kept off `setData`, so Craft logs should no longer report
+`phase has no bindings` or `pendingQuestion has no bindings`.
 
 Craft imports a local folder, a local `.aix`, or a publicly readable GitHub
 subdirectory. This repository is private, so Craft's anonymous GitHub importer
 returns `repository not found`. Use the clean extracted local folder:
 
 ```text
-/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.11
+/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.12
 ```
 
 Craft generates the final `.aix` from the imported project.
@@ -201,7 +203,7 @@ http://localhost:5186/preview/?api=http://localhost:8793
 
 ## Optical-Waveguide Acceptance
 
-1. Import `release/rokid-craft-project-0.2.11` as a local folder in Rokid Craft.
+1. Import `release/rokid-craft-project-0.2.12` as a local folder in Rokid Craft.
 2. Set `api` to a backend URL reachable from the glasses.
 3. Open MindIOU and confirm a single large question fits without scrolling.
 4. Confirm the screen shows a source count but no answer before recall.

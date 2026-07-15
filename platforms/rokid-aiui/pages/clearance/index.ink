@@ -39,8 +39,6 @@ export default {
     resultClass: "feedback-text",
     canEnd: false,
     ended: false,
-    phase: "question",
-    pendingQuestion: "",
     working: false,
     listening: false,
     selectedAction: 0,
@@ -51,6 +49,8 @@ export default {
 
   async onLoad(query = {}) {
     this.config = getRuntimeConfig(query);
+    this.phase = "question";
+    this.pendingQuestion = "";
     await this.begin();
   },
 
@@ -96,7 +96,7 @@ export default {
   },
 
   actionLabels() {
-    if (this.data.phase === "feedback" && !this.data.ended) return ["继续", "重试", "结束"];
+    if (this.phase === "feedback" && !this.data.ended) return ["继续", "重试", "结束"];
     return this.data.ended ? ["回顾", "重学", "下一张"] : ["解释", "重试", "结束"];
   },
 
@@ -105,7 +105,7 @@ export default {
       this.showResultSummary();
       return;
     }
-    if (this.data.phase === "feedback") {
+    if (this.phase === "feedback") {
       this.showFollowupQuestion();
       return;
     }
@@ -119,7 +119,7 @@ export default {
 
   async onVoiceWakeup() {
     if (this.data.ended) this.showResultSummary();
-    else if (this.data.phase === "feedback") this.showFollowupQuestion();
+    else if (this.phase === "feedback") this.showFollowupQuestion();
     else this.startListening();
   },
 
@@ -230,10 +230,10 @@ export default {
         analysis.nextQuestion || analysis.teaching || "请再补充一个例子。",
         48
       );
+      this.phase = "feedback";
+      this.pendingQuestion = nextQuestion;
       this.setData({
         working: false,
-        phase: "feedback",
-        pendingQuestion: nextQuestion,
         selectedAction: 0,
         actionPrimary: "继续",
         actionSecondary: "重试",
@@ -270,12 +270,12 @@ export default {
   async begin(cardId = this.config.cardId) {
     this.stopRecognition();
     this.processingAnswer = false;
+    this.phase = "question";
+    this.pendingQuestion = "";
     this.setData({
       loading: true,
       ready: false,
       ended: false,
-      phase: "question",
-      pendingQuestion: "",
       working: false,
       listening: false,
       canEnd: false,
@@ -320,11 +320,11 @@ export default {
       const started = await startClearance(this.config, entry.reportId, entry.cardId);
       this.currentSession = started.session;
       saveClearanceSession(started.session);
+      this.phase = "question";
       this.setData({
         loading: false,
         ready: true,
         canEnd: true,
-        phase: "question",
         state: "请直接口述回答",
         question: conciseQuestion(started.session.clearanceQuestion),
         questionClass: "question",
@@ -363,13 +363,13 @@ export default {
       this.currentSession = payload.session;
       saveClearanceSession(payload.session);
       const answerText = conciseAnswerText(payload.session, payload.result);
+      this.phase = "ended";
+      this.pendingQuestion = "";
       this.setData({
         state: "参考答案",
         ready: false,
         canEnd: false,
         ended: true,
-        phase: "ended",
-        pendingQuestion: "",
         working: false,
         selectedAction: 2,
         actionPrimary: "回顾",
@@ -415,14 +415,14 @@ export default {
   },
 
   showFollowupQuestion() {
+    this.phase = "question";
     this.setData({
-      phase: "question",
       selectedAction: 0,
       actionPrimary: "解释",
       actionSecondary: "重试",
       actionTertiary: "结束",
       state: "继续解释",
-      question: this.data.pendingQuestion || "请再补充一个具体例子。",
+      question: this.pendingQuestion || "请再补充一个具体例子。",
       questionClass: "question",
       resultText: "",
       sourceHint: "回答前不显示答案"

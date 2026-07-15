@@ -89,7 +89,7 @@ trigger a verification requirement.
 
 ## Remaining Submission Work
 
-- Import the clean `0.2.11` local source folder into the competition's Rokid Craft account.
+- Import the clean `0.2.12` local source folder into the competition's Rokid Craft account.
 - On glasses, verify the native four-control path: swipe up/down changes the white
   selection, click executes it, and exit returns to the previous view.
 - Verify the log continues from `Speech recognition started` to
@@ -99,6 +99,9 @@ trigger a verification requirement.
   card and confirm a concise reference answer appears before clicking the highlighted
   `下一张` action. Confirm progress changes from `2 / 4` to `3 / 4` without flashing
   the previous large feedback text or changing the bounded `896 x 300` page height.
+- Confirm Craft logs no longer repeat `phase has no bindings` or
+  `pendingQuestion has no bindings`; remaining QuickJS drop/memory lines are runtime
+  lifecycle logs unless paired with a functional failure.
 - Validate microphone Tool Rendering and layout on the exact target firmware.
 - Add competition app ID, author metadata, icon, privacy URL, screenshots, and
   a 60-90 second hardware demo video.
