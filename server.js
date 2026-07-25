@@ -23,6 +23,15 @@ import {
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
 const apiToken = process.env.LEARNING_API_TOKEN || "";
+const earlyAccessCodes = parseEarlyAccessCodes(
+  process.env.MINDIOU_EARLY_ACCESS_CODES || process.env.MINDIOU_ACCESS_CODE || ""
+);
+const sessionSecret = process.env.MINDIOU_SESSION_SECRET || "";
+const configuredSessionTtl = Number(process.env.MINDIOU_SESSION_TTL_SECONDS || 60 * 60 * 24 * 7);
+const sessionTtlSeconds = Number.isFinite(configuredSessionTtl)
+  ? Math.min(60 * 60 * 24 * 30, Math.max(300, configuredSessionTtl))
+  : 60 * 60 * 24 * 7;
+const secureSessionCookie = process.env.MINDIOU_COOKIE_SECURE === "1";
 const configuredEnv = (name, fallback = "") => Object.hasOwn(process.env, name)
   ? process.env[name] || ""
   : fallback;
@@ -135,6 +144,97 @@ function optionsResponse(res) {
   res.end();
 }
 
+function parseEarlyAccessCodes(value) {
+  return String(value || "")
+    .split(",")
+    .map((entry, index) => {
+      const trimmed = entry.trim();
+      if (!trimmed) return null;
+      const separator = trimmed.indexOf(":");
+      if (separator < 1) {
+        return { label: `early-user-${index + 1}`, code: trimmed };
+      }
+      return {
+        label: clean(trimmed.slice(0, separator)).slice(0, 80) || `early-user-${index + 1}`,
+        code: trimmed.slice(separator + 1).trim()
+      };
+    })
+    .filter(entry => entry?.code);
+}
+
+function safeEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function parseCookies(req) {
+  return String(req.headers.cookie || "")
+    .split(";")
+    .reduce((cookies, part) => {
+      const separator = part.indexOf("=");
+      if (separator < 1) return cookies;
+      const key = part.slice(0, separator).trim();
+      const value = part.slice(separator + 1).trim();
+      if (key) cookies[key] = value;
+      return cookies;
+    }, {});
+}
+
+function signSession(payload) {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", sessionSecret).update(encoded).digest("base64url");
+  return `${encoded}.${signature}`;
+}
+
+function readSession(req) {
+  if (!sessionSecret) return null;
+  const token = parseCookies(req).mindiou_session || "";
+  const separator = token.lastIndexOf(".");
+  if (separator < 1) return null;
+  const encoded = token.slice(0, separator);
+  const signature = token.slice(separator + 1);
+  const expected = crypto.createHmac("sha256", sessionSecret).update(encoded).digest("base64url");
+  if (!safeEqual(signature, expected)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    if (!payload?.label || !Number.isFinite(payload.expiresAt) || payload.expiresAt <= Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function sessionCookie(req, value, maxAge) {
+  const requestIsHttps = String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
+  return [
+    `mindiou_session=${value}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    secureSessionCookie || requestIsHttps ? "Secure" : "",
+    `Max-Age=${maxAge}`
+  ].filter(Boolean).join("; ");
+}
+
+function findEarlyAccessUser(code) {
+  return earlyAccessCodes.find(entry => safeEqual(entry.code, code)) || null;
+}
+
+function accessControlEnabled() {
+  return Boolean(apiToken || earlyAccessCodes.length);
+}
+
+function authorizeRequest(req) {
+  const header = req.headers.authorization || "";
+  if (apiToken && safeEqual(header, `Bearer ${apiToken}`)) {
+    return { label: "device-or-service", method: "bearer" };
+  }
+  const session = readSession(req);
+  return session ? { label: session.label, method: "session" } : null;
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -151,10 +251,9 @@ function readBody(req) {
 }
 
 function requireToken(req, res) {
-  if (!apiToken) return true;
-  const header = req.headers.authorization || "";
-  if (header === `Bearer ${apiToken}`) return true;
-  jsonResponse(res, 401, { ok: false, error: "Invalid token" });
+  if (!accessControlEnabled()) return true;
+  if (authorizeRequest(req)) return true;
+  jsonResponse(res, 401, { ok: false, error: "请先使用体验邀请码登录。" });
   return false;
 }
 
@@ -1115,7 +1214,54 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/access/login") {
+      if (!earlyAccessCodes.length) {
+        jsonResponse(res, 503, { ok: false, error: "体验邀请码登录尚未启用。" });
+        return;
+      }
+      if (Buffer.byteLength(sessionSecret) < 32) {
+        jsonResponse(res, 503, { ok: false, error: "体验会话尚未完成服务端配置。" });
+        return;
+      }
+      let payload;
+      try {
+        payload = parseJson(await readBody(req));
+      } catch {
+        jsonResponse(res, 400, { ok: false, error: "登录请求格式无效。" });
+        return;
+      }
+      const user = findEarlyAccessUser(String(payload.code || "").trim());
+      if (!user) {
+        jsonResponse(res, 401, { ok: false, error: "邀请码无效，请联系邀请人确认。" });
+        return;
+      }
+      const expiresAt = Date.now() + sessionTtlSeconds * 1000;
+      const token = signSession({ label: user.label, expiresAt });
+      res.setHeader("set-cookie", sessionCookie(req, token, sessionTtlSeconds));
+      jsonResponse(res, 200, {
+        ok: true,
+        user: { label: user.label },
+        expiresAt: new Date(expiresAt).toISOString()
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/access/logout") {
+      res.setHeader("set-cookie", sessionCookie(req, "", 0));
+      jsonResponse(res, 200, { ok: true });
+      return;
+    }
+
     if (!requireToken(req, res)) return;
+    if (req.method === "GET" && url.pathname === "/api/access/session") {
+      const identity = authorizeRequest(req) || { label: "local-user", method: "disabled" };
+      jsonResponse(res, 200, {
+        ok: true,
+        user: { label: identity.label },
+        method: identity.method
+      });
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/learn/events") {
       const since = url.searchParams.get("since");
       const events = since ? eventLog.filter(event => event.at > since) : eventLog.slice(-80);

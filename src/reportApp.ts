@@ -141,7 +141,15 @@ function detectArtifactType(text: string): string {
 
 const runtimeParams = new URLSearchParams(location.search)
 const isPublicDeployment = location.pathname.startsWith('/mindiou/')
+const accessGateEnabled = isPublicDeployment || runtimeParams.get('earlyAccess') === '1'
 const API_BASE = isPublicDeployment ? '/mindiou-api' : runtimeParams.get('api') || ''
+
+async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
+    ...options,
+    credentials: 'same-origin'
+  })
+}
 
 function mvp1Url(reportId: string, cardId: string): string {
   const url = isPublicDeployment
@@ -188,7 +196,7 @@ function clear(node: HTMLElement) {
 // ── API ──
 
 async function generateReport(artifactText: string, artifactType: string): Promise<{ report: ClearanceReport; fallback: boolean }> {
-  const res = await fetch(`${API_BASE}/api/mvp0/report`, {
+  const res = await apiFetch('/api/mvp0/report', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ artifactText, artifactType })
@@ -202,7 +210,7 @@ async function generateReport(artifactText: string, artifactType: string): Promi
 }
 
 async function fetchReport(reportId: string): Promise<ClearanceReport> {
-  const res = await fetch(`${API_BASE}/api/mvp0/reports/${reportId}`)
+  const res = await apiFetch(`/api/mvp0/reports/${reportId}`)
   if (!res.ok) {
     throw new Error(`Report not found: ${reportId}`)
   }
@@ -211,7 +219,7 @@ async function fetchReport(reportId: string): Promise<ClearanceReport> {
 }
 
 async function submitCardAnswer(reportId: string, cardId: string, answer: string): Promise<{ card: FeynmanCard; shouldFollowUp: boolean }> {
-  const res = await fetch(`${API_BASE}/api/mvp0/reports/${reportId}/cards/${cardId}/answer`, {
+  const res = await apiFetch(`/api/mvp0/reports/${reportId}/cards/${cardId}/answer`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ answer })
@@ -234,8 +242,20 @@ function render(): void {
 
   // Header
   const header = el('div', 'report-header')
-  header.appendChild(el('h1', undefined, 'MindIOU — 认知欠条清算'))
-  header.appendChild(el('p', undefined, '把 AI 代劳转化为真实能力成长'))
+  const headerCopy = el('div')
+  headerCopy.appendChild(el('h1', undefined, 'MindIOU — 认知欠条清算'))
+  headerCopy.appendChild(el('p', undefined, '把 AI 代劳转化为真实能力成长'))
+  header.appendChild(headerCopy)
+  if (accessGateEnabled) {
+    const logout = el('button', 'btn-logout', '退出')
+    logout.type = 'button'
+    logout.onclick = async () => {
+      await apiFetch('/api/access/logout', { method: 'POST' }).catch(() => undefined)
+      sessionStorage.removeItem('mindiou-report-id')
+      renderAccessGate()
+    }
+    header.appendChild(logout)
+  }
   surface.appendChild(header)
 
   // Input form
@@ -688,4 +708,79 @@ async function restoreReport(): Promise<void> {
   }
 }
 
-restoreReport()
+function renderAccessGate(message = ''): void {
+  const app = document.getElementById('app')!
+  clear(app)
+
+  const surface = el('div', 'access-surface')
+  const panel = el('section', 'access-panel')
+  panel.appendChild(el('div', 'access-brand', 'MINDIOU'))
+  panel.appendChild(el('h1', undefined, '进入认知欠条'))
+  panel.appendChild(el('p', 'access-intro', '当前为早期体验版。请输入邀请人提供的邀请码。'))
+
+  const form = document.createElement('form')
+  form.className = 'access-form'
+  const input = document.createElement('input')
+  input.type = 'password'
+  input.name = 'access-code'
+  input.autocomplete = 'one-time-code'
+  input.placeholder = '体验邀请码'
+  input.required = true
+  input.setAttribute('aria-label', '体验邀请码')
+
+  const button = el('button', 'btn-access', '进入产品')
+  button.type = 'submit'
+  const status = el('p', `access-status${message ? ' error' : ''}`, message)
+
+  form.append(input, button)
+  form.onsubmit = async event => {
+    event.preventDefault()
+    const code = input.value.trim()
+    if (!code) return
+    button.disabled = true
+    button.textContent = '正在验证…'
+    status.className = 'access-status'
+    status.textContent = ''
+    try {
+      const response = await apiFetch('/api/access/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code })
+      })
+      const payload = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+      if (!response.ok || payload.ok === false) throw new Error(payload.error || '邀请码验证失败')
+      await restoreReport()
+    } catch (error) {
+      status.className = 'access-status error'
+      status.textContent = error instanceof Error ? error.message : '邀请码验证失败'
+      button.disabled = false
+      button.textContent = '进入产品'
+      input.select()
+    }
+  }
+
+  panel.append(form, status)
+  panel.appendChild(el('p', 'access-privacy', '请勿提交密码、API Key 或未授权的客户资料。'))
+  surface.appendChild(panel)
+  app.appendChild(surface)
+  input.focus()
+}
+
+async function bootstrap(): Promise<void> {
+  if (!accessGateEnabled) {
+    await restoreReport()
+    return
+  }
+  try {
+    const response = await apiFetch('/api/access/session')
+    if (!response.ok) {
+      renderAccessGate()
+      return
+    }
+    await restoreReport()
+  } catch {
+    renderAccessGate('暂时无法连接服务，请稍后重试。')
+  }
+}
+
+void bootstrap()

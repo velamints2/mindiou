@@ -27,8 +27,14 @@ let session = null;
 
 async function request(path, options) {
   if (!apiBaseUrl) throw new Error("Learning API URL is required");
-  const response = await fetch(`${apiBaseUrl}${path}`, options);
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    ...options,
+    credentials: "same-origin"
+  });
   const payload = await response.json();
+  if (response.status === 401 && publicDeployment) {
+    throw new Error("体验登录已过期，请返回报告页重新输入邀请码。");
+  }
   if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
   return payload;
 }

@@ -16,10 +16,13 @@ Runtime state is stored outside the release directory:
 ```
 
 The systemd service reads secrets from `/etc/mindiou.env`. Never copy that file
-into the repository or web root. The anonymous deployment intentionally blocks
-the report-list endpoint and the Rokid latest-report endpoint to prevent obvious
-cross-visitor data disclosure. It is still a public beta without accounts, so
-the UI warns visitors not to submit secrets or private customer data.
+into the repository or web root. Configure individual early-access invite codes,
+a session-signing secret, and secure cookies as documented in
+`../../docs/engineering/early-access-auth.md`. The deployment still blocks the
+report-list endpoint and the Rokid latest-report endpoint to prevent obvious
+cross-visitor data disclosure. Early-access authentication is not complete
+multi-tenant isolation, so the UI continues to warn visitors not to submit
+secrets or private customer data.
 
 For small demo servers, `journald-mindiou-limits.conf` bounds system journal
 retention so old logs cannot consume multiple gigabytes of the root disk.
