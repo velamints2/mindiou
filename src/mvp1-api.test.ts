@@ -9,6 +9,7 @@ const API_PORT = 8801;
 const OPENAI_PORT = 8802;
 const BASE = `http://127.0.0.1:${API_PORT}`;
 const STORE = path.resolve("tmp/mvp1-api-test-store.json");
+const SESSION_STORE = path.resolve("tmp/mvp1-api-test-sessions.json");
 let appProcess;
 let fakeOpenAi;
 let sessionId = "";
@@ -83,12 +84,17 @@ beforeAll(async () => {
     json(res, 404, { error: { message: "not found" } });
   });
   await new Promise(resolve => fakeOpenAi.listen(OPENAI_PORT, "127.0.0.1", resolve));
+  await startServer();
+});
+
+async function startServer() {
   appProcess = spawn("node", ["server.js"], {
     cwd: path.resolve("."),
     env: {
       ...process.env,
       PORT: String(API_PORT),
       MVP0_STORE_PATH: STORE,
+      MVP1_STORE_PATH: SESSION_STORE,
       AI_PROVIDER: "deepseek",
       AI_API_KEY: "test-key",
       AI_BASE_URL: `http://127.0.0.1:${OPENAI_PORT}/v1`,
@@ -103,12 +109,20 @@ beforeAll(async () => {
     stdio: "pipe"
   });
   await waitFor(`${BASE}/health`);
-});
+}
+
+async function stopServer() {
+  if (!appProcess) return;
+  const exited = new Promise(resolve => appProcess.once("exit", resolve));
+  appProcess.kill("SIGTERM");
+  await exited;
+}
 
 afterAll(async () => {
   appProcess?.kill("SIGTERM");
   await new Promise(resolve => fakeOpenAi?.close(resolve));
   await rm(STORE, { force: true });
+  await rm(SESSION_STORE, { force: true });
 });
 
 describe("MVP-1 HTTP vertical slice", () => {
@@ -151,6 +165,7 @@ describe("MVP-1 HTTP vertical slice", () => {
     expect(data.session.clearanceQuestion).toContain("reachability");
     expect(data.session.sources[0].type).toBe("official_doc");
     expect(data.session.scaffold).toBeUndefined();
+    expect(data.session.userId).toBe("demo-user");
   });
 
   it("analyzes an answer and reveals the scaffold", async () => {
@@ -172,5 +187,104 @@ describe("MVP-1 HTTP vertical slice", () => {
     expect(data.result.status).toBe("provisionally_cleared");
     expect(data.result.sourceReviewRequired).toBe(false);
     expect(data.session.state).toBe("ended");
+  });
+});
+
+describe("MVP-1 user ownership and persistence", () => {
+  it("assigns a new session to the supplied userId", async () => {
+    const response = await fetch(`${BASE}/api/mvp1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reportId: seededReport.id, cardId: "mvp1-card", userId: "alice" })
+    });
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.session.userId).toBe("alice");
+  });
+
+  it("hides a session from other users and from the anonymous demo-user", async () => {
+    const createResponse = await fetch(`${BASE}/api/mvp1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reportId: seededReport.id, cardId: "mvp1-card", userId: "alice" })
+    });
+    const created = await createResponse.json();
+    const ownedId = created.session.id;
+
+    const asOwner = await fetch(`${BASE}/api/mvp1/sessions/${ownedId}`, { headers: { "x-user-id": "alice" } });
+    expect(asOwner.status).toBe(200);
+
+    const asBob = await fetch(`${BASE}/api/mvp1/sessions/${ownedId}`, { headers: { "x-user-id": "bob" } });
+    expect(asBob.status).toBe(404);
+
+    const asAnonymous = await fetch(`${BASE}/api/mvp1/sessions/${ownedId}`);
+    expect(asAnonymous.status).toBe(404);
+
+    const answerAsBob = await fetch(`${BASE}/api/mvp1/sessions/${ownedId}/answers`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "bob" },
+      body: JSON.stringify({ answer: "CORS can stop JavaScript from reading the response." })
+    });
+    expect(answerAsBob.status).toBe(404);
+  });
+
+  it("writes the cautious final state back to the MVP-0 card on end", async () => {
+    const createResponse = await fetch(`${BASE}/api/mvp1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reportId: seededReport.id, cardId: "mvp1-card" })
+    });
+    const created = await createResponse.json();
+    const writeBackSessionId = created.session.id;
+
+    const answerResponse = await fetch(`${BASE}/api/mvp1/sessions/${writeBackSessionId}/answers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ answer: "The request may reach the server, but CORS can stop JavaScript from reading the response." })
+    });
+    expect(answerResponse.status).toBe(200);
+
+    const endResponse = await fetch(`${BASE}/api/mvp1/sessions/${writeBackSessionId}/end`, { method: "POST" });
+    expect(endResponse.status).toBe(200);
+    const ended = await endResponse.json();
+
+    const reportResponse = await fetch(`${BASE}/api/mvp0/reports/${seededReport.id}`);
+    expect(reportResponse.status).toBe(200);
+    const reportData = await reportResponse.json();
+    const card = reportData.report.sections.feynmanCards.find(item => item.id === "mvp1-card");
+    expect(card.clearance).toBeTruthy();
+    expect(card.clearance.status).toBe(ended.result.status);
+    expect(card.clearance.sessionId).toBe(writeBackSessionId);
+    expect(card.clearance.endedAt).toBeTruthy();
+  });
+
+  it("recovers a session with its attempts after a server restart", async () => {
+    const createResponse = await fetch(`${BASE}/api/mvp1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reportId: seededReport.id, cardId: "mvp1-card", userId: "carol" })
+    });
+    const created = await createResponse.json();
+    const restartSessionId = created.session.id;
+
+    const answerResponse = await fetch(`${BASE}/api/mvp1/sessions/${restartSessionId}/answers`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": "carol" },
+      body: JSON.stringify({ answer: "The request may reach the server, but CORS can stop JavaScript from reading the response." })
+    });
+    expect(answerResponse.status).toBe(200);
+
+    await stopServer();
+    await startServer();
+
+    const response = await fetch(`${BASE}/api/mvp1/sessions/${restartSessionId}`, { headers: { "x-user-id": "carol" } });
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.session.userId).toBe("carol");
+    expect(data.session.attempts).toHaveLength(1);
+    expect(data.session.attempts[0].answer).toContain("JavaScript");
+
+    const asAnonymous = await fetch(`${BASE}/api/mvp1/sessions/${restartSessionId}`);
+    expect(asAnonymous.status).toBe(404);
   });
 });

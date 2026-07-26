@@ -146,6 +146,27 @@ export function createMvp0Store(filePath) {
     return { report, card, previousAnswer };
   }
 
+  async function updateCardClearance(reportId, cardId, clearance) {
+    const report = getReport(reportId);
+    const card = report.sections.feynmanCards?.find(item => item.id === cardId);
+    if (!card) {
+      throw new Error(`Feynman card not found: ${cardId} in report ${reportId}`);
+    }
+    card.clearance = {
+      sessionId: clean(clearance?.sessionId || "").slice(0, 100),
+      status: clean(clearance?.status || "").slice(0, 40),
+      sourceReviewRequired: Boolean(clearance?.sourceReviewRequired),
+      endedAt: clearance?.endedAt || new Date().toISOString(),
+      nextRecommendation: clean(clearance?.nextRecommendation || "").slice(0, 300),
+      remainingGaps: (Array.isArray(clearance?.remainingGaps) ? clearance.remainingGaps : [])
+        .map(item => clean(item).slice(0, 400))
+        .filter(Boolean)
+        .slice(0, 8)
+    };
+    await persist();
+    return { report, card };
+  }
+
   async function addCorrection(reportId, correction) {
     const report = getReport(reportId);
     const record = {
@@ -173,6 +194,7 @@ export function createMvp0Store(filePath) {
     getReport,
     listReports,
     updateCardAnswer,
+    updateCardClearance,
     addCorrection,
     getState
   };

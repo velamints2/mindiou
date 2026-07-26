@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import crypto from "node:crypto";
 import { createSpiralStore } from "./spiral-store.js";
 import { createMvp0Store } from "./mvp0-store.js";
+import { createMvp1Store } from "./mvp1-store.js";
 import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport } from "./mvp0-report.js";
 import { feynmanFollowUp } from "./mvp0-followup.js";
@@ -48,12 +49,14 @@ const sttPrompt = process.env.OPENAI_STT_PROMPT || [
 ].join(" ");
 const learningStorePath = process.env.LEARNING_STORE_PATH || "tmp/spiral-store.json";
 const mvp0StorePath = process.env.MVP0_STORE_PATH || "tmp/mvp0-store.json";
+const mvp1StorePath = process.env.MVP1_STORE_PATH || "tmp/mvp1-store.json";
 const eventLog = [];
 const spiralStore = createSpiralStore(learningStorePath);
 await spiralStore.load();
 const mvp0Store = createMvp0Store(mvp0StorePath);
 await mvp0Store.load();
-const mvp1Sessions = new Map();
+const mvp1Store = createMvp1Store(mvp1StorePath);
+await mvp1Store.load();
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: researchApiKey,
   baseUrl: researchBaseUrl,
@@ -165,6 +168,23 @@ function parseJson(text) {
 
 function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function resolveUserId(req, payload) {
+  const fromPayload = clean(payload?.userId || "");
+  const fromHeader = clean(req?.headers?.["x-user-id"] || "");
+  return (fromPayload || fromHeader || "demo-user").slice(0, 100);
+}
+
+function findOwnedMvp1Session(id, userId) {
+  let session = null;
+  try {
+    session = mvp1Store.getSession(id);
+  } catch {
+    session = null;
+  }
+  if (!session || session.userId !== userId) return null;
+  return session;
 }
 
 function detectArtifactType(text) {
@@ -1200,7 +1220,7 @@ const server = createServer(async (req, res) => {
     }
     const mvp1SessionMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)$/);
     if (req.method === "GET" && mvp1SessionMatch) {
-      const session = mvp1Sessions.get(decodeURIComponent(mvp1SessionMatch[1]));
+      const session = findOwnedMvp1Session(decodeURIComponent(mvp1SessionMatch[1]), resolveUserId(req, null));
       if (!session) {
         jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
         return;
@@ -1242,7 +1262,8 @@ const server = createServer(async (req, res) => {
         }
         const report = mvp0Store.getReport(reportId);
         const session = await startClearanceSession({ report, cardId, researchFn: researchClearanceContext });
-        mvp1Sessions.set(session.id, session);
+        session.userId = resolveUserId(req, payload);
+        await mvp1Store.saveSession(session);
         jsonResponse(res, 200, { ok: true, session: publicSession(session) });
       } catch (error) {
         const status = /not found/i.test(String(error.message)) ? 404 : 502;
@@ -1254,7 +1275,7 @@ const server = createServer(async (req, res) => {
     const mvp1AnswerMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/answers$/);
     if (mvp1AnswerMatch) {
       try {
-        const session = mvp1Sessions.get(decodeURIComponent(mvp1AnswerMatch[1]));
+        const session = findOwnedMvp1Session(decodeURIComponent(mvp1AnswerMatch[1]), resolveUserId(req, payload));
         if (!session) {
           jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
           return;
@@ -1264,6 +1285,7 @@ const server = createServer(async (req, res) => {
           answer: payload.answer,
           analyzeFn: analyzeClearanceAnswer
         });
+        await mvp1Store.saveSession(session);
         jsonResponse(res, 200, {
           ok: true,
           attempt,
@@ -1277,12 +1299,25 @@ const server = createServer(async (req, res) => {
 
     const mvp1EndMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/end$/);
     if (mvp1EndMatch) {
-      const session = mvp1Sessions.get(decodeURIComponent(mvp1EndMatch[1]));
+      const session = findOwnedMvp1Session(decodeURIComponent(mvp1EndMatch[1]), resolveUserId(req, payload));
       if (!session) {
         jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
         return;
       }
       const result = endClearanceSession(session);
+      try {
+        await mvp0Store.updateCardClearance(session.reportId, session.cardId, {
+          sessionId: session.id,
+          status: result.status,
+          sourceReviewRequired: result.sourceReviewRequired,
+          endedAt: session.endedAt,
+          nextRecommendation: result.nextRecommendation,
+          remainingGaps: result.remainingGaps
+        });
+      } catch (error) {
+        console.warn(`MVP-1 clearance write-back failed for session ${session.id}: ${error.message}`);
+      }
+      await mvp1Store.saveSession(session);
       jsonResponse(res, 200, {
         ok: true,
         result,
