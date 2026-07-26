@@ -153,8 +153,8 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<Respon
 
 function mvp1Url(reportId: string, cardId: string): string {
   const url = isPublicDeployment
-    ? new URL('/mindiou/mvp1/', location.origin)
-    : new URL('/platforms/rokid-aiui/preview/', location.origin)
+    ? new URL('/mindiou/mvp1.html', location.origin)
+    : new URL('/mvp1.html', location.origin)
   url.searchParams.set('reportId', reportId)
   url.searchParams.set('cardId', cardId)
   if (!isPublicDeployment && API_BASE) url.searchParams.set('api', API_BASE)
