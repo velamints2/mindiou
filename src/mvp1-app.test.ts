@@ -27,14 +27,12 @@ describe("matchDangerousGap", () => {
     expect(hit?.rank).toBe(1);
   });
 
-  it("falls back to the first gap when no gap text matches", () => {
-    const hit = matchDangerousGap(gaps, "完全无关的目标");
-    expect(hit?.rank).toBe(1);
+  it("returns null when no gap text matches the card target", () => {
+    expect(matchDangerousGap(gaps, "完全无关的目标")).toBeNull();
   });
 
-  it("falls back to the first gap when the card target is blank", () => {
-    const hit = matchDangerousGap(gaps, "   ");
-    expect(hit?.rank).toBe(1);
+  it("returns null when the card target is blank", () => {
+    expect(matchDangerousGap(gaps, "   ")).toBeNull();
   });
 
   it("returns null when there are no gaps to show", () => {

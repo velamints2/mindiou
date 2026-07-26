@@ -117,7 +117,7 @@ export function matchDangerousGap(gaps: DangerousGap[] | undefined, cardTarget: 
     const hit = gaps.find(gap => gap.gap.toLowerCase().includes(target))
     if (hit) return hit
   }
-  return gaps[0]
+  return null
 }
 
 export function statusLabel(status: string): string {
