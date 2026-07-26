@@ -4,6 +4,7 @@ import { createSpiralStore } from "./spiral-store.js";
 import { createMvp0Store } from "./mvp0-store.js";
 import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport } from "./mvp0-report.js";
+import { generateCollaborationTimeline } from "./mvp0-timeline.js";
 import { feynmanFollowUp } from "./mvp0-followup.js";
 import {
   endClearanceSession,
@@ -119,7 +120,7 @@ function jsonResponse(res, statusCode, payload) {
     "content-length": Buffer.byteLength(body),
     "cache-control": "no-store",
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
     "access-control-allow-headers": "content-type,authorization"
   });
   res.end(body);
@@ -128,7 +129,7 @@ function jsonResponse(res, statusCode, payload) {
 function optionsResponse(res) {
   res.writeHead(204, {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
     "access-control-allow-headers": "content-type,authorization",
     "access-control-max-age": "86400"
   });
@@ -438,6 +439,37 @@ async function researchClearanceContext(request) {
     if (!mvp1DemoFallback) throw error;
     return createDemoResearchFallback(request, error);
   }
+}
+
+// MVP-0 bounded research adapter: wraps raw web research into the
+// (query) => { sources: [{title,url,snippet}] } shape expected by the
+// multi-step report pipeline. Returns null when research is not configured,
+// which makes the pipeline mark research as "skipped" transparently.
+const mvp0ResearchFn = (researchProvider === "openai" && researchApiKey && researchBaseUrl)
+  ? async query => {
+      const evidence = await rawWebResearch({
+        originalQuestion: query,
+        purpose: "MVP-0 diagnostic report bounded research"
+      });
+      return {
+        sources: (evidence.sources || []).map(source => ({
+          title: source.title || "",
+          url: source.url || "",
+          snippet: clean(source.claim || evidence.researchText || "").slice(0, 300)
+        }))
+      };
+    }
+  : null;
+
+function confusionsFromTimeline(timeline) {
+  const steps = Array.isArray(timeline?.steps) ? timeline.steps : [];
+  return steps
+    .filter(step => clean(step?.userConfusion || ""))
+    .map(step => ({
+      stepId: clean(step.id || ""),
+      stepTitle: clean(step.title || ""),
+      text: clean(step.userConfusion || "")
+    }));
 }
 
 async function checkAiConnectivity() {
@@ -1219,7 +1251,22 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (req.method !== "POST") {
+    if (req.method === "GET" && url.pathname === "/api/mvp0/drafts") {
+      jsonResponse(res, 200, { ok: true, drafts: mvp0Store.listDrafts() });
+      return;
+    }
+    const mvp0DraftMatch = url.pathname.match(/^\/api\/mvp0\/drafts\/([^/]+)$/);
+    if (req.method === "GET" && mvp0DraftMatch) {
+      try {
+        const draft = mvp0Store.getDraft(decodeURIComponent(mvp0DraftMatch[1]));
+        jsonResponse(res, 200, { ok: true, draft });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (req.method !== "POST" && req.method !== "PATCH") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
       return;
     }
@@ -1291,11 +1338,71 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // ── MVP-0: cognitive-debt clearance report ──
+    // ── MVP-0: collaboration timeline (step 1 of the report pipeline) ──
 
-    if (url.pathname === "/api/mvp0/report") {
+    if (req.method === "POST" && url.pathname === "/api/mvp0/timelines") {
       const artifactText = String(payload.artifactText || "").trim();
       let artifactType = clean(payload.artifactType || "");
+      if (!artifactText) {
+        jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
+        return;
+      }
+      if (!artifactType) {
+        artifactType = detectArtifactType(artifactText);
+      }
+      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+      const timeline = await generateCollaborationTimeline(artifactText, artifactType, chatFn);
+      const draft = await mvp0Store.saveDraft({
+        input: {
+          artifactText: artifactText.slice(0, 30000),
+          artifactType,
+          charCount: clean(artifactText).length
+        },
+        timeline: { steps: timeline.steps },
+        generation: timeline.generation,
+        status: "timeline"
+      });
+      const isFallback = Boolean(timeline.generation?.fallback);
+      jsonResponse(res, 200, {
+        ok: true,
+        draft,
+        timeline: { steps: draft.timeline.steps, ...(timeline.note ? { note: timeline.note } : {}) },
+        fallback: isFallback,
+        ...(isFallback && timeline.generation?.error ? { error: timeline.generation.error } : {}),
+        detectedType: artifactType
+      });
+      return;
+    }
+
+    if (req.method === "PATCH" && mvp0DraftMatch) {
+      try {
+        const draftId = decodeURIComponent(mvp0DraftMatch[1]);
+        const draft = await mvp0Store.updateDraftConfusions(draftId, payload.confusions);
+        jsonResponse(res, 200, { ok: true, draft });
+      } catch (error) {
+        jsonResponse(res, /not found/i.test(String(error.message)) ? 404 : 400, {
+          ok: false,
+          error: error.message
+        });
+      }
+      return;
+    }
+
+    // ── MVP-0: cognitive-debt clearance report ──
+
+    if (req.method === "POST" && url.pathname === "/api/mvp0/report") {
+      let draft = null;
+      const draftId = clean(payload.draftId || "");
+      if (draftId) {
+        try {
+          draft = mvp0Store.getDraft(draftId);
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+          return;
+        }
+      }
+      const artifactText = String(draft ? draft.input.artifactText : payload.artifactText || "").trim();
+      let artifactType = clean(draft ? draft.input.artifactType : payload.artifactType || "");
       if (!artifactText) {
         jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
         return;
@@ -1304,9 +1411,21 @@ const server = createServer(async (req, res) => {
       if (!artifactType) {
         artifactType = detectArtifactType(artifactText);
       }
+      const timeline = draft ? draft.timeline : (payload.timeline && typeof payload.timeline === "object" ? payload.timeline : null);
+      const confusions = draft
+        ? confusionsFromTimeline(draft.timeline)
+        : (Array.isArray(payload.confusions) ? payload.confusions : []);
       const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-      const report = await generateClearanceReport(artifactText, artifactType, chatFn);
+      const report = await generateClearanceReport(artifactText, artifactType, chatFn, {
+        researchFn: mvp0ResearchFn,
+        timeline,
+        confusions
+      });
+      if (draft) report.draftId = draft.id;
       const saved = await mvp0Store.saveReport(report);
+      if (draft) {
+        await mvp0Store.attachReportToDraft(draft.id, saved.id);
+      }
       const isFallback = Boolean(saved.generation?.fallback);
       jsonResponse(res, 200, {
         ok: true,

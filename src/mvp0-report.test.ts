@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, it, vi } from "vitest";
-import { generateClearanceReport, getClearanceReportSystemPrompt } from "../mvp0-report.js";
+import { generateClearanceReport, getReportStepPrompts } from "../mvp0-report.js";
 
 const SAMPLE_TEXT = `
 I'm building a React app with Vite. The AI suggested using TypeScript for type safety.
@@ -27,123 +27,242 @@ function rolloutMessage(role: string, text: string) {
   };
 }
 
-// A realistic AI response that matches the schema
-const MOCK_AI_SUCCESS = {
-  sections: {
-    aiCompleted: [
-      { item: "AI chose React with Vite as the frontend stack", evidence: '"The AI suggested using TypeScript"', isInference: false },
-      { item: "AI selected useState and useEffect for state and data fetching", evidence: "AI set up the project structure", isInference: false },
-      { item: "AI recommended Supabase over Firebase", evidence: '"the AI said Supabase was better"', isInference: false },
-      { item: "AI wrote all database queries and API routes", evidence: "stated in artifact", isInference: false }
-    ],
-    userContributed: [
-      { item: "User wanted to use Firebase initially", evidence: '"I wanted to use Firebase"', isInference: false },
-      { item: "User agreed to TypeScript without understanding it", evidence: '"I agreed because I don\'t know TypeScript well"', isInference: false }
-    ],
-    dangerousGaps: [
-      { rank: 1, gap: "TypeScript type system", whyDangerous: "Cannot judge whether types are correct or safe", evidence: '"I don\'t know TypeScript well"' },
-      { rank: 2, gap: "Supabase auth flow", whyDangerous: "Cannot verify if authentication is secure", evidence: '"not sure how the auth flow works"' },
-      { rank: 3, gap: "Build pipeline", whyDangerous: "Cannot debug deployment failures", evidence: '"don\'t understand how the build pipeline works"' },
-      { rank: 4, gap: "useState vs useReducer trade-off", whyDangerous: "Cannot assess if state management choice is appropriate", evidence: "inference" },
-      { rank: 5, gap: "Supabase vs Firebase decision criteria", whyDangerous: "Cannot evaluate if the recommendation was justified", evidence: "inference" }
-    ],
-    cognitiveStructure: {
-      facts: [
-        { item: "Project uses React, Vite, TypeScript, Tailwind, Supabase, Vercel", evidence: "stated in artifact" }
-      ],
-      hypotheses: [
-        { item: "Supabase may be over-provisioned for the project's needs", evidence: "inference" }
-      ],
-      questions: [
-        { item: "Is the auth flow using JWT or session cookies?", evidence: "unresolved" }
-      ],
-      decisions: [
-        { item: "Use Supabase instead of Firebase", evidence: '"AI said Supabase was better"' }
-      ],
-      tradeoffs: [
-        { item: "TypeScript safety vs learning curve", evidence: "inference" }
-      ]
+// ── Per-step mock outputs (pipeline calls chatFn 3 times: A → B → D) ──
+
+const STEP_A = {
+  artifactKind: "ai_chat",
+  aiCompleted: [
+    { item: "AI chose React with Vite as the frontend stack", evidence: "原文 'The AI suggested using TypeScript' 表明技术选型由 AI 提出。", isInference: false },
+    { item: "AI recommended Supabase over Firebase", evidence: "原文 'the AI said Supabase was better' 表明替代方案由 AI 提出。", isInference: false },
+    { item: "AI wrote all database queries and API routes", evidence: "原文 'The AI wrote all the database queries' 直接陈述。", isInference: false }
+  ],
+  userContributed: [
+    { item: "User wanted to use Firebase initially", evidence: "原文 'I wanted to use Firebase' 是用户自己的偏好。", isInference: false },
+    { item: "User agreed to TypeScript without understanding it", evidence: "原文 'I agreed because I don't know TypeScript well' 表明用户在不懂的情况下批准。", isInference: false }
+  ],
+  cognitiveProcessesOutsourced: [
+    { process: "技术选型权衡", surfaceTask: "Supabase vs Firebase 的选择", whyItMatters: "产品负责人需要能判断数据层选型对成本和扩展性的影响", evidence: "用户提出 Firebase 后直接接受了 AI 的替代建议。", isInference: false }
+  ],
+  userCapability: {
+    overall: "L2",
+    dimensions: {
+      productProblemFraming: { level: "L2", evidenceStatus: "partial", evidence: ["用户能提出要用 Firebase"], confidence: 0.6 },
+      aiAgentSteering: { level: "L2", evidenceStatus: "partial", evidence: ["用户跟随 AI 步骤"], confidence: 0.6 },
+      systemMentalModel: { level: "L1", evidenceStatus: "partial", evidence: ["不理解 auth flow"], confidence: 0.7 },
+      technicalDecisionComprehension: { level: "L1", evidenceStatus: "partial", evidence: ["不懂 TypeScript 却同意"], confidence: 0.7 },
+      validationAndQualityJudgment: { level: "L1", evidenceStatus: "unobserved", evidence: [], confidence: 0.3 }
     },
-    feynmanCards: [
-      { id: "card-1", target: "TypeScript type system", prompt: "Explain how TypeScript types protect your code at compile time vs runtime.", userAnswer: "", aiFollowUp: "", answeredAt: null },
-      { id: "card-2", target: "Supabase auth flow", prompt: "Describe the authentication flow in your app step by step.", userAnswer: "", aiFollowUp: "", answeredAt: null },
-      { id: "card-3", target: "Build pipeline", prompt: "Explain what happens when you run 'vercel deploy' from code to production.", userAnswer: "", aiFollowUp: "", answeredAt: null },
-      { id: "card-4", target: "State management choice", prompt: "Why would you choose useReducer over useState? Give a concrete example.", userAnswer: "", aiFollowUp: "", answeredAt: null }
-    ],
-    nextActions: [
-      { item: "Read TypeScript handbook on type annotations", route: "verify", reason: "Need to verify type safety claims" },
-      { item: "Document the Supabase auth flow", route: "note", reason: "Reusable knowledge for future projects" },
-      { item: "Test the Vercel build locally", route: "task", reason: "Need to understand build pipeline behavior" },
-      { item: "Ask a senior dev about Supabase vs Firebase for this use case", route: "ask", reason: "Needs expert judgment on database choice" }
-    ]
+    currentDomain: "React web app with Supabase backend",
+    strongestDemonstratedAbility: "跟随 AI 指令完成搭建",
+    highestPriorityGrowthArea: "理解数据层与认证的技术决策",
+    evidenceSignals: ["User approves AI execution without asking for implementation reasoning."],
+    recommendedCardLevel: "foundation"
   }
 };
 
-describe("generateClearanceReport", () => {
-  describe("with mock AI success", () => {
-    it("produces a normalized six-section report from AI output", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
-      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+const STEP_B = {
+  dangerousGaps: [
+    {
+      rank: 1,
+      title: "认证流程心智模型缺失",
+      gap: "用户尚未证明自己理解 Supabase auth flow 的端到端过程",
+      underlyingCapability: "系统心智模型",
+      surfaceSignals: ["'not sure how the auth flow works'", "所有数据库查询都由 AI 编写"],
+      whyDangerous: "无法判断认证是否安全，也无法排查登录故障",
+      transferScenarios: ["下一个需要登录的产品", "任何接入第三方认证的项目"],
+      confidence: 0.8,
+      alternativeExplanations: ["用户可能只是还没看到这部分代码"],
+      diagnosticQuestion: "请画出用户点击登录到拿到会话的完整数据流。",
+      masteryCriteria: ["能说出 token 的签发与校验位置", "能指出会话存储在哪里"]
+    },
+    {
+      rank: 2,
+      title: "类型系统的验证能力缺失",
+      gap: "用户尚未证明自己能判断 TypeScript 类型是否正确",
+      underlyingCapability: "验证与质量判断",
+      surfaceSignals: ["'I don't know TypeScript well' 却同意了选型", "构建管线不理解"],
+      whyDangerous: "无法验收 AI 写的类型是否带来真实安全保障",
+      transferScenarios: ["任何强类型语言项目"],
+      confidence: 0.7,
+      alternativeExplanations: ["用户可能计划后续再学"],
+      diagnosticQuestion: "给一个函数签名，请说出它在编译期能防止什么错误。",
+      masteryCriteria: ["能解释编译期与运行期类型检查的区别"]
+    }
+  ],
+  cognitiveStructure: {
+    facts: [
+      { item: "Project uses React, Vite, TypeScript, Supabase, Vercel", evidence: "原文多处直接陈述", isInference: false }
+    ],
+    hypotheses: [
+      { item: "Supabase may be over-provisioned for the project's needs", evidence: "inference", isInference: true, confidence: 0.5, alternativeExplanation: "项目可能确实需要 Auth + DB 一体化" }
+    ],
+    questions: [
+      { item: "Is the auth flow using JWT or session cookies?", evidence: "材料未回答", isInference: true }
+    ],
+    decisions: [
+      { item: "Use Supabase instead of Firebase", evidence: "AI 建议后用户接受", isInference: false, decisionOwner: "ai" }
+    ],
+    tradeoffs: [
+      { item: "TypeScript safety vs learning curve", evidence: "inference", isInference: true }
+    ]
+  },
+  confusionResolutions: []
+};
 
-      expect(report.sections.aiCompleted).toBeDefined();
+const STEP_D = {
+  feynmanCards: [
+    { id: "card-1", target: "认证流程心智模型缺失", cardType: "system_map", prompt: "画出你的 app 从用户登录到访问数据库的完整数据流，标出 token 在哪里签发和校验。", targetLevel: "L2", difficulty: "foundation", evaluationCriteria: ["标出 token 签发位置", "标出会话存储位置"], userAnswer: "", aiFollowUp: "", answeredAt: null },
+    { id: "card-2", target: "类型系统的验证能力缺失", cardType: "analogy", prompt: "用一个生活类比解释 TypeScript 编译期类型检查和运行期报错的区别。", targetLevel: "L2", difficulty: "foundation", evaluationCriteria: ["类比准确"], userAnswer: "", aiFollowUp: "", answeredAt: null },
+    { id: "card-3", target: "认证流程心智模型缺失", cardType: "prediction", prompt: "如果 Supabase 的 JWT 密钥泄露，你的 app 会发生什么？攻击者能做什么？", targetLevel: "L2", difficulty: "intermediate", evaluationCriteria: ["指出伪造会话风险"], userAnswer: "", aiFollowUp: "", answeredAt: null }
+  ],
+  nextActions: [
+    { item: "在 Supabase 文档中验证 auth flow 是 JWT 还是 session cookie", route: "verify", reason: "需要确认认证机制的真实实现", relatedCapability: "系统心智模型" },
+    { item: "记录 Supabase vs Firebase 的选型判断", route: "note", reason: "可复用的技术决策模式", relatedCapability: "技术决策理解" },
+    { item: "在本地跑一次 Vercel 构建", route: "task", reason: "理解构建管线行为", relatedCapability: "验证与质量判断" },
+    { item: "向有经验的工程师请教 Supabase 是否适合这个规模", route: "ask", reason: "需要经验判断", relatedCapability: "技术决策理解" }
+  ]
+};
+
+function mockPipeline(overrides: { stepA?: unknown; stepB?: unknown; stepD?: unknown } = {}) {
+  return vi.fn()
+    .mockResolvedValueOnce(overrides.stepA ?? STEP_A)
+    .mockResolvedValueOnce(overrides.stepB ?? STEP_B)
+    .mockResolvedValueOnce(overrides.stepD ?? STEP_D);
+}
+
+describe("generateClearanceReport (multi-step pipeline)", () => {
+  describe("with mock AI success", () => {
+    it("produces a normalized seven-section report from step outputs", async () => {
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
+
       expect(report.sections.aiCompleted.length).toBeGreaterThan(0);
-      expect(report.sections.userContributed).toBeDefined();
-      expect(report.sections.dangerousGaps).toHaveLength(5);
-      expect(report.sections.cognitiveStructure).toBeDefined();
-      expect(report.sections.cognitiveStructure.facts).toBeDefined();
+      expect(report.sections.userContributed.length).toBeGreaterThan(0);
+      expect(report.sections.cognitiveProcessesOutsourced.length).toBeGreaterThan(0);
+      expect(report.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
+      expect(report.sections.dangerousGaps.length).toBeLessThanOrEqual(4);
+      expect(report.sections.cognitiveStructure.facts.length).toBeGreaterThan(0);
       expect(report.sections.feynmanCards.length).toBeGreaterThanOrEqual(3);
       expect(report.sections.feynmanCards.length).toBeLessThanOrEqual(5);
       expect(report.sections.nextActions.length).toBeGreaterThan(0);
     });
 
-    it("calls chatFn with system prompt containing six-section schema", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
+    it("calls chatFn three times — attribution, root gaps, cards", async () => {
+      const mockChatFn = mockPipeline();
       await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
-
-      expect(mockChatFn).toHaveBeenCalledTimes(1);
-      const [messages] = mockChatFn.mock.calls[0];
-      expect(messages).toHaveLength(2);
-      expect(messages[0].role).toBe("system");
-      expect(messages[0].content).toContain("aiCompleted");
-      expect(messages[0].content).toContain("userContributed");
-      expect(messages[0].content).toContain("dangerousGaps");
-      expect(messages[0].content).toContain("cognitiveStructure");
-      expect(messages[0].content).toContain("feynmanCards");
-      expect(messages[0].content).toContain("nextActions");
+      expect(mockChatFn).toHaveBeenCalledTimes(3);
     });
 
-    it("passes truncated artifactText in user message", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
+    it("step A prompt covers attribution, outsourced processes, and capability calibration", async () => {
+      const mockChatFn = mockPipeline();
       await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
 
-      const [, userMessage] = mockChatFn.mock.calls[0][0];
-      expect(userMessage.role).toBe("user");
-      const payload = JSON.parse(userMessage.content);
+      const stepAMessages = mockChatFn.mock.calls[0][0];
+      expect(stepAMessages[0].role).toBe("system");
+      expect(stepAMessages[0].content).toContain("aiCompleted");
+      expect(stepAMessages[0].content).toContain("userContributed");
+      expect(stepAMessages[0].content).toContain("cognitiveProcessesOutsourced");
+      expect(stepAMessages[0].content).toContain("userCapability");
+    });
+
+    it("step B prompt covers root gaps, cognitive structure, and confusion resolutions", async () => {
+      const mockChatFn = mockPipeline();
+      await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+
+      const stepBSystem = mockChatFn.mock.calls[1][0][0].content;
+      expect(stepBSystem).toContain("dangerousGaps");
+      expect(stepBSystem).toContain("cognitiveStructure");
+      expect(stepBSystem).toContain("confusionResolutions");
+    });
+
+    it("step D prompt covers feynman cards and next actions", async () => {
+      const mockChatFn = mockPipeline();
+      await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+
+      const stepDSystem = mockChatFn.mock.calls[2][0][0].content;
+      expect(stepDSystem).toContain("feynmanCards");
+      expect(stepDSystem).toContain("nextActions");
+    });
+
+    it("passes truncated artifactText and preprocess metadata in the step A user message", async () => {
+      const mockChatFn = mockPipeline();
+      await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+
+      const payload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
       expect(payload.artifactText).toContain("React app with Vite");
       expect(payload.artifactType).toBe("chatgpt");
+      expect(payload.preprocess).toBeDefined();
+    });
+
+    it("threads timeline digest and user confusions into step B", async () => {
+      const mockChatFn = mockPipeline();
+      await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn, {
+        timeline: {
+          steps: [
+            { id: "step-1", title: "选型", keyConcepts: ["Supabase"], userConfusion: "为什么换掉 Firebase" }
+          ]
+        },
+        confusions: [{ stepId: "step-1", stepTitle: "选型", text: "为什么换掉 Firebase" }]
+      });
+
+      const stepBPayload = JSON.parse(mockChatFn.mock.calls[1][0][1].content);
+      expect(stepBPayload.timelineDigest).toHaveLength(1);
+      expect(stepBPayload.timelineDigest[0].userConfusion).toBe("为什么换掉 Firebase");
+      expect(stepBPayload.userConfusions).toHaveLength(1);
+      expect(stepBPayload.confusionNote).toContain("1 条困惑");
+    });
+
+    it("tells step B to lower confidence when no user confusions exist", async () => {
+      const mockChatFn = mockPipeline();
+      await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+
+      const stepBPayload = JSON.parse(mockChatFn.mock.calls[1][0][1].content);
+      expect(stepBPayload.userConfusions).toEqual([]);
+      expect(stepBPayload.confusionNote).toContain("未提供用户困惑");
+    });
+
+    it("preserves confusionResolutions from step B", async () => {
+      const stepB = {
+        ...STEP_B,
+        confusionResolutions: [
+          { stepId: "step-1", confusion: "为什么换掉 Firebase", resolution: "gap", gapRank: 2, reason: "" },
+          { stepId: "step-2", confusion: "页面为什么刷新", resolution: "not_capability_gap", gapRank: 0, reason: "属于操作疑问而非能力缺口" }
+        ]
+      };
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline({ stepB }));
+
+      expect(report.confusionResolutions).toHaveLength(2);
+      expect(report.confusionResolutions[0].resolution).toBe("gap");
+      expect(report.confusionResolutions[0].gapRank).toBe(2);
+      expect(report.confusionResolutions[1].resolution).toBe("not_capability_gap");
     });
 
     it("preserves AI-generated gaps with correct ranking", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
-      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
-
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
       const ranks = report.sections.dangerousGaps.map(g => g.rank);
-      expect(ranks).toEqual([1, 2, 3, 4, 5]);
+      expect(ranks).toEqual([1, 2]);
     });
 
-    it("preserves AI-generated feynman card prompts", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
-      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+    it("preserves root-capability gap fields", async () => {
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
+      const gap = report.sections.dangerousGaps[0];
+      expect(gap.title).toBe("认证流程心智模型缺失");
+      expect(gap.surfaceSignals.length).toBeGreaterThanOrEqual(2);
+      expect(gap.transferScenarios.length).toBeGreaterThanOrEqual(1);
+      expect(gap.diagnosticQuestion).toContain("数据流");
+      expect(gap.masteryCriteria.length).toBeGreaterThan(0);
+      expect(gap.confidence).toBeGreaterThan(0);
+    });
 
-      expect(report.sections.feynmanCards[0].prompt).toContain("TypeScript");
+    it("preserves AI-generated feynman card prompts and cardType", async () => {
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
+      expect(report.sections.feynmanCards[0].prompt).toContain("数据流");
+      expect(report.sections.feynmanCards[0].cardType).toBe("system_map");
       expect(report.sections.feynmanCards[0].userAnswer).toBe("");
       expect(report.sections.feynmanCards[0].answeredAt).toBeNull();
     });
 
     it("preserves AI-generated next action routes", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
-      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
-
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
       const routes = report.sections.nextActions.map(a => a.route);
       expect(routes).toContain("verify");
       expect(routes).toContain("note");
@@ -154,111 +273,175 @@ describe("generateClearanceReport", () => {
       }
     });
 
-    it("overrides input fields with controlled values", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
-      const report = await generateClearanceReport(SAMPLE_TEXT, "claude", mockChatFn);
+    it("exposes capability analysis from step A", async () => {
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
+      expect(report.analysis.artifactKind).toBe("ai_chat");
+      expect(report.analysis.userCapability.overall).toBe("L2");
+      expect(report.analysis.userCapability.dimensions.systemMentalModel.level).toBe("L1");
+      expect(report.analysis.userCapability.dimensions.systemMentalModel.evidenceStatus).toBe("partial");
+    });
 
+    it("overrides input fields with controlled values", async () => {
+      const report = await generateClearanceReport(SAMPLE_TEXT, "claude", mockPipeline());
       expect(report.input.artifactType).toBe("claude");
       expect(report.input.artifactText).toContain("React app with Vite");
       expect(report.input.charCount).toBeGreaterThan(0);
     });
 
-    it("sets status to 'generated'", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
-      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+    it("sets status to 'generated' and clears generation flags", async () => {
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
       expect(report.status).toBe("generated");
-      expect(report.generation).toEqual({ fallback: false, error: "" });
+      expect(report.generation).toEqual({ fallback: false, error: "", failedStep: "" });
     });
 
     it("generates a report id", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
-      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
       expect(report.id).toBeTruthy();
       expect(report.id.length).toBeGreaterThan(10);
     });
 
-    it("normalizes AI output that is missing fields", async () => {
-      const partialAI = {
-        sections: {
-          aiCompleted: [{ item: "AI did something" }],
-          dangerousGaps: [
-            { gap: "gap1", whyDangerous: "danger1" },
-            { gap: "gap2", whyDangerous: "danger2" }
-          ],
-          feynmanCards: [{ target: "gap1", prompt: "explain gap1" }],
-          nextActions: [{ item: "do something", route: "task" }]
-        }
+    it("normalizes step output that is missing fields", async () => {
+      const stepB = {
+        dangerousGaps: [{ gap: "only one gap", whyDangerous: "danger" }],
+        cognitiveStructure: { facts: [{ item: "fact1" }] }
       };
-      const mockChatFn = vi.fn().mockResolvedValue(partialAI);
-      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+      const stepD = {
+        feynmanCards: [{ target: "only one gap", prompt: "explain it" }],
+        nextActions: [{ item: "do something", route: "invalid-route" }]
+      };
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline({ stepB, stepD }));
 
-      // Missing arrays should be filled
-      expect(report.sections.userContributed).toEqual([]);
-      expect(report.sections.cognitiveStructure.facts).toEqual([]);
-      // Missing evidence should set isInference to true
-      expect(report.sections.aiCompleted[0].isInference).toBe(true);
-      // Missing rank should be assigned sequentially
+      // Single gap is padded to the 2-gap minimum
+      expect(report.sections.dangerousGaps).toHaveLength(2);
       expect(report.sections.dangerousGaps[0].rank).toBe(1);
-      expect(report.sections.dangerousGaps[1].rank).toBe(2);
-      // Missing reason should still have a route
-      expect(report.sections.nextActions[0].route).toBe("task");
-      // Card should get an id
+      // Missing hypothesis/decision arrays get filled
+      expect(report.sections.cognitiveStructure.hypotheses).toEqual([]);
+      expect(report.sections.cognitiveStructure.decisions).toEqual([]);
+      // Single card is padded to the 3-card minimum
+      expect(report.sections.feynmanCards).toHaveLength(3);
       expect(report.sections.feynmanCards[0].id).toBeTruthy();
+      // Invalid route is normalized
+      expect(report.sections.nextActions[0].route).toBe("task");
+    });
+  });
+
+  describe("bounded research (step C)", () => {
+    it("marks research skipped when no researchFn is provided", async () => {
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
+      expect(report.research.status).toBe("skipped");
+      expect(report.research.sources).toEqual([]);
     });
 
-    it("normalizes AI output with invalid routes", async () => {
-      const badRoutes = {
-        sections: {
-          nextActions: [
-            { item: "check", route: "invalid", reason: "because" },
-            { item: "write", route: "TODO", reason: "because" }
-          ]
-        }
-      };
-      const mockChatFn = vi.fn().mockResolvedValue(badRoutes);
-      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+    it("runs at most 3 queries derived from the root gaps", async () => {
+      const researchFn = vi.fn().mockResolvedValue({
+        sources: [{ title: "Supabase Auth docs", url: "https://supabase.com/docs/auth", snippet: "JWT based auth" }]
+      });
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline(), { researchFn });
 
-      expect(report.sections.nextActions[0].route).toBe("task");
-      expect(report.sections.nextActions[1].route).toBe("task");
+      expect(researchFn).toHaveBeenCalledTimes(2); // one per unique gap query (2 gaps)
+      expect(report.research.status).toBe("ok");
+      expect(report.research.queries).toHaveLength(2);
+      expect(report.research.sources.length).toBeGreaterThan(0);
+      expect(report.research.sources[0].url).toContain("supabase.com");
+    });
+
+    it("degrades transparently when research fails — the report still succeeds", async () => {
+      const researchFn = vi.fn().mockRejectedValue(new Error("research provider down"));
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline(), { researchFn });
+
+      expect(report.generation.fallback).toBe(false);
+      expect(report.research.status).toBe("unavailable");
+      expect(report.research.sources).toEqual([]);
+      expect(report.research.queries[0].error).toContain("research provider down");
+    });
+
+    it("applies a per-query timeout", async () => {
+      const researchFn = vi.fn().mockImplementation(() => new Promise(resolve => setTimeout(resolve, 5000)));
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline(), {
+        researchFn,
+        researchTimeoutMs: 50
+      });
+
+      expect(report.research.status).toBe("unavailable");
+      expect(report.research.queries[0].error).toContain("timeout");
+    });
+
+    it("threads research sources into step D", async () => {
+      const researchFn = vi.fn().mockResolvedValue({
+        sources: [{ title: "Docs", url: "https://example.com/docs", snippet: "snippet" }]
+      });
+      const mockChatFn = mockPipeline();
+      await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn, { researchFn });
+
+      const stepDPayload = JSON.parse(mockChatFn.mock.calls[2][0][1].content);
+      expect(stepDPayload.researchDigest.status).toBe("ok");
+      expect(stepDPayload.researchDigest.sources[0].url).toContain("example.com");
     });
   });
 
   describe("with mock AI failure (fallback)", () => {
-    it("falls back when chatFn throws an error", async () => {
+    it("falls back with failedStep=attribution when step A throws", async () => {
       const mockChatFn = vi.fn().mockRejectedValue(new Error("Network timeout"));
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
 
-      expect(report.generation).toEqual({ fallback: true, error: "Network timeout" });
-      expect(report.sections.dangerousGaps).toHaveLength(5);
-      expect(report.sections.feynmanCards.length).toBeGreaterThanOrEqual(3);
-      expect(report.sections.nextActions.length).toBeGreaterThan(0);
-      // All items should be marked as inference
+      expect(report.generation.fallback).toBe(true);
+      expect(report.generation.error).toBe("Network timeout");
+      expect(report.generation.failedStep).toBe("attribution");
+      expect(report.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
+      expect(report.sections.dangerousGaps.length).toBeLessThanOrEqual(4);
       for (const item of report.sections.aiCompleted) {
         expect(item.isInference).toBe(true);
       }
     });
 
-    it("falls back when chatFn returns __fallback flag", async () => {
+    it("falls back with failedStep=root_gaps when step B throws", async () => {
+      const mockChatFn = vi.fn()
+        .mockResolvedValueOnce(STEP_A)
+        .mockRejectedValueOnce(new Error("step B exploded"));
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+
+      expect(report.generation.failedStep).toBe("root_gaps");
+      expect(report.generation.error).toBe("step B exploded");
+    });
+
+    it("falls back with failedStep=cards when step D throws", async () => {
+      const mockChatFn = vi.fn()
+        .mockResolvedValueOnce(STEP_A)
+        .mockResolvedValueOnce(STEP_B)
+        .mockRejectedValueOnce(new Error("step D exploded"));
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+
+      expect(report.generation.failedStep).toBe("cards");
+      expect(report.generation.error).toBe("step D exploded");
+    });
+
+    it("falls back when a step returns a __fallback marker", async () => {
       const mockChatFn = vi.fn().mockResolvedValue({
         __fallback: true,
         __fallbackError: "OPENAI_API_KEY is not set"
       });
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
 
-      expect(report.generation).toEqual({
-        fallback: true,
-        error: "OPENAI_API_KEY is not set"
-      });
-      expect(report.sections.dangerousGaps).toHaveLength(5);
-      expect(report.sections.aiCompleted.length).toBeGreaterThan(0);
-      expect(report.sections.aiCompleted[0].isInference).toBe(true);
+      expect(report.generation.fallback).toBe(true);
+      expect(report.generation.error).toBe("OPENAI_API_KEY is not set");
+      expect(report.generation.failedStep).toBe("attribution");
     });
 
-    it("falls back when chatFn returns __useFallback marker", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue({ __useFallback: true });
+    it("falls back when a step returns malformed output", async () => {
+      const mockChatFn = vi.fn().mockResolvedValue("not an object");
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+      expect(report.generation.fallback).toBe(true);
+      expect(report.generation.error).toContain("malformed");
+    });
+
+    it("falls back when step B output misses dangerousGaps", async () => {
+      const mockChatFn = vi.fn()
+        .mockResolvedValueOnce(STEP_A)
+        .mockResolvedValueOnce({ cognitiveStructure: {} });
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
 
-      expect(report.sections.dangerousGaps).toHaveLength(5);
+      expect(report.generation.fallback).toBe(true);
+      expect(report.generation.failedStep).toBe("root_gaps");
     });
 
     it("fallback report has all nextActions with valid routes", async () => {
@@ -276,25 +459,26 @@ describe("generateClearanceReport", () => {
     it("generates fallback report when chatFn is null", async () => {
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", null);
       expect(report.generation.fallback).toBe(true);
-      expect(report.sections.dangerousGaps).toHaveLength(5);
+      expect(report.generation.failedStep).toBe("attribution");
+      expect(report.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
       expect(report.sections.feynmanCards.length).toBeGreaterThanOrEqual(3);
     });
 
     it("generates fallback report when chatFn is undefined", async () => {
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt");
       expect(report.generation.fallback).toBe(true);
-      expect(report.sections.dangerousGaps).toHaveLength(5);
+      expect(report.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
     });
   });
 
   describe("input handling", () => {
     it("truncates artifactText to 30000 characters", async () => {
       const longText = "x".repeat(40000);
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
+      const mockChatFn = mockPipeline();
       await generateClearanceReport(longText, "chatgpt", mockChatFn);
 
-      const userPayload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
-      expect(userPayload.artifactText.length).toBe(30000);
+      const payload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
+      expect(payload.artifactText.length).toBe(30000);
     });
 
     it("uses structured compression for rollout JSONL before sending the prompt", async () => {
@@ -305,66 +489,97 @@ describe("generateClearanceReport", () => {
         rolloutMessage("user", "切到 API 26 VM 做最终验证。"),
         rolloutMessage("assistant", "最终结果：API 26 VM 已通过 HAP 构建、hdc 安装、aa start 启动。仍需区分 VM 验收与真机验收。")
       ]);
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
+      const mockChatFn = mockPipeline();
 
       const report = await generateClearanceReport(raw, "codex", mockChatFn);
 
-      const userPayload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
-      expect(userPayload.preprocess.strategy).toBe("rollout-jsonl-structured");
-      expect(userPayload.preprocess.didCompress).toBe(true);
-      expect(userPayload.artifactText).toContain("Structured Compression");
-      expect(userPayload.artifactText).toContain("API 26 VM 已通过");
-      expect(userPayload.artifactText).toContain("VM 验收与真机验收");
-      expect(userPayload.artifactText.length).toBeLessThanOrEqual(30000);
+      const payload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
+      expect(payload.preprocess.strategy).toBe("rollout-jsonl-structured");
+      expect(payload.preprocess.didCompress).toBe(true);
+      expect(payload.artifactText).toContain("Structured Compression");
+      expect(payload.artifactText).toContain("API 26 VM 已通过");
+      expect(payload.artifactText.length).toBeLessThanOrEqual(30000);
       expect(report.input.preprocess.strategy).toBe("rollout-jsonl-structured");
     });
 
     it("defaults invalid artifactType to 'other'", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
-      const report = await generateClearanceReport(SAMPLE_TEXT, "invalid-type", mockChatFn);
+      const report = await generateClearanceReport(SAMPLE_TEXT, "invalid-type", mockPipeline());
       expect(report.input.artifactType).toBe("other");
     });
 
     it("handles empty text gracefully", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
-      const report = await generateClearanceReport("", "other", mockChatFn);
-      expect(report.sections.dangerousGaps).toHaveLength(5);
+      const report = await generateClearanceReport("", "other", mockPipeline());
+      expect(report.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
+      expect(report.sections.dangerousGaps.length).toBeLessThanOrEqual(4);
     });
 
     it("handles short text gracefully", async () => {
-      const mockChatFn = vi.fn().mockResolvedValue(MOCK_AI_SUCCESS);
-      const report = await generateClearanceReport("AI wrote a function.", "codex", mockChatFn);
-      expect(report.sections.dangerousGaps).toHaveLength(5);
+      const report = await generateClearanceReport("AI wrote a function.", "codex", mockPipeline());
+      expect(report.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
     });
   });
 
-  describe("system prompt", () => {
-    it("contains all six section names", () => {
-      const prompt = getClearanceReportSystemPrompt();
-      expect(prompt).toContain("aiCompleted");
-      expect(prompt).toContain("userContributed");
-      expect(prompt).toContain("dangerousGaps");
-      expect(prompt).toContain("cognitiveStructure");
-      expect(prompt).toContain("feynmanCards");
-      expect(prompt).toContain("nextActions");
+  describe("step prompts", () => {
+    it("exposes all three step prompts", () => {
+      const prompts = getReportStepPrompts();
+      expect(prompts.attribution).toBeTruthy();
+      expect(prompts.rootGaps).toBeTruthy();
+      expect(prompts.cards).toBeTruthy();
     });
 
-    it("specifies exactly 5 dangerous gaps", () => {
-      const prompt = getClearanceReportSystemPrompt();
-      expect(prompt).toContain("Exactly 5");
+    it("attribution prompt defines the five capability dimensions and evidence statuses", () => {
+      const { attribution } = getReportStepPrompts();
+      expect(attribution).toContain("productProblemFraming");
+      expect(attribution).toContain("aiAgentSteering");
+      expect(attribution).toContain("systemMentalModel");
+      expect(attribution).toContain("technicalDecisionComprehension");
+      expect(attribution).toContain("validationAndQualityJudgment");
+      expect(attribution).toContain("proven");
+      expect(attribution).toContain("partial");
+      expect(attribution).toContain("unobserved");
+      expect(attribution).toContain("misconception");
     });
 
-    it("specifies 3-5 feynman cards", () => {
-      const prompt = getClearanceReportSystemPrompt();
-      expect(prompt).toContain("3-5");
+    it("attribution prompt forbids treating the user checklist as AI work and copying source as evidence", () => {
+      const { attribution } = getReportStepPrompts();
+      expect(attribution).toContain("严禁把用户的验收清单条目当作 AI 完成的工作");
+      expect(attribution).toContain("evidence 不得照抄原文");
     });
 
-    it("lists all four action routes", () => {
-      const prompt = getClearanceReportSystemPrompt();
-      expect(prompt).toContain("verify");
-      expect(prompt).toContain("note");
-      expect(prompt).toContain("task");
-      expect(prompt).toContain("ask");
+    it("root-gaps prompt requires 2-4 root gaps with transfer, verification, and mastery criteria", () => {
+      const { rootGaps } = getReportStepPrompts();
+      expect(rootGaps).toContain("2-4");
+      expect(rootGaps).toContain("surfaceSignals");
+      expect(rootGaps).toContain("transferScenarios");
+      expect(rootGaps).toContain("diagnosticQuestion");
+      expect(rootGaps).toContain("masteryCriteria");
+    });
+
+    it("root-gaps prompt makes user confusions first-class input", () => {
+      const { rootGaps } = getReportStepPrompts();
+      expect(rootGaps).toContain("用户亲手标注的每一条困惑");
+      expect(rootGaps).toContain("confusionResolutions");
+    });
+
+    it("cards prompt specifies 3-5 cards with cardType and evaluationCriteria", () => {
+      const { cards } = getReportStepPrompts();
+      expect(cards).toContain("3-5");
+      expect(cards).toContain("system_map");
+      expect(cards).toContain("analogy");
+      expect(cards).toContain("prediction");
+      expect(cards).toContain("decision_explanation");
+      expect(cards).toContain("comparison");
+      expect(cards).toContain("transfer");
+      expect(cards).toContain("validation_design");
+      expect(cards).toContain("evaluationCriteria");
+    });
+
+    it("cards prompt lists all four action routes", () => {
+      const { cards } = getReportStepPrompts();
+      expect(cards).toContain("verify");
+      expect(cards).toContain("note");
+      expect(cards).toContain("task");
+      expect(cards).toContain("ask");
     });
   });
 });

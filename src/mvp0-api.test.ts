@@ -62,9 +62,114 @@ afterAll(async () => {
 describe("MVP-0 API endpoints", () => {
   let createdReportId: string;
   let firstCardId: string;
+  let createdDraftId: string;
+
+  describe("POST /api/mvp0/timelines", () => {
+    it("creates a draft with a collaboration timeline", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/timelines`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          artifactText: SAMPLE_ARTIFACT,
+          artifactType: "chatgpt"
+        })
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+      expect(data.fallback).toBe(true);
+      expect(data.draft.id).toBeTruthy();
+      expect(data.draft.status).toBe("timeline");
+      expect(data.draft.timeline.steps.length).toBeGreaterThanOrEqual(1);
+      expect(data.timeline.steps.length).toBe(data.draft.timeline.steps.length);
+      for (const step of data.draft.timeline.steps) {
+        expect(step.id).toBeTruthy();
+        expect(step.title).toBeTruthy();
+        expect(step.userConfusion).toBe("");
+      }
+      createdDraftId = data.draft.id;
+    });
+
+    it("returns 400 when artifactText is missing", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/timelines`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ artifactType: "chatgpt" })
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+      expect(data.error).toContain("artifactText");
+    });
+  });
+
+  describe("GET /api/mvp0/drafts", () => {
+    it("lists drafts sorted by updatedAt descending", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/drafts`);
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+      expect(Array.isArray(data.drafts)).toBe(true);
+      expect(data.drafts.length).toBeGreaterThanOrEqual(1);
+      for (let i = 1; i < data.drafts.length; i++) {
+        expect(data.drafts[i - 1].updatedAt >= data.drafts[i].updatedAt).toBe(true);
+      }
+    });
+  });
+
+  describe("GET /api/mvp0/drafts/:id", () => {
+    it("returns the draft when found", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`);
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+      expect(data.draft.id).toBe(createdDraftId);
+    });
+
+    it("returns 404 when draft not found", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/drafts/nonexistent-id`);
+      expect(res.status).toBe(404);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+      expect(data.error).toContain("Draft not found");
+    });
+  });
+
+  describe("PATCH /api/mvp0/drafts/:id", () => {
+    it("writes user confusions onto timeline steps", async () => {
+      const draftRes = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`);
+      const draft = (await draftRes.json()).draft;
+      const stepId = draft.timeline.steps[0].id;
+
+      const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          confusions: [{ stepId, text: "我不理解这一步 AI 为什么这样做" }]
+        })
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+      const step = data.draft.timeline.steps.find((s: { id: string }) => s.id === stepId);
+      expect(step.userConfusion).toBe("我不理解这一步 AI 为什么这样做");
+    });
+
+    it("returns 404 when draft not found", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/drafts/nonexistent-id`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confusions: [] })
+      });
+      expect(res.status).toBe(404);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+      expect(data.error).toContain("Draft not found");
+    });
+  });
 
   describe("POST /api/mvp0/report", () => {
-    it("generates a fallback report with all six sections", async () => {
+    it("generates a fallback report with all seven sections", async () => {
       const res = await fetch(`${BASE}/api/mvp0/report`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -80,13 +185,49 @@ describe("MVP-0 API endpoints", () => {
       expect(data.report.id).toBeTruthy();
       expect(data.report.sections.aiCompleted).toBeDefined();
       expect(data.report.sections.userContributed).toBeDefined();
-      expect(data.report.sections.dangerousGaps).toHaveLength(5);
+      expect(data.report.sections.cognitiveProcessesOutsourced).toBeDefined();
+      expect(data.report.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
+      expect(data.report.sections.dangerousGaps.length).toBeLessThanOrEqual(4);
       expect(data.report.sections.cognitiveStructure).toBeDefined();
       expect(data.report.sections.feynmanCards.length).toBeGreaterThanOrEqual(3);
       expect(data.report.sections.feynmanCards.length).toBeLessThanOrEqual(5);
       expect(data.report.sections.nextActions.length).toBeGreaterThan(0);
+      expect(data.report.research).toBeDefined();
+      expect(data.report.confusionResolutions).toBeDefined();
       createdReportId = data.report.id;
       firstCardId = data.report.sections.feynmanCards[0].id;
+    });
+
+    it("generates a report from a draft and threads user confusions through", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/report`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ draftId: createdDraftId })
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+      expect(data.report.draftId).toBe(createdDraftId);
+      expect(data.report.input.confusions.length).toBeGreaterThanOrEqual(1);
+      expect(data.report.input.confusions[0].text).toContain("我不理解这一步");
+
+      // Draft is marked as reported and linked to the saved report
+      const draftRes = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`);
+      const draft = (await draftRes.json()).draft;
+      expect(draft.status).toBe("reported");
+      expect(draft.reportId).toBe(data.report.id);
+    });
+
+    it("returns 404 when draftId does not exist", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/report`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ draftId: "nonexistent-draft" })
+      });
+      expect(res.status).toBe(404);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+      expect(data.error).toContain("Draft not found");
     });
 
     it("returns 400 when artifactText is missing", async () => {
