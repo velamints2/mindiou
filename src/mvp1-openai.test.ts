@@ -26,6 +26,26 @@ describe("MVP-1 OpenAI web research adapter", () => {
     expect(request.tools[0].type).toBe("web_search");
     expect(request.tools[0].search_context_size).toBe("low");
     expect(request.max_output_tokens).toBe(1600);
+    expect(request.input).not.toContain("Even Realities G2");
+  });
+
+  it("injects G2 glasses disambiguation only when the question mentions G2", async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        output: [{
+          type: "message",
+          content: [{
+            type: "output_text",
+            text: "G2 smart glasses display system.",
+            annotations: [{ type: "url_citation", url: "https://hub.evenrealities.com/docs", title: "G2 Docs" }]
+          }]
+        }]
+      })
+    });
+    const research = createOpenAiWebResearch({ apiKey: "test", baseUrl: "https://api.openai.com/v1", model: "gpt-5.5", fetchFn });
+    await research({ originalQuestion: "How does G2 handle voice input?" });
+    const request = JSON.parse(fetchFn.mock.calls[0][1].body);
     expect(request.input).toContain("Even Realities G2");
   });
 
