@@ -1089,6 +1089,31 @@ function rokidCard(card) {
   };
 }
 
+function clearanceEntryPayload(platform) {
+  const report = mvp0Store.listReports().find(item => item.sections?.feynmanCards?.length);
+  if (!report) {
+    return { ok: true, platform, entry: null };
+  }
+  const cards = report.sections.feynmanCards;
+  const card = cards.find(item => !item.userAnswer) || cards[0];
+  const cardIndex = cards.findIndex(item => item.id === card.id);
+  return {
+    ok: true,
+    platform,
+    entry: {
+      reportId: report.id,
+      cardId: card.id,
+      nextCardId: cards.length > 1 ? cards[(cardIndex + 1) % cards.length].id : "",
+      createdAt: report.createdAt,
+      domain: clean(report.analysis?.userCapability?.currentDomain || "认知债务"),
+      target: clean(card.target || "理解缺口"),
+      prompt: clean(card.prompt || "请用自己的话解释这个问题。"),
+      cardNumber: cardIndex + 1,
+      cardCount: cards.length
+    }
+  };
+}
+
 function rokidSession(duration, demo = false) {
   const session = spiralStore.buildSession(duration);
   const sourceCards = demo ? rokidDemoCards : session.cards;
@@ -1333,29 +1358,11 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/rokid/clearance-entry") {
-      const report = mvp0Store.listReports().find(item => item.sections?.feynmanCards?.length);
-      if (!report) {
-        jsonResponse(res, 200, { ok: true, platform: "rokid-aiui", entry: null });
-        return;
-      }
-      const cards = report.sections.feynmanCards;
-      const card = cards.find(item => !item.userAnswer) || cards[0];
-      const cardIndex = cards.findIndex(item => item.id === card.id);
-      jsonResponse(res, 200, {
-        ok: true,
-        platform: "rokid-aiui",
-        entry: {
-          reportId: report.id,
-          cardId: card.id,
-          nextCardId: cards.length > 1 ? cards[(cardIndex + 1) % cards.length].id : "",
-          createdAt: report.createdAt,
-          domain: clean(report.analysis?.userCapability?.currentDomain || "认知债务"),
-          target: clean(card.target || "理解缺口"),
-          prompt: clean(card.prompt || "请用自己的话解释这个问题。"),
-          cardNumber: cardIndex + 1,
-          cardCount: cards.length
-        }
-      });
+      jsonResponse(res, 200, clearanceEntryPayload("rokid-aiui"));
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/mentra/clearance-entry") {
+      jsonResponse(res, 200, clearanceEntryPayload("mentra"));
       return;
     }
 

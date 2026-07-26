@@ -1,0 +1,21 @@
+{
+  "name": "@mindiou/mentra-tpa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MindIOU clearance app for MentraOS smart glasses (Even G2 / custom hardware).",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@mentra/sdk": "^2.1.29"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8"
+  }
+}
