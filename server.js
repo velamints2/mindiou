@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { createSpiralStore } from "./spiral-store.js";
 import { createMvp0Store } from "./mvp0-store.js";
 import { createMvp1Store } from "./mvp1-store.js";
+import { createAuthStore } from "./auth-store.js";
 import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport } from "./mvp0-report.js";
 import { feynmanFollowUp } from "./mvp0-followup.js";
@@ -50,6 +51,7 @@ const sttPrompt = process.env.OPENAI_STT_PROMPT || [
 const learningStorePath = process.env.LEARNING_STORE_PATH || "tmp/spiral-store.json";
 const mvp0StorePath = process.env.MVP0_STORE_PATH || "tmp/mvp0-store.json";
 const mvp1StorePath = process.env.MVP1_STORE_PATH || "tmp/mvp1-store.json";
+const authStorePath = process.env.AUTH_STORE_PATH || "tmp/auth-store.sqlite";
 const eventLog = [];
 const spiralStore = createSpiralStore(learningStorePath);
 await spiralStore.load();
@@ -57,6 +59,7 @@ const mvp0Store = createMvp0Store(mvp0StorePath);
 await mvp0Store.load();
 const mvp1Store = createMvp1Store(mvp1StorePath);
 await mvp1Store.load();
+const authStore = createAuthStore(authStorePath);
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: researchApiKey,
   baseUrl: researchBaseUrl,
@@ -115,7 +118,7 @@ const rokidDemoCards = [
   }
 ];
 
-function jsonResponse(res, statusCode, payload) {
+function jsonResponse(res, statusCode, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
   res.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
@@ -123,7 +126,9 @@ function jsonResponse(res, statusCode, payload) {
     "cache-control": "no-store",
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,authorization"
+    "access-control-allow-headers": "content-type,authorization,cookie",
+    "access-control-allow-credentials": "true",
+    ...extraHeaders
   });
   res.end(body);
 }
@@ -132,7 +137,8 @@ function optionsResponse(res) {
   res.writeHead(204, {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type,authorization",
+    "access-control-allow-headers": "content-type,authorization,cookie",
+    "access-control-allow-credentials": "true",
     "access-control-max-age": "86400"
   });
   res.end();
@@ -170,21 +176,60 @@ function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-function resolveUserId(req, payload) {
-  const fromPayload = clean(payload?.userId || "");
-  const fromHeader = clean(req?.headers?.["x-user-id"] || "");
-  return (fromPayload || fromHeader || "demo-user").slice(0, 100);
+const sessionCookieName = "session";
+const sessionCookieMaxAge = 604800; // 7 days, matches auth-store session TTL
+
+function parseCookies(req) {
+  const cookies = {};
+  for (const part of String(req.headers.cookie || "").split(";")) {
+    const index = part.indexOf("=");
+    if (index < 0) continue;
+    const name = part.slice(0, index).trim();
+    if (name) cookies[name] = part.slice(index + 1).trim();
+  }
+  return cookies;
 }
 
-function findOwnedMvp1Session(id, userId) {
-  let session = null;
-  try {
-    session = mvp1Store.getSession(id);
-  } catch {
-    session = null;
+function sessionCookie(sessionId) {
+  const parts = [
+    `${sessionCookieName}=${sessionId}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    "Path=/",
+    `Max-Age=${sessionCookieMaxAge}`
+  ];
+  if (process.env.NODE_ENV === "production") parts.push("Secure");
+  return parts.join("; ");
+}
+
+function clearSessionCookie() {
+  const parts = [
+    `${sessionCookieName}=`,
+    "HttpOnly",
+    "SameSite=Lax",
+    "Path=/",
+    "Max-Age=0"
+  ];
+  if (process.env.NODE_ENV === "production") parts.push("Secure");
+  return parts.join("; ");
+}
+
+function requireAuth(req, res) {
+  const sessionId = parseCookies(req)[sessionCookieName] || "";
+  const user = sessionId ? authStore.getUserBySession(sessionId) : null;
+  if (!user) {
+    jsonResponse(res, 401, { ok: false, error: "Authentication required" });
+    return null;
   }
-  if (!session || session.userId !== userId) return null;
-  return session;
+  return user;
+}
+
+function loadOwnedMvp1Session(id, userId) {
+  try {
+    return mvp1Store.getSession(id, userId);
+  } catch {
+    return null;
+  }
 }
 
 function detectArtifactType(text) {
@@ -1135,6 +1180,246 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── Auth: web user accounts (no LEARNING_API_TOKEN required) ──
+
+    if (url.pathname === "/api/auth/register" && req.method === "POST") {
+      const payload = parseJson(await readBody(req));
+      try {
+        const { user, sessionId } = authStore.register(payload.email, payload.password);
+        jsonResponse(res, 201, { ok: true, user }, { "set-cookie": sessionCookie(sessionId) });
+      } catch (error) {
+        const status = /already registered/i.test(String(error.message)) ? 409 : 400;
+        jsonResponse(res, status, { ok: false, error: error.message });
+      }
+      return;
+    }
+    if (url.pathname === "/api/auth/login" && req.method === "POST") {
+      const payload = parseJson(await readBody(req));
+      try {
+        const { user, sessionId } = authStore.login(payload.email, payload.password);
+        jsonResponse(res, 200, { ok: true, user }, { "set-cookie": sessionCookie(sessionId) });
+      } catch {
+        jsonResponse(res, 401, { ok: false, error: "Invalid email or password" });
+      }
+      return;
+    }
+    if (url.pathname === "/api/auth/logout" && req.method === "POST") {
+      const sessionId = parseCookies(req)[sessionCookieName];
+      if (sessionId) authStore.logout(sessionId);
+      jsonResponse(res, 200, { ok: true }, { "set-cookie": clearSessionCookie() });
+      return;
+    }
+    if (url.pathname === "/api/auth/me" && req.method === "GET") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      jsonResponse(res, 200, { ok: true, user });
+      return;
+    }
+
+    // ── Web MVP-0/MVP-1 routes: cookie session auth, per-user data isolation ──
+
+    const mvp1SessionMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)$/);
+    const mvp0ReportMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)$/);
+    const mvp1AnswerMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/answers$/);
+    const mvp1EndMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/end$/);
+    const mvp0CardAnswerMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)\/cards\/([^/]+)\/answer$/);
+    const mvp0CorrectionMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)\/corrections$/);
+    const isWebMvpRoute =
+      (req.method === "GET" && (url.pathname === "/api/mvp0/reports" || mvp1SessionMatch || mvp0ReportMatch)) ||
+      (req.method === "POST" && (
+        url.pathname === "/api/mvp1/sessions" || mvp1AnswerMatch || mvp1EndMatch ||
+        url.pathname === "/api/mvp0/report" || mvp0CardAnswerMatch || mvp0CorrectionMatch
+      ));
+    if (isWebMvpRoute) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+
+      if (req.method === "GET" && url.pathname === "/api/mvp0/reports") {
+        jsonResponse(res, 200, { ok: true, reports: mvp0Store.listReports(user.id) });
+        return;
+      }
+      if (req.method === "GET" && mvp1SessionMatch) {
+        const session = loadOwnedMvp1Session(decodeURIComponent(mvp1SessionMatch[1]), user.id);
+        if (!session) {
+          jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
+          return;
+        }
+        jsonResponse(res, 200, { ok: true, session: publicSession(session, { revealScaffold: session.attempts.length > 0 }) });
+        return;
+      }
+      if (req.method === "GET" && mvp0ReportMatch) {
+        try {
+          const report = mvp0Store.getReport(decodeURIComponent(mvp0ReportMatch[1]), user.id);
+          jsonResponse(res, 200, { ok: true, report });
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+        }
+        return;
+      }
+
+      const payload = parseJson(await readBody(req));
+
+      // ── MVP-1: source-grounded debt clearance ──
+
+      if (url.pathname === "/api/mvp1/sessions") {
+        try {
+          if (!aiApiKey || disableAi) {
+            jsonResponse(res, 503, { ok: false, error: "MVP-1 external research requires an active OpenAI API configuration" });
+            return;
+          }
+          const reportId = clean(payload.reportId || "");
+          const cardId = clean(payload.cardId || "");
+          if (!reportId || !cardId) {
+            jsonResponse(res, 400, { ok: false, error: "Missing reportId or cardId" });
+            return;
+          }
+          const report = mvp0Store.getReport(reportId, user.id);
+          const session = await startClearanceSession({ report, cardId, researchFn: researchClearanceContext });
+          session.userId = user.id;
+          await mvp1Store.saveSession(session);
+          jsonResponse(res, 200, { ok: true, session: publicSession(session) });
+        } catch (error) {
+          const status = /not found/i.test(String(error.message)) ? 404 : 502;
+          jsonResponse(res, status, { ok: false, error: error.message });
+        }
+        return;
+      }
+
+      if (mvp1AnswerMatch) {
+        try {
+          const session = loadOwnedMvp1Session(decodeURIComponent(mvp1AnswerMatch[1]), user.id);
+          if (!session) {
+            jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
+            return;
+          }
+          const attempt = await submitClearanceAnswer({
+            session,
+            answer: payload.answer,
+            analyzeFn: analyzeClearanceAnswer
+          });
+          await mvp1Store.saveSession(session);
+          jsonResponse(res, 200, {
+            ok: true,
+            attempt,
+            session: publicSession(session, { revealScaffold: true })
+          });
+        } catch (error) {
+          jsonResponse(res, 400, { ok: false, error: error.message });
+        }
+        return;
+      }
+
+      if (mvp1EndMatch) {
+        const session = loadOwnedMvp1Session(decodeURIComponent(mvp1EndMatch[1]), user.id);
+        if (!session) {
+          jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
+          return;
+        }
+        const result = endClearanceSession(session);
+        try {
+          await mvp0Store.updateCardClearance(session.reportId, session.cardId, {
+            sessionId: session.id,
+            status: result.status,
+            sourceReviewRequired: result.sourceReviewRequired,
+            endedAt: session.endedAt,
+            nextRecommendation: result.nextRecommendation,
+            remainingGaps: result.remainingGaps
+          }, user.id);
+        } catch (error) {
+          console.warn(`MVP-1 clearance write-back failed for session ${session.id}: ${error.message}`);
+        }
+        await mvp1Store.saveSession(session);
+        jsonResponse(res, 200, {
+          ok: true,
+          result,
+          session: publicSession(session, { revealScaffold: true })
+        });
+        return;
+      }
+
+      // ── MVP-0: cognitive-debt clearance report ──
+
+      if (url.pathname === "/api/mvp0/report") {
+        const artifactText = String(payload.artifactText || "").trim();
+        let artifactType = clean(payload.artifactType || "");
+        if (!artifactText) {
+          jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
+          return;
+        }
+        // Auto-detect type if not provided or empty
+        if (!artifactType) {
+          artifactType = detectArtifactType(artifactText);
+        }
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const report = await generateClearanceReport(artifactText, artifactType, chatFn);
+        report.userId = user.id;
+        const saved = await mvp0Store.saveReport(report);
+        const isFallback = Boolean(saved.generation?.fallback);
+        jsonResponse(res, 200, {
+          ok: true,
+          report: saved,
+          fallback: isFallback,
+          ...(isFallback && saved.generation?.error ? { error: saved.generation.error } : {}),
+          detectedType: artifactType
+        });
+        return;
+      }
+
+      if (mvp0CardAnswerMatch) {
+        try {
+          const reportId = decodeURIComponent(mvp0CardAnswerMatch[1]);
+          const cardId = decodeURIComponent(mvp0CardAnswerMatch[2]);
+          const answer = clean(payload.answer || "");
+          if (!answer) {
+            jsonResponse(res, 400, { ok: false, error: "Missing answer" });
+            return;
+          }
+          const report = mvp0Store.getReport(reportId, user.id);
+          const card = report.sections.feynmanCards?.find(item => item.id === cardId);
+          if (!card) {
+            jsonResponse(res, 404, { ok: false, error: `Feynman card not found: ${cardId} in report ${reportId}` });
+            return;
+          }
+          const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+          const followUpResult = await feynmanFollowUp(card, answer, chatFn);
+          const aiFollowUp = followUpResult.shouldFollowUp
+            ? followUpResult.followUp
+            : followUpResult.summary;
+          const result = await mvp0Store.updateCardAnswer(reportId, cardId, answer, aiFollowUp, user.id);
+          jsonResponse(res, 200, {
+            ok: true,
+            card: result.card,
+            shouldFollowUp: followUpResult.shouldFollowUp,
+            fallback: (!aiApiKey || disableAi)
+          });
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+        }
+        return;
+      }
+
+      if (mvp0CorrectionMatch) {
+        try {
+          const reportId = decodeURIComponent(mvp0CorrectionMatch[1]);
+          const result = await mvp0Store.addCorrection(reportId, {
+            target: payload.target,
+            targetId: payload.targetId,
+            originalValue: payload.originalValue,
+            correctedValue: payload.correctedValue,
+            reason: payload.reason
+          }, user.id);
+          jsonResponse(res, 200, {
+            ok: true,
+            correction: result.correction,
+            report: result.report
+          });
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+        }
+        return;
+      }
+    }
+
     if (!requireToken(req, res)) return;
     if (req.method === "GET" && url.pathname === "/api/learn/events") {
       const since = url.searchParams.get("since");
@@ -1212,206 +1497,12 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // ── MVP-0: cognitive-debt clearance report ──
-
-    if (req.method === "GET" && url.pathname === "/api/mvp0/reports") {
-      jsonResponse(res, 200, { ok: true, reports: mvp0Store.listReports() });
-      return;
-    }
-    const mvp1SessionMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)$/);
-    if (req.method === "GET" && mvp1SessionMatch) {
-      const session = findOwnedMvp1Session(decodeURIComponent(mvp1SessionMatch[1]), resolveUserId(req, null));
-      if (!session) {
-        jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
-        return;
-      }
-      jsonResponse(res, 200, { ok: true, session: publicSession(session, { revealScaffold: session.attempts.length > 0 }) });
-      return;
-    }
-    const mvp0ReportMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)$/);
-    if (req.method === "GET" && mvp0ReportMatch) {
-      try {
-        const report = mvp0Store.getReport(decodeURIComponent(mvp0ReportMatch[1]));
-        jsonResponse(res, 200, { ok: true, report });
-      } catch (error) {
-        jsonResponse(res, 404, { ok: false, error: error.message });
-      }
-      return;
-    }
-
     if (req.method !== "POST") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
       return;
     }
 
     const payload = parseJson(await readBody(req));
-
-    // ── MVP-1: source-grounded debt clearance ──
-
-    if (url.pathname === "/api/mvp1/sessions") {
-      try {
-        if (!aiApiKey || disableAi) {
-          jsonResponse(res, 503, { ok: false, error: "MVP-1 external research requires an active OpenAI API configuration" });
-          return;
-        }
-        const reportId = clean(payload.reportId || "");
-        const cardId = clean(payload.cardId || "");
-        if (!reportId || !cardId) {
-          jsonResponse(res, 400, { ok: false, error: "Missing reportId or cardId" });
-          return;
-        }
-        const report = mvp0Store.getReport(reportId);
-        const session = await startClearanceSession({ report, cardId, researchFn: researchClearanceContext });
-        session.userId = resolveUserId(req, payload);
-        await mvp1Store.saveSession(session);
-        jsonResponse(res, 200, { ok: true, session: publicSession(session) });
-      } catch (error) {
-        const status = /not found/i.test(String(error.message)) ? 404 : 502;
-        jsonResponse(res, status, { ok: false, error: error.message });
-      }
-      return;
-    }
-
-    const mvp1AnswerMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/answers$/);
-    if (mvp1AnswerMatch) {
-      try {
-        const session = findOwnedMvp1Session(decodeURIComponent(mvp1AnswerMatch[1]), resolveUserId(req, payload));
-        if (!session) {
-          jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
-          return;
-        }
-        const attempt = await submitClearanceAnswer({
-          session,
-          answer: payload.answer,
-          analyzeFn: analyzeClearanceAnswer
-        });
-        await mvp1Store.saveSession(session);
-        jsonResponse(res, 200, {
-          ok: true,
-          attempt,
-          session: publicSession(session, { revealScaffold: true })
-        });
-      } catch (error) {
-        jsonResponse(res, 400, { ok: false, error: error.message });
-      }
-      return;
-    }
-
-    const mvp1EndMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/end$/);
-    if (mvp1EndMatch) {
-      const session = findOwnedMvp1Session(decodeURIComponent(mvp1EndMatch[1]), resolveUserId(req, payload));
-      if (!session) {
-        jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
-        return;
-      }
-      const result = endClearanceSession(session);
-      try {
-        await mvp0Store.updateCardClearance(session.reportId, session.cardId, {
-          sessionId: session.id,
-          status: result.status,
-          sourceReviewRequired: result.sourceReviewRequired,
-          endedAt: session.endedAt,
-          nextRecommendation: result.nextRecommendation,
-          remainingGaps: result.remainingGaps
-        });
-      } catch (error) {
-        console.warn(`MVP-1 clearance write-back failed for session ${session.id}: ${error.message}`);
-      }
-      await mvp1Store.saveSession(session);
-      jsonResponse(res, 200, {
-        ok: true,
-        result,
-        session: publicSession(session, { revealScaffold: true })
-      });
-      return;
-    }
-
-    // ── MVP-0: cognitive-debt clearance report ──
-
-    if (url.pathname === "/api/mvp0/report") {
-      const artifactText = String(payload.artifactText || "").trim();
-      let artifactType = clean(payload.artifactType || "");
-      if (!artifactText) {
-        jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
-        return;
-      }
-      // Auto-detect type if not provided or empty
-      if (!artifactType) {
-        artifactType = detectArtifactType(artifactText);
-      }
-      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-      const report = await generateClearanceReport(artifactText, artifactType, chatFn);
-      const saved = await mvp0Store.saveReport(report);
-      const isFallback = Boolean(saved.generation?.fallback);
-      jsonResponse(res, 200, {
-        ok: true,
-        report: saved,
-        fallback: isFallback,
-        ...(isFallback && saved.generation?.error ? { error: saved.generation.error } : {}),
-        detectedType: artifactType
-      });
-      return;
-    }
-
-    const mvp0CardAnswerMatch = url.pathname.match(
-      /^\/api\/mvp0\/reports\/([^/]+)\/cards\/([^/]+)\/answer$/
-    );
-    if (mvp0CardAnswerMatch) {
-      try {
-        const reportId = decodeURIComponent(mvp0CardAnswerMatch[1]);
-        const cardId = decodeURIComponent(mvp0CardAnswerMatch[2]);
-        const answer = clean(payload.answer || "");
-        if (!answer) {
-          jsonResponse(res, 400, { ok: false, error: "Missing answer" });
-          return;
-        }
-        const report = mvp0Store.getReport(reportId);
-        const card = report.sections.feynmanCards?.find(item => item.id === cardId);
-        if (!card) {
-          jsonResponse(res, 404, { ok: false, error: `Feynman card not found: ${cardId} in report ${reportId}` });
-          return;
-        }
-        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-        const followUpResult = await feynmanFollowUp(card, answer, chatFn);
-        const aiFollowUp = followUpResult.shouldFollowUp
-          ? followUpResult.followUp
-          : followUpResult.summary;
-        const result = await mvp0Store.updateCardAnswer(reportId, cardId, answer, aiFollowUp);
-        jsonResponse(res, 200, {
-          ok: true,
-          card: result.card,
-          shouldFollowUp: followUpResult.shouldFollowUp,
-          fallback: (!aiApiKey || disableAi)
-        });
-      } catch (error) {
-        jsonResponse(res, 404, { ok: false, error: error.message });
-      }
-      return;
-    }
-
-    const mvp0CorrectionMatch = url.pathname.match(
-      /^\/api\/mvp0\/reports\/([^/]+)\/corrections$/
-    );
-    if (mvp0CorrectionMatch) {
-      try {
-        const reportId = decodeURIComponent(mvp0CorrectionMatch[1]);
-        const result = await mvp0Store.addCorrection(reportId, {
-          target: payload.target,
-          targetId: payload.targetId,
-          originalValue: payload.originalValue,
-          correctedValue: payload.correctedValue,
-          reason: payload.reason
-        });
-        jsonResponse(res, 200, {
-          ok: true,
-          correction: result.correction,
-          report: result.report
-        });
-      } catch (error) {
-        jsonResponse(res, 404, { ok: false, error: error.message });
-      }
-      return;
-    }
 
     if (url.pathname === "/api/learn/events") {
       jsonResponse(res, 200, { ok: true, event: recordEvent(payload) });

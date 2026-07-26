@@ -68,6 +68,7 @@ export function createMvp0Store(filePath) {
     const now = new Date().toISOString();
     const record = {
       id,
+      userId: clean(report.userId || "").slice(0, 100),
       createdAt: report.createdAt || now,
       input: {
         artifactText: String(report.input?.artifactText || "").slice(0, 30000),
@@ -116,21 +117,27 @@ export function createMvp0Store(filePath) {
     return record;
   }
 
-  function getReport(id) {
+  function getReport(id, userId) {
     const report = state.clearanceReports.find(item => item.id === id);
-    if (!report) {
+    // A userId mismatch raises the same error as a missing report so
+    // ownership is never revealed. Reports saved before accounts existed
+    // have no userId and stay visible to unscoped (legacy/internal) calls.
+    if (!report || (userId !== undefined && report.userId !== userId)) {
       throw new Error(`Report not found: ${id}`);
     }
     return report;
   }
 
-  function listReports() {
-    return [...state.clearanceReports]
+  function listReports(userId) {
+    const reports = userId === undefined
+      ? state.clearanceReports
+      : state.clearanceReports.filter(item => item.userId === userId);
+    return [...reports]
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async function updateCardAnswer(reportId, cardId, answer, aiFollowUp) {
-    const report = getReport(reportId);
+  async function updateCardAnswer(reportId, cardId, answer, aiFollowUp, userId) {
+    const report = getReport(reportId, userId);
     const card = report.sections.feynmanCards?.find(item => item.id === cardId);
     if (!card) {
       throw new Error(`Feynman card not found: ${cardId} in report ${reportId}`);
@@ -146,8 +153,8 @@ export function createMvp0Store(filePath) {
     return { report, card, previousAnswer };
   }
 
-  async function updateCardClearance(reportId, cardId, clearance) {
-    const report = getReport(reportId);
+  async function updateCardClearance(reportId, cardId, clearance, userId) {
+    const report = getReport(reportId, userId);
     const card = report.sections.feynmanCards?.find(item => item.id === cardId);
     if (!card) {
       throw new Error(`Feynman card not found: ${cardId} in report ${reportId}`);
@@ -167,8 +174,8 @@ export function createMvp0Store(filePath) {
     return { report, card };
   }
 
-  async function addCorrection(reportId, correction) {
-    const report = getReport(reportId);
+  async function addCorrection(reportId, correction, userId) {
+    const report = getReport(reportId, userId);
     const record = {
       id: clean(correction.id || crypto.randomUUID()).slice(0, 100),
       target: clean(correction.target || "attribution").slice(0, 30),

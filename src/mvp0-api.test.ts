@@ -5,8 +5,10 @@ import path from "node:path";
 
 const TEST_PORT = 8799;
 const TEST_STORE = path.resolve("tmp/mvp0-api-test-store.json");
+const TEST_AUTH_STORE = path.resolve("tmp/mvp0-api-test-auth.sqlite");
 const BASE = `http://127.0.0.1:${TEST_PORT}`;
 let serverProcess: ReturnType<typeof spawn> | null = null;
+let authCookie = "";
 
 const SAMPLE_ARTIFACT = `
 I'm building a React app with Vite. The AI suggested using TypeScript for type safety.
@@ -36,18 +38,28 @@ async function waitForServer(url: string, maxAttempts = 30): Promise<void> {
 beforeAll(async () => {
   await mkdir(path.dirname(TEST_STORE), { recursive: true });
   await rm(TEST_STORE, { force: true });
+  await rm(TEST_AUTH_STORE, { force: true });
+  await rm(`${TEST_AUTH_STORE}-wal`, { force: true });
+  await rm(`${TEST_AUTH_STORE}-shm`, { force: true });
   serverProcess = spawn("node", ["server.js"], {
     cwd: path.resolve("."),
     env: {
       ...process.env,
       PORT: String(TEST_PORT),
       MVP0_STORE_PATH: TEST_STORE,
+      AUTH_STORE_PATH: TEST_AUTH_STORE,
       SPIRAL_DISABLE_AI: "1",
       LEARNING_API_TOKEN: ""
     },
     stdio: "pipe"
   });
   await waitForServer(`${BASE}/health`);
+  const register = await fetch(`${BASE}/api/auth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "mvp0-api@example.com", password: "test-secret-1" })
+  });
+  authCookie = (register.headers.get("set-cookie") || "").split(";")[0];
 });
 
 afterAll(async () => {
@@ -57,6 +69,9 @@ afterAll(async () => {
     if (!serverProcess.killed) serverProcess.kill("SIGKILL");
   }
   await rm(TEST_STORE, { force: true });
+  await rm(TEST_AUTH_STORE, { force: true });
+  await rm(`${TEST_AUTH_STORE}-wal`, { force: true });
+  await rm(`${TEST_AUTH_STORE}-shm`, { force: true });
 });
 
 describe("MVP-0 API endpoints", () => {
@@ -67,7 +82,7 @@ describe("MVP-0 API endpoints", () => {
     it("generates a fallback report with all six sections", async () => {
       const res = await fetch(`${BASE}/api/mvp0/report`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({
           artifactText: SAMPLE_ARTIFACT,
           artifactType: "chatgpt"
@@ -92,7 +107,7 @@ describe("MVP-0 API endpoints", () => {
     it("returns 400 when artifactText is missing", async () => {
       const res = await fetch(`${BASE}/api/mvp0/report`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({ artifactType: "chatgpt" })
       });
       expect(res.status).toBe(400);
@@ -104,7 +119,7 @@ describe("MVP-0 API endpoints", () => {
     it("preserves artifactType in the report", async () => {
       const res = await fetch(`${BASE}/api/mvp0/report`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({
           artifactText: "Some AI conversation text here.",
           artifactType: "claude"
@@ -143,7 +158,7 @@ describe("MVP-0 API endpoints", () => {
       ]);
       const res = await fetch(`${BASE}/api/mvp0/report`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({
           artifactText: raw,
           artifactType: "codex"
@@ -161,7 +176,7 @@ describe("MVP-0 API endpoints", () => {
 
   describe("GET /api/mvp0/reports", () => {
     it("lists reports sorted by createdAt descending", async () => {
-      const res = await fetch(`${BASE}/api/mvp0/reports`);
+      const res = await fetch(`${BASE}/api/mvp0/reports`, { headers: { cookie: authCookie } });
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.ok).toBe(true);
@@ -175,7 +190,7 @@ describe("MVP-0 API endpoints", () => {
 
   describe("GET /api/mvp0/reports/:id", () => {
     it("returns the report when found", async () => {
-      const res = await fetch(`${BASE}/api/mvp0/reports/${createdReportId}`);
+      const res = await fetch(`${BASE}/api/mvp0/reports/${createdReportId}`, { headers: { cookie: authCookie } });
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.ok).toBe(true);
@@ -183,7 +198,7 @@ describe("MVP-0 API endpoints", () => {
     });
 
     it("returns 404 when report not found", async () => {
-      const res = await fetch(`${BASE}/api/mvp0/reports/nonexistent-id`);
+      const res = await fetch(`${BASE}/api/mvp0/reports/nonexistent-id`, { headers: { cookie: authCookie } });
       expect(res.status).toBe(404);
       const data = await res.json();
       expect(data.ok).toBe(false);
@@ -197,7 +212,7 @@ describe("MVP-0 API endpoints", () => {
         `${BASE}/api/mvp0/reports/${createdReportId}/cards/${firstCardId}/answer`,
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", cookie: authCookie },
           body: JSON.stringify({ answer: "This is my explanation of the concept." })
         }
       );
@@ -215,7 +230,7 @@ describe("MVP-0 API endpoints", () => {
         `${BASE}/api/mvp0/reports/${createdReportId}/cards/${firstCardId}/answer`,
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", cookie: authCookie },
           body: JSON.stringify({})
         }
       );
@@ -230,7 +245,7 @@ describe("MVP-0 API endpoints", () => {
         `${BASE}/api/mvp0/reports/nonexistent/cards/${firstCardId}/answer`,
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", cookie: authCookie },
           body: JSON.stringify({ answer: "test" })
         }
       );
@@ -245,7 +260,7 @@ describe("MVP-0 API endpoints", () => {
         `${BASE}/api/mvp0/reports/${createdReportId}/cards/nonexistent-card/answer`,
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", cookie: authCookie },
           body: JSON.stringify({ answer: "test" })
         }
       );
@@ -260,7 +275,7 @@ describe("MVP-0 API endpoints", () => {
     it("appends a correction to the report", async () => {
       const res = await fetch(`${BASE}/api/mvp0/reports/${createdReportId}/corrections`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({
           target: "gap",
           targetId: "gap-1",
@@ -280,7 +295,7 @@ describe("MVP-0 API endpoints", () => {
     it("returns 404 when report not found", async () => {
       const res = await fetch(`${BASE}/api/mvp0/reports/nonexistent/corrections`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({
           target: "gap",
           correctedValue: "fix"

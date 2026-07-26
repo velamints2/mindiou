@@ -70,16 +70,21 @@ export function createMvp1Store(filePath) {
     return record;
   }
 
-  function getSession(id) {
+  function getSession(id, userId) {
     const session = state.clearanceSessions.find(item => item.id === id);
-    if (!session) {
+    // A userId mismatch raises the same error as a missing session so
+    // ownership is never revealed. Unscoped calls keep legacy behavior.
+    if (!session || (userId !== undefined && session.userId !== userId)) {
       throw new Error(`Clearance session not found: ${id}`);
     }
     return session;
   }
 
-  function listSessions() {
-    return [...state.clearanceSessions]
+  function listSessions(userId) {
+    const sessions = userId === undefined
+      ? state.clearanceSessions
+      : state.clearanceSessions.filter(item => item.userId === userId);
+    return [...sessions]
       .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
   }
 
