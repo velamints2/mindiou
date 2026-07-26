@@ -182,6 +182,18 @@ function parseCookies(req) {
     }, {});
 }
 
+const revokedSessionSignatures = new Map();
+
+function revokeSessionToken(token, expiresAt) {
+  const separator = String(token || "").lastIndexOf(".");
+  if (separator < 1) return;
+  const now = Date.now();
+  for (const [signature, expiry] of revokedSessionSignatures) {
+    if (expiry <= now) revokedSessionSignatures.delete(signature);
+  }
+  revokedSessionSignatures.set(String(token).slice(separator + 1), expiresAt || now);
+}
+
 function signSession(payload) {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = crypto.createHmac("sha256", sessionSecret).update(encoded).digest("base64url");
@@ -195,6 +207,7 @@ function readSession(req) {
   if (separator < 1) return null;
   const encoded = token.slice(0, separator);
   const signature = token.slice(separator + 1);
+  if (revokedSessionSignatures.has(signature)) return null;
   const expected = crypto.createHmac("sha256", sessionSecret).update(encoded).digest("base64url");
   if (!safeEqual(signature, expected)) return null;
   try {
@@ -1236,7 +1249,11 @@ const server = createServer(async (req, res) => {
         return;
       }
       const expiresAt = Date.now() + sessionTtlSeconds * 1000;
-      const token = signSession({ label: user.label, expiresAt });
+      const token = signSession({
+        label: user.label,
+        expiresAt,
+        jti: crypto.randomBytes(9).toString("base64url")
+      });
       res.setHeader("set-cookie", sessionCookie(req, token, sessionTtlSeconds));
       jsonResponse(res, 200, {
         ok: true,
@@ -1247,6 +1264,10 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/access/logout") {
+      const session = readSession(req);
+      if (session) {
+        revokeSessionToken(parseCookies(req).mindiou_session, session.expiresAt);
+      }
       res.setHeader("set-cookie", sessionCookie(req, "", 0));
       jsonResponse(res, 200, { ok: true });
       return;

@@ -128,4 +128,44 @@ describe("early-access authentication", () => {
     expect(cookie).toContain("mindiou_session=");
     expect(cookie).toContain("Max-Age=0");
   });
+
+  it("rejects the logged-out session token when replayed", async () => {
+    const login = await fetch(`${BASE}/api/access/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "invite-alice" })
+    });
+    expect(login.status).toBe(200);
+    const cookie = (login.headers.get("set-cookie") || "").split(";")[0];
+
+    expect(
+      (await fetch(`${BASE}/api/access/session`, { headers: { cookie } })).status
+    ).toBe(200);
+
+    const logout = await fetch(`${BASE}/api/access/logout`, {
+      method: "POST",
+      headers: { cookie }
+    });
+    expect(logout.status).toBe(200);
+
+    expect(
+      (await fetch(`${BASE}/api/access/session`, { headers: { cookie } })).status
+    ).toBe(401);
+
+    const relogin = await fetch(`${BASE}/api/access/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "invite-alice" })
+    });
+    expect(relogin.status).toBe(200);
+    const newCookie = (relogin.headers.get("set-cookie") || "").split(";")[0];
+    expect(newCookie).not.toBe(cookie);
+    expect(
+      (await fetch(`${BASE}/api/access/session`, { headers: { cookie: newCookie } })).status
+    ).toBe(200);
+
+    expect(
+      (await fetch(`${BASE}/api/access/session`, { headers: { cookie } })).status
+    ).toBe(401);
+  });
 });
