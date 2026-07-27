@@ -10,6 +10,7 @@ export type VoiceCommand =
   | "known"
   | "skip"
   | "end"
+  | "retry"
   | "answer";
 
 export function commandFromUtterance(value: string): VoiceCommand {
@@ -25,6 +26,7 @@ export function commandFromUtterance(value: string): VoiceCommand {
   if (["会了", "懂了", "got it", "known"].includes(text)) return "known";
   if (["跳过", "skip"].includes(text)) return "skip";
   if (["结束清偿", "结束学习", "完成清偿", "结束", "end", "stop"].includes(text)) return "end";
+  if (["重试", "再试一次", "retry", "try again"].includes(text)) return "retry";
   return "answer";
 }
 
@@ -70,6 +72,8 @@ export function controlFromCommand(command: VoiceCommand): ControlAction | "" {
     case "known":
     case "end":
       return "end";
+    case "retry":
+      return "retry";
     default:
       return "";
   }

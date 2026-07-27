@@ -264,3 +264,142 @@ describe("referenceFromSession", () => {
     expect(referenceFromSession(makeSession({ scaffold: undefined }), "回退文本")).toBe("回退文本");
   });
 });
+
+describe("Mentra 清偿状态机 · 异常与边界", () => {
+  it("后端会话缺少 clearanceQuestion 时回退到入口卡片 prompt，且不泄露 scaffold", async () => {
+    const screens: ScreenSpec[] = [];
+    const runtime = new ClearanceRuntime({
+      show: s => screens.push(s),
+      fetchEntry: async () => entry,
+      startSession: async () => makeSession({ clearanceQuestion: "" }),
+      submitAnswer: async () => { throw new Error("unreachable"); },
+      endSession: async () => { throw new Error("unreachable"); }
+    });
+    await runtime.dispatch({ type: "start" });
+    expect(runtime.getState().phase).toBe("question");
+    const text = `${screens.at(-1)?.title}\n${screens.at(-1)?.text}`;
+    expect(text).toContain("可达的 API 在 WebView 里仍可能失败");
+    expect(text).not.toContain(SCAFFOLD_POINT);
+  });
+
+  it("AI 反馈字段全部缺失时给出保守占位而非空白屏", async () => {
+    const screens: ScreenSpec[] = [];
+    const runtime = new ClearanceRuntime({
+      show: s => screens.push(s),
+      fetchEntry: async () => entry,
+      startSession: async () => makeSession(),
+      submitAnswer: async () => ({
+        attempt: { id: "a1", createdAt: "", answer: "x", analysis: analysis({ feedback: "", teaching: "", nextQuestion: "" }) },
+        session: makeSession({ state: "answered" })
+      }),
+      endSession: async () => { throw new Error("unreachable"); }
+    });
+    await runtime.dispatch({ type: "start" });
+    await runtime.handleUtterance("任何回答");
+    expect(runtime.getState().phase).toBe("feedback");
+    expect(screens.at(-1)?.text).toContain("已记录本次回答。");
+  });
+
+  it("结算结果字段缺失时不崩溃，仍展示参考答案与谨慎状态", async () => {
+    const screens: ScreenSpec[] = [];
+    const runtime = new ClearanceRuntime({
+      show: s => screens.push(s),
+      fetchEntry: async () => entry,
+      startSession: async () => makeSession(),
+      submitAnswer: async () => { throw new Error("unreachable"); },
+      endSession: async () => ({
+        result: { status: "needs_verification" } as never,
+        session: makeSession({ state: "ended" })
+      })
+    });
+    await runtime.dispatch({ type: "start" });
+    await runtime.handleUtterance("结束");
+    expect(runtime.getState().phase).toBe("conclusion");
+    const text = screens.map(s => `${s.title}\n${s.text}`).join("\n");
+    expect(text).toContain(`参考答案：${SCAFFOLD_POINT}`);
+    expect(text).toContain("需要查证");
+  });
+
+  it("结算会话未揭示 scaffold 时参考答案回退到教学文本", async () => {
+    const screens: ScreenSpec[] = [];
+    const runtime = new ClearanceRuntime({
+      show: s => screens.push(s),
+      fetchEntry: async () => entry,
+      startSession: async () => makeSession(),
+      submitAnswer: async () => ({
+        attempt: { id: "a1", createdAt: "", answer: "x", analysis: analysis({ teaching: "教学回退文本" }) },
+        session: makeSession({ state: "answered" })
+      }),
+      endSession: async () => ({
+        result: { status: "needs_practice", sourceReviewRequired: false, evidence: [], demonstrated: [], remainingGaps: [], nextRecommendation: "" },
+        session: makeSession({ state: "ended", scaffold: undefined })
+      })
+    });
+    await runtime.dispatch({ type: "start" });
+    await runtime.handleUtterance("回答一下");
+    await runtime.handleUtterance("结束");
+    const text = screens.map(s => `${s.title}\n${s.text}`).join("\n");
+    expect(text).toContain("参考答案：教学回退文本");
+  });
+
+  it("反馈/结算阶段的语音不会变成新的回答提交", async () => {
+    const h = makeHarness();
+    await h.runtime.dispatch({ type: "start" });
+    await h.runtime.handleUtterance("第一次回答");
+    expect(h.runtime.getState().phase).toBe("feedback");
+    const before = h.calls.filter(c => c.startsWith("submitAnswer")).length;
+    await h.runtime.handleUtterance("这是一段很长的解释不应该被当作新回答提交因为当前不在问答阶段");
+    expect(h.calls.filter(c => c.startsWith("submitAnswer")).length).toBe(before);
+  });
+
+  it("纯空白语音被忽略，不产生提交", async () => {
+    const h = makeHarness();
+    await h.runtime.dispatch({ type: "start" });
+    await h.runtime.handleUtterance("   ");
+    expect(h.calls.filter(c => c.startsWith("submitAnswer")).length).toBe(0);
+    expect(h.runtime.getState().phase).toBe("question");
+  });
+
+  it("提交失败后重试会重新提交同一回答", async () => {
+    const h = makeHarness();
+    await h.runtime.dispatch({ type: "start" });
+    h.failNext.set("submitAnswer", new Error("socket hangup"));
+    await h.runtime.handleUtterance("网络层面的回答");
+    expect(h.runtime.getState().phase).toBe("error");
+    await h.runtime.handleUtterance("重试");
+    expect(h.calls.filter(c => c === "submitAnswer:网络层面的回答").length).toBe(2);
+    expect(h.runtime.getState().phase).toBe("feedback");
+  });
+
+  it("结算失败后重试会重新调用 endSession", async () => {
+    const h = makeHarness();
+    await h.runtime.dispatch({ type: "start" });
+    h.failNext.set("endSession", new Error("503"));
+    await h.runtime.handleUtterance("结束");
+    expect(h.runtime.getState().phase).toBe("error");
+    await h.runtime.handleGesture("TAP");
+    expect(h.calls.filter(c => c === "endSession:s1").length).toBe(2);
+    expect(h.runtime.getState().phase).toBe("conclusion");
+  });
+
+  it("没有下一张卡片时，结算后继续会重新读取入口", async () => {
+    const screens: ScreenSpec[] = [];
+    const calls: string[] = [];
+    const singleEntry = { ...entry, nextCardId: null } as never;
+    const runtime = new ClearanceRuntime({
+      show: s => screens.push(s),
+      fetchEntry: async () => { calls.push("fetchEntry"); return singleEntry; },
+      startSession: async () => { calls.push("startSession"); return makeSession(); },
+      submitAnswer: async () => { throw new Error("unreachable"); },
+      endSession: async () => ({
+        result: { status: "provisionally_cleared", sourceReviewRequired: false, evidence: [], demonstrated: [], remainingGaps: [], nextRecommendation: "" },
+        session: makeSession({ state: "ended" })
+      })
+    });
+    await runtime.dispatch({ type: "start" });
+    await runtime.handleUtterance("结束");
+    expect(runtime.getState().phase).toBe("conclusion");
+    await runtime.handleGesture("TAP");
+    expect(calls.filter(c => c === "fetchEntry").length).toBe(2);
+  });
+});
