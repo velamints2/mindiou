@@ -12,3 +12,6 @@ npm-debug.log*
 # Eval run artifacts (samples stay tracked, outputs are temporary)
 evals/output-*.json
 evals/payload-*-input.json
+
+# Local proxy helper (developer-specific, not needed in repo)
+force-proxy.cjs
