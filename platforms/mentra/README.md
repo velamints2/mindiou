@@ -51,12 +51,103 @@ webhook 回调地址需指向本服务的公网 URL。
 
 ```bash
 npm run check   # tsc --noEmit
-npm test        # vitest，38 例（含黄金路径端到端显示序列）
+npm test        # vitest，47 例（含黄金路径端到端显示序列、异常恢复、协议健壮性）
 npm run build   # tsc 产出 dist/
 ```
 
+## 部署
+
+### 本地开发
+
+```bash
+npm install
+cp .env.example .env   # 填写下方四个必填项
+npm run build
+npm start              # 默认端口 7010
+```
+
+本地隧道（供 Mentra Cloud webhook 回调）：
+
+```bash
+# 方式一：cloudflared（推荐，无需账号）
+cloudflared tunnel --url http://localhost:7010
+
+# 方式二：ngrok
+ngrok http 7010
+```
+
+将隧道公网 URL + `/webhook` 填入 Mentra Console 的 Webhook URL 字段。
+
+### 生产部署（复用 MindIOU 服务器）
+
+TPA 与 MindIOU 主后端共用同一台服务器，但监听不同端口（主后端 8794，TPA 7010）。
+
+```bash
+# 1. 克隆代码到服务器
+cd /opt/mindiou/evenhub-g2-learning/platforms/mentra
+npm ci --production=false && npm run build
+
+# 2. 配置环境变量（写入 /etc/mindiou.env 或 systemd EnvironmentFile）
+#    详见 .env.example，不得在代码或 git 中存储真实密钥
+
+# 3. 启动（推荐 systemd 管理进程）
+#    见下方 systemd unit 模板
+
+# 4. Nginx 反代（已在 deploy/nginx-mindiou-locations.conf 中配置
+#    /mindiou-api/api/mentra/clearance-entry，但 TPA webhook 需单独暴露）
+```
+
+systemd unit 模板：
+
+```ini
+[Unit]
+Description=MindIOU Mentra TPA
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mindiou/evenhub-g2-learning/platforms/mentra
+EnvironmentFile=/etc/mindiou.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 启动 / 停止 / 日志 / 回滚
+
+```bash
+sudo systemctl start mindiou-mentra      # 启动
+sudo systemctl stop mindiou-mentra       # 停止
+sudo journalctl -u mindiou-mentra -f     # 实时日志
+sudo systemctl restart mindiou-mentra    # 重启
+# 回滚：git checkout <上一个 commit> && npm ci && npm run build && sudo systemctl restart mindiou-mentra
+```
+
+### Mentra Console 注册字段清单
+
+在 https://console.mentra.glass 创建 App 时填写：
+
+| 字段 | 值 | 说明 |
+| --- | --- | --- |
+| Package Name | `com.mindiou.clearance` | 与 `MENTRA_PACKAGE_NAME` 一致 |
+| Webhook URL | `https://<公网域名>/webhook` | 需公网 HTTPS 可达 |
+| API Key | （Console 生成） | 填入服务端 `MENTRA_API_KEY` |
+| Display Name | MindIOU 认知清偿 | 眼镜 Launcher 显示名 |
+| Description | 认知欠条清偿：看问题→语音回答→AI反馈→结算 | |
+
+### 日志安全
+
+- 所有日志仅输出 error.message 和启动信息，**不包含用户语音原文、回答内容或 API 密钥**。
+- unhandledRejection / uncaughtException 仅记录错误消息字符串，不 dump 堆栈中的请求体。
+- 遵循 MindIOU 规则：不把 API Key 写入代码、日志或前端 bundle。
+
 ## 验证边界
 
-- 单测证明状态机、显示序列、错误态、重试与重入逻辑。
-- 浏览器/模拟器不在本包范围内；G2 真机配对、麦克风、触控、延迟、
-  伴随手机网络路由与退出行为必须在真机上验证后才能宣称可用。
+- 单测证明状态机、显示序列、错误态、重试与重入逻辑（47 例 VERIFIED）。
+- TPA 本地启动 + 健康检查 + webhook POST 返回 200 已在本地验证（VERIFIED）。
+- G2 真机配对、麦克风、触控、延迟、伴随手机网络路由与退出行为必须在真机上验证后才能宣称可用（BLOCKED_EXTERNAL）。
