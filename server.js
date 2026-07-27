@@ -21,6 +21,8 @@ import {
   ensureLearnerFacingLanguage
 } from "./mvp1-demo-fallback.js";
 
+import { handleAdminRoute } from "./admin-backend-patch.js";
+
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
 const apiToken = process.env.LEARNING_API_TOKEN || "";
@@ -1327,6 +1329,19 @@ const server = createServer(async (req, res) => {
       }
       res.setHeader("set-cookie", sessionCookie(req, "", 0));
       jsonResponse(res, 200, { ok: true });
+      return;
+    }
+
+    // ── 运营后台路由（独立鉴权，不走邀请码）──
+    if (handleAdminRoute(req, res, url.pathname, req.method, {
+      mvp0Store, spiralStore, eventLog, mvp1Sessions
+    })) return;
+
+    // ── 公开埋点端点：未登录访客也可发送，不鉴权 ──
+    // 前端 tracker.ts 用 sendBeacon 发送 page_enter/page_leave，无法带 Authorization 头
+    if (req.method === "POST" && url.pathname === "/api/learn/events") {
+      const trackingPayload = parseJson(await readBody(req));
+      jsonResponse(res, 200, { ok: true, event: recordEvent(trackingPayload) });
       return;
     }
 
