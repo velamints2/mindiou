@@ -189,6 +189,29 @@ type AppState = {
 
 // ── Constants ──
 
+/** 固定演示样本：服务器事故排查的 AI 辅助记录。
+ *  配合 SPIRAL_DISABLE_AI=1 + MVP1_DEMO_FALLBACK=1 可稳定复现完整清偿链路。 */
+const DEMO_SAMPLE_TEXT = `用户：线上服务器突然响应变慢，top 看到 load average 飙到 40+，很多进程卡在 D 状态。
+iostat 显示 %iowait 超过 60%。我让 AI 帮我排查。
+
+AI：根据你描述的症状（高 load、D 状态进程、高 iowait），这通常是磁盘 I/O 瓶颈。
+建议检查：
+1. dmesg 是否有磁盘错误
+2. iotop 找出 I/O 最大的进程
+3. 检查是否有大量 swap 导致 thrashing
+
+用户：dmesg 没有磁盘错误。iotop 显示 nginx worker 进程在大量写日志。
+我直接重启了 nginx，负载暂时降下来了。
+
+AI：重启 nginx 只是缓解了症状。根因可能是：
+1. 日志写入没有异步化
+2. 磁盘本身性能不足
+3. 日志级别设置过低导致写入量过大
+建议长期修复：启用日志缓冲、升级磁盘、或将日志写入远程日志服务。
+
+用户：好的，我先把日志级别调高，重启后负载正常了。
+但我不确定根因是否真的修复了，因为只是减少了写入量而不是解决了 I/O 瓶颈。`
+
 const ARTIFACT_TYPES = [
   { value: 'chatgpt', label: 'ChatGPT 对话' },
   { value: 'claude', label: 'Claude 对话' },
@@ -560,6 +583,20 @@ function renderInputForm(): HTMLElement {
       '公开体验环境：请勿粘贴密码、密钥、客户隐私或其他敏感内容。报告仅凭当前浏览器保存的随机 ID 恢复。'
     ))
   }
+
+  // 演示样本按钮：一键填入固定文本，配合 SPIRAL_DISABLE_AI=1 + MVP1_DEMO_FALLBACK=1 可稳定复现
+  const demoBar = el('div', 'demo-bar')
+  const demoBtn = document.createElement('button')
+  demoBtn.className = 'btn-demo-sample'
+  demoBtn.textContent = '使用演示样本（服务器事故排查）'
+  demoBtn.onclick = () => {
+    state._lastInputText = DEMO_SAMPLE_TEXT
+    state.detectedType = 'codex'
+    state.typeEditing = false
+    render()
+  }
+  demoBar.appendChild(demoBtn)
+  form.appendChild(demoBar)
 
   const textarea = document.createElement('textarea')
   textarea.placeholder = '粘贴 AI 辅助工作的材料：ChatGPT/Claude 对话、AI 生成的方案、黑客松记录、会议纪要…'
