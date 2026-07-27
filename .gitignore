@@ -8,3 +8,7 @@ tmp/
 !.env.example
 glasses_*.png
 npm-debug.log*
+
+# Eval run artifacts (samples stay tracked, outputs are temporary)
+evals/output-*.json
+evals/payload-*-input.json
