@@ -8,7 +8,8 @@ export default defineConfig({
       input: {
         main: "index.html",
         desktop: "desktop.html",
-        report: "report.html"
+        report: "report.html",
+        mvp1: "mvp1.html"
       }
     }
   },

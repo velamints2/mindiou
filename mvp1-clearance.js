@@ -243,11 +243,13 @@ export function getClearanceAnalysisPrompt() {
 }
 
 export function getClearanceResearchPrompt(request) {
+  const questionText = `${request?.originalQuestion || ""} ${request?.targetDebt || ""}`;
+  const needsG2Disambiguation = /\bG2\b/i.test(questionText);
   return [
     "Research the minimum external knowledge needed to evaluate one cognitive-debt clearance answer.",
     "Prefer official documentation and primary sources. Use ordinary web sources only when needed.",
     "Resolve product names from the supplied practice context and reject same-name but unrelated products.",
-    "For this project, G2 means Even Realities G2 smart glasses unless the context explicitly says it is a chart library.",
+    ...(needsG2Disambiguation ? ["For this project, G2 means Even Realities G2 smart glasses unless the context explicitly says it is a chart library."] : []),
     "Do not write a broad tutorial. Produce a compact evidence brief with 3-6 essential points.",
     "Explain which source supports each point and include normal inline citations.",
     "Do not return JSON; citations and readable evidence are more important than formatting.",

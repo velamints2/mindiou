@@ -6,6 +6,7 @@ import { createMvp1Store } from "./mvp1-store.js";
 import { createAuthStore } from "./auth-store.js";
 import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport } from "./mvp0-report.js";
+import { generateCollaborationTimeline } from "./mvp0-timeline.js";
 import { feynmanFollowUp } from "./mvp0-followup.js";
 import {
   endClearanceSession,
@@ -25,6 +26,15 @@ import {
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
 const apiToken = process.env.LEARNING_API_TOKEN || "";
+const earlyAccessCodes = parseEarlyAccessCodes(
+  process.env.MINDIOU_EARLY_ACCESS_CODES || process.env.MINDIOU_ACCESS_CODE || ""
+);
+const sessionSecret = process.env.MINDIOU_SESSION_SECRET || "";
+const configuredSessionTtl = Number(process.env.MINDIOU_SESSION_TTL_SECONDS || 60 * 60 * 24 * 7);
+const sessionTtlSeconds = Number.isFinite(configuredSessionTtl)
+  ? Math.min(60 * 60 * 24 * 30, Math.max(300, configuredSessionTtl))
+  : 60 * 60 * 24 * 7;
+const secureSessionCookie = process.env.MINDIOU_COOKIE_SECURE === "1";
 const configuredEnv = (name, fallback = "") => Object.hasOwn(process.env, name)
   ? process.env[name] || ""
   : fallback;
@@ -125,7 +135,7 @@ function jsonResponse(res, statusCode, payload, extraHeaders = {}) {
     "content-length": Buffer.byteLength(body),
     "cache-control": "no-store",
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
     "access-control-allow-headers": "content-type,authorization,cookie",
     "access-control-allow-credentials": "true",
     ...extraHeaders
@@ -136,12 +146,116 @@ function jsonResponse(res, statusCode, payload, extraHeaders = {}) {
 function optionsResponse(res) {
   res.writeHead(204, {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
     "access-control-allow-headers": "content-type,authorization,cookie",
     "access-control-allow-credentials": "true",
     "access-control-max-age": "86400"
   });
   res.end();
+}
+
+function parseEarlyAccessCodes(value) {
+  return String(value || "")
+    .split(",")
+    .map((entry, index) => {
+      const trimmed = entry.trim();
+      if (!trimmed) return null;
+      const separator = trimmed.indexOf(":");
+      if (separator < 1) {
+        return { label: `early-user-${index + 1}`, code: trimmed };
+      }
+      return {
+        label: clean(trimmed.slice(0, separator)).slice(0, 80) || `early-user-${index + 1}`,
+        code: trimmed.slice(separator + 1).trim()
+      };
+    })
+    .filter(entry => entry?.code);
+}
+
+function safeEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function parseCookies(req) {
+  return String(req.headers.cookie || "")
+    .split(";")
+    .reduce((cookies, part) => {
+      const separator = part.indexOf("=");
+      if (separator < 1) return cookies;
+      const key = part.slice(0, separator).trim();
+      const value = part.slice(separator + 1).trim();
+      if (key) cookies[key] = value;
+      return cookies;
+    }, {});
+}
+
+const revokedSessionSignatures = new Map();
+
+function revokeSessionToken(token, expiresAt) {
+  const separator = String(token || "").lastIndexOf(".");
+  if (separator < 1) return;
+  const now = Date.now();
+  for (const [signature, expiry] of revokedSessionSignatures) {
+    if (expiry <= now) revokedSessionSignatures.delete(signature);
+  }
+  revokedSessionSignatures.set(String(token).slice(separator + 1), expiresAt || now);
+}
+
+function signSession(payload) {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = crypto.createHmac("sha256", sessionSecret).update(encoded).digest("base64url");
+  return `${encoded}.${signature}`;
+}
+
+function readSession(req) {
+  if (!sessionSecret) return null;
+  const token = parseCookies(req).mindiou_session || "";
+  const separator = token.lastIndexOf(".");
+  if (separator < 1) return null;
+  const encoded = token.slice(0, separator);
+  const signature = token.slice(separator + 1);
+  if (revokedSessionSignatures.has(signature)) return null;
+  const expected = crypto.createHmac("sha256", sessionSecret).update(encoded).digest("base64url");
+  if (!safeEqual(signature, expected)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    if (!payload?.label || !Number.isFinite(payload.expiresAt) || payload.expiresAt <= Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function earlyAccessSessionCookie(req, value, maxAge) {
+  const requestIsHttps = String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
+  return [
+    `mindiou_session=${value}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    secureSessionCookie || requestIsHttps ? "Secure" : "",
+    `Max-Age=${maxAge}`
+  ].filter(Boolean).join("; ");
+}
+
+function findEarlyAccessUser(code) {
+  return earlyAccessCodes.find(entry => safeEqual(entry.code, code)) || null;
+}
+
+function accessControlEnabled() {
+  return Boolean(apiToken || earlyAccessCodes.length);
+}
+
+function authorizeRequest(req) {
+  const header = req.headers.authorization || "";
+  if (apiToken && safeEqual(header, `Bearer ${apiToken}`)) {
+    return { label: "device-or-service", method: "bearer" };
+  }
+  const session = readSession(req);
+  return session ? { label: session.label, method: "session" } : null;
 }
 
 function readBody(req) {
@@ -165,6 +279,8 @@ function readBody(req) {
 // behavior.
 function requireToken(req, res) {
   if (isAdminToken(req)) return true;
+  if (!accessControlEnabled()) return true;
+  if (authorizeRequest(req)) return true;
   jsonResponse(res, 401, { ok: false, error: "Invalid token" });
   return false;
 }
@@ -216,18 +332,7 @@ function clean(value) {
 const sessionCookieName = "session";
 const sessionCookieMaxAge = 604800; // 7 days, matches auth-store session TTL
 
-function parseCookies(req) {
-  const cookies = {};
-  for (const part of String(req.headers.cookie || "").split(";")) {
-    const index = part.indexOf("=");
-    if (index < 0) continue;
-    const name = part.slice(0, index).trim();
-    if (name) cookies[name] = part.slice(index + 1).trim();
-  }
-  return cookies;
-}
-
-function sessionCookie(sessionId) {
+function authSessionCookie(sessionId) {
   const parts = [
     `${sessionCookieName}=${sessionId}`,
     "HttpOnly",
@@ -254,11 +359,14 @@ function clearSessionCookie() {
 function requireAuth(req, res) {
   const sessionId = parseCookies(req)[sessionCookieName] || "";
   const user = sessionId ? authStore.getUserBySession(sessionId) : null;
-  if (!user) {
-    jsonResponse(res, 401, { ok: false, error: "Authentication required" });
-    return null;
+  if (user) return user;
+  // Fallback: accept legacy early-access session (invite-code cookie)
+  const earlySession = readSession(req);
+  if (earlySession) {
+    return { id: `early-access:${earlySession.label}`, email: null };
   }
-  return user;
+  jsonResponse(res, 401, { ok: false, error: "Authentication required" });
+  return null;
 }
 
 function loadOwnedMvp1Session(id, userId) {
@@ -540,6 +648,37 @@ async function researchClearanceContext(request) {
     if (!mvp1DemoFallback) throw error;
     return createDemoResearchFallback(request, error);
   }
+}
+
+// MVP-0 bounded research adapter: wraps raw web research into the
+// (query) => { sources: [{title,url,snippet}] } shape expected by the
+// multi-step report pipeline. Returns null when research is not configured,
+// which makes the pipeline mark research as "skipped" transparently.
+const mvp0ResearchFn = (researchProvider === "openai" && researchApiKey && researchBaseUrl)
+  ? async query => {
+      const evidence = await rawWebResearch({
+        originalQuestion: query,
+        purpose: "MVP-0 diagnostic report bounded research"
+      });
+      return {
+        sources: (evidence.sources || []).map(source => ({
+          title: source.title || "",
+          url: source.url || "",
+          snippet: clean(source.claim || evidence.researchText || "").slice(0, 300)
+        }))
+      };
+    }
+  : null;
+
+function confusionsFromTimeline(timeline) {
+  const steps = Array.isArray(timeline?.steps) ? timeline.steps : [];
+  return steps
+    .filter(step => clean(step?.userConfusion || ""))
+    .map(step => ({
+      stepId: clean(step.id || ""),
+      stepTitle: clean(step.title || ""),
+      text: clean(step.userConfusion || "")
+    }));
 }
 
 async function checkAiConnectivity() {
@@ -1079,6 +1218,31 @@ function rokidCard(card) {
   };
 }
 
+function clearanceEntryPayload(platform) {
+  const report = mvp0Store.listReports().find(item => item.sections?.feynmanCards?.length);
+  if (!report) {
+    return { ok: true, platform, entry: null };
+  }
+  const cards = report.sections.feynmanCards;
+  const card = cards.find(item => !item.userAnswer) || cards[0];
+  const cardIndex = cards.findIndex(item => item.id === card.id);
+  return {
+    ok: true,
+    platform,
+    entry: {
+      reportId: report.id,
+      cardId: card.id,
+      nextCardId: cards.length > 1 ? cards[(cardIndex + 1) % cards.length].id : "",
+      createdAt: report.createdAt,
+      domain: clean(report.analysis?.userCapability?.currentDomain || "认知债务"),
+      target: clean(card.target || "理解缺口"),
+      prompt: clean(card.prompt || "请用自己的话解释这个问题。"),
+      cardNumber: cardIndex + 1,
+      cardCount: cards.length
+    }
+  };
+}
+
 function rokidSession(duration, demo = false) {
   const session = spiralStore.buildSession(duration);
   const sourceCards = demo ? rokidDemoCards : session.cards;
@@ -1223,7 +1387,7 @@ const server = createServer(async (req, res) => {
       const payload = parseJson(await readBody(req));
       try {
         const { user, sessionId } = authStore.register(payload.email, payload.password);
-        jsonResponse(res, 201, { ok: true, user }, { "set-cookie": sessionCookie(sessionId) });
+        jsonResponse(res, 201, { ok: true, user }, { "set-cookie": authSessionCookie(sessionId) });
       } catch (error) {
         const status = /already registered/i.test(String(error.message)) ? 409 : 400;
         jsonResponse(res, status, { ok: false, error: error.message });
@@ -1234,7 +1398,7 @@ const server = createServer(async (req, res) => {
       const payload = parseJson(await readBody(req));
       try {
         const { user, sessionId } = authStore.login(payload.email, payload.password);
-        jsonResponse(res, 200, { ok: true, user }, { "set-cookie": sessionCookie(sessionId) });
+        jsonResponse(res, 200, { ok: true, user }, { "set-cookie": authSessionCookie(sessionId) });
       } catch {
         jsonResponse(res, 401, { ok: false, error: "Invalid email or password" });
       }
@@ -1276,6 +1440,54 @@ const server = createServer(async (req, res) => {
         jsonResponse(res, 404, { ok: false, error: "Device token not found" });
         return;
       }
+      jsonResponse(res, 200, { ok: true });
+      return;
+    }
+
+    // ── Legacy early-access login (kept for backward compatibility) ──
+
+    if (req.method === "POST" && url.pathname === "/api/access/login") {
+      if (!earlyAccessCodes.length) {
+        jsonResponse(res, 503, { ok: false, error: "体验邀请码登录尚未启用。" });
+        return;
+      }
+      if (Buffer.byteLength(sessionSecret) < 32) {
+        jsonResponse(res, 503, { ok: false, error: "体验会话尚未完成服务端配置。" });
+        return;
+      }
+      let payload;
+      try {
+        payload = parseJson(await readBody(req));
+      } catch {
+        jsonResponse(res, 400, { ok: false, error: "登录请求格式无效。" });
+        return;
+      }
+      const user = findEarlyAccessUser(String(payload.code || "").trim());
+      if (!user) {
+        jsonResponse(res, 401, { ok: false, error: "邀请码无效，请联系邀请人确认。" });
+        return;
+      }
+      const expiresAt = Date.now() + sessionTtlSeconds * 1000;
+      const token = signSession({
+        label: user.label,
+        expiresAt,
+        jti: crypto.randomBytes(9).toString("base64url")
+      });
+      res.setHeader("set-cookie", earlyAccessSessionCookie(req, token, sessionTtlSeconds));
+      jsonResponse(res, 200, {
+        ok: true,
+        user: { label: user.label },
+        expiresAt: new Date(expiresAt).toISOString()
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/access/logout") {
+      const session = readSession(req);
+      if (session) {
+        revokeSessionToken(parseCookies(req).mindiou_session, session.expiresAt);
+      }
+      res.setHeader("set-cookie", earlyAccessSessionCookie(req, "", 0));
       jsonResponse(res, 200, { ok: true });
       return;
     }
@@ -1404,8 +1616,18 @@ const server = createServer(async (req, res) => {
       // ── MVP-0: cognitive-debt clearance report ──
 
       if (url.pathname === "/api/mvp0/report") {
-        const artifactText = String(payload.artifactText || "").trim();
-        let artifactType = clean(payload.artifactType || "");
+        let draft = null;
+        const draftId = clean(payload.draftId || "");
+        if (draftId) {
+          try {
+            draft = mvp0Store.getDraft(draftId);
+          } catch (error) {
+            jsonResponse(res, 404, { ok: false, error: error.message });
+            return;
+          }
+        }
+        const artifactText = String(draft ? draft.input.artifactText : payload.artifactText || "").trim();
+        let artifactType = clean(draft ? draft.input.artifactType : payload.artifactType || "");
         if (!artifactText) {
           jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
           return;
@@ -1414,10 +1636,22 @@ const server = createServer(async (req, res) => {
         if (!artifactType) {
           artifactType = detectArtifactType(artifactText);
         }
+        const timeline = draft ? draft.timeline : (payload.timeline && typeof payload.timeline === "object" ? payload.timeline : null);
+        const confusions = draft
+          ? confusionsFromTimeline(draft.timeline)
+          : (Array.isArray(payload.confusions) ? payload.confusions : []);
         const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-        const report = await generateClearanceReport(artifactText, artifactType, chatFn);
+        const report = await generateClearanceReport(artifactText, artifactType, chatFn, {
+          researchFn: mvp0ResearchFn,
+          timeline,
+          confusions
+        });
+        if (draft) report.draftId = draft.id;
         report.userId = user.id;
         const saved = await mvp0Store.saveReport(report);
+        if (draft) {
+          await mvp0Store.attachReportToDraft(draft.id, saved.id);
+        }
         const isFallback = Boolean(saved.generation?.fallback);
         jsonResponse(res, 200, {
           ok: true,
@@ -1537,6 +1771,15 @@ const server = createServer(async (req, res) => {
     }
 
     if (!requireToken(req, res)) return;
+    if (req.method === "GET" && url.pathname === "/api/access/session") {
+      const identity = authorizeRequest(req) || { label: "local-user", method: "disabled" };
+      jsonResponse(res, 200, {
+        ok: true,
+        user: { label: identity.label },
+        method: identity.method
+      });
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/learn/events") {
       const since = url.searchParams.get("since");
       const events = since ? eventLog.filter(event => event.at > since) : eventLog.slice(-80);
@@ -1581,13 +1824,100 @@ const server = createServer(async (req, res) => {
       );
       return;
     }
+    if (req.method === "GET" && url.pathname === "/api/mentra/clearance-entry") {
+      jsonResponse(res, 200, clearanceEntryPayload("mentra"));
+      return;
+    }
 
-    if (req.method !== "POST") {
+    if (req.method === "GET" && url.pathname === "/api/mvp0/drafts") {
+      jsonResponse(res, 200, { ok: true, drafts: mvp0Store.listDrafts() });
+      return;
+    }
+    const mvp0DraftMatch = url.pathname.match(/^\/api\/mvp0\/drafts\/([^/]+)$/);
+    if (req.method === "GET" && mvp0DraftMatch) {
+      try {
+        const draft = mvp0Store.getDraft(decodeURIComponent(mvp0DraftMatch[1]));
+        jsonResponse(res, 200, { ok: true, draft });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (req.method !== "POST" && req.method !== "PATCH") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
       return;
     }
 
     const payload = parseJson(await readBody(req));
+
+    // ── MVP-0: collaboration timeline (step 1 of the report pipeline) ──
+
+    if (req.method === "POST" && url.pathname === "/api/mvp0/timelines") {
+      const artifactText = String(payload.artifactText || "").trim();
+      let artifactType = clean(payload.artifactType || "");
+      if (!artifactText) {
+        jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
+        return;
+      }
+      if (!artifactType) {
+        artifactType = detectArtifactType(artifactText);
+      }
+      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+      const timeline = await generateCollaborationTimeline(artifactText, artifactType, chatFn);
+      const draft = await mvp0Store.saveDraft({
+        input: {
+          artifactText: artifactText.slice(0, 30000),
+          artifactType,
+          charCount: clean(artifactText).length
+        },
+        timeline: { steps: timeline.steps },
+        generation: timeline.generation,
+        status: "timeline"
+      });
+      const isFallback = Boolean(timeline.generation?.fallback);
+      jsonResponse(res, 200, {
+        ok: true,
+        draft,
+        timeline: { steps: draft.timeline.steps, ...(timeline.note ? { note: timeline.note } : {}) },
+        fallback: isFallback,
+        ...(isFallback && timeline.generation?.error ? { error: timeline.generation.error } : {}),
+        detectedType: artifactType
+      });
+      return;
+    }
+
+    if (req.method === "PATCH" && mvp0DraftMatch) {
+      try {
+        const draftId = decodeURIComponent(mvp0DraftMatch[1]);
+        const confusions = payload.confusions;
+        const confusionsValid =
+          confusions === undefined ||
+          (Array.isArray(confusions) &&
+            confusions.every(
+              entry =>
+                entry !== null &&
+                typeof entry === "object" &&
+                typeof entry.stepId === "string" &&
+                typeof entry.text === "string"
+            ));
+        if (!confusionsValid) {
+          jsonResponse(res, 400, {
+            ok: false,
+            error: "confusions must be an array of { stepId, text }"
+          });
+          return;
+        }
+        const draft = await mvp0Store.updateDraftConfusions(draftId, confusions);
+        jsonResponse(res, 200, { ok: true, draft });
+      } catch (error) {
+        jsonResponse(res, /not found/i.test(String(error.message)) ? 404 : 400, {
+          ok: false,
+          error: error.message
+        });
+      }
+      return;
+    }
 
     if (url.pathname === "/api/learn/events") {
       jsonResponse(res, 200, { ok: true, event: recordEvent(payload) });

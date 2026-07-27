@@ -33,6 +33,10 @@ button, input, textarea, select {
 
 .report-header {
   margin-bottom: 24px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .report-header h1 {
@@ -44,6 +48,112 @@ button, input, textarea, select {
   margin: 0;
   color: #7ba89e;
   font-size: 0.9rem;
+}
+
+.btn-logout {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid #28584e;
+  border-radius: 6px;
+  background: transparent;
+  color: #a9c8bf;
+  cursor: pointer;
+}
+
+.btn-logout:hover {
+  border-color: #4f8c7d;
+  color: #eef9f5;
+}
+
+/* ── Early access ── */
+
+.access-surface {
+  min-height: calc(100vh - 48px);
+  display: grid;
+  place-items: center;
+}
+
+.access-panel {
+  width: min(100%, 420px);
+  padding: 32px;
+  border: 1px solid #28584e;
+  border-radius: 8px;
+  background: #071310;
+}
+
+.access-brand {
+  margin-bottom: 36px;
+  color: #78d4bd;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.access-panel h1 {
+  margin: 0 0 8px;
+  font-size: 1.6rem;
+}
+
+.access-intro,
+.access-privacy {
+  color: #8fb0a7;
+  line-height: 1.6;
+}
+
+.access-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.access-form input {
+  min-width: 0;
+  flex: 1;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid #28584e;
+  border-radius: 6px;
+  background: #06100e;
+  color: #eef9f5;
+}
+
+.access-form input:focus {
+  outline: none;
+  border-color: #63b7a2;
+}
+
+.btn-access {
+  height: 44px;
+  padding: 0 18px;
+  border: 1px solid #d9fff5;
+  border-radius: 6px;
+  background: #d9fff5;
+  color: #06100e;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-access:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.access-status {
+  min-height: 22px;
+  margin: 10px 0 0;
+  color: #8fb0a7;
+  font-size: 0.86rem;
+}
+
+.access-status.error {
+  color: #ffadad;
+}
+
+.access-privacy {
+  margin: 28px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid #18352e;
+  font-size: 0.78rem;
 }
 
 /* ── Input form ── */
@@ -156,6 +266,28 @@ button, input, textarea, select {
 .btn-generate:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ── Demo ── */
+
+.demo-bar {
+  margin-bottom: 12px;
+}
+
+.btn-demo-sample {
+  background: transparent;
+  border: 1px dashed #4a6a8a;
+  color: #7ab;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.btn-demo-sample:hover {
+  border-color: #6ab;
+  color: #9cd;
 }
 
 /* ── Status ── */
@@ -503,4 +635,315 @@ button, input, textarea, select {
   font-size: 0.8rem;
   color: #3a5a4e;
   text-align: center;
+}
+
+/* ── Stage indicator (three-step flow) ── */
+
+.stage-indicator {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.stage-step {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #1a3a32;
+  background: #0a1815;
+  color: #5a8a7e;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.stage-step.active {
+  border-color: #3d8b7a;
+  background: #0e2a22;
+  color: #b0e0d0;
+  font-weight: 600;
+}
+
+/* ── Buttons: secondary / nav ── */
+
+.btn-secondary {
+  padding: 10px 18px;
+  border: 1px solid #28584e;
+  border-radius: 6px;
+  background: transparent;
+  color: #8ab0a4;
+  cursor: pointer;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #0e1f1a;
+  color: #b0e0d0;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.report-nav {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.report-nav .btn-secondary {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+}
+
+/* ── Timeline stage ── */
+
+.timeline-stage {
+  margin-bottom: 32px;
+}
+
+.timeline-intro h2 {
+  font-size: 1.1rem;
+  margin: 0 0 6px 0;
+  color: #b0e0d0;
+}
+
+.timeline-intro p {
+  margin: 0 0 16px 0;
+  color: #7ba89e;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.timeline-empty {
+  padding: 10px 12px;
+  border: 1px dashed #28584e;
+  border-radius: 6px;
+  color: #7ba89e;
+  font-size: 0.9rem;
+}
+
+.timeline-step {
+  position: relative;
+  padding: 14px 16px 14px 20px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  background: #0a1815;
+  border: 1px solid #152823;
+  border-left: 3px solid #1f5a4a;
+}
+
+.timeline-step-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.timeline-step-index {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  line-height: 24px;
+  text-align: center;
+  border-radius: 50%;
+  background: #1f5a4a;
+  color: #b0e0d0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.timeline-step-title {
+  font-weight: 600;
+  color: #d6eee6;
+}
+
+.timeline-step-aidid {
+  margin: 4px 0 8px 0;
+  font-size: 0.85rem;
+  color: #8ab0a4;
+}
+
+.timeline-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.timeline-tag {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.timeline-tag.action {
+  background: #12262a;
+  border: 1px solid #1f4a52;
+  color: #7ab8c8;
+}
+
+.timeline-tag.concept {
+  background: #1a2a1f;
+  border: 1px solid #2d5a3a;
+  color: #8ec89a;
+}
+
+.confusion-label {
+  display: block;
+  margin-top: 10px;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+  color: #d8b45c;
+}
+
+.confusion-input {
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid #4a3f22;
+  border-radius: 6px;
+  background: #0d0f08;
+  color: #f1e5c0;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.confusion-input:focus {
+  outline: none;
+  border-color: #d8b45c;
+}
+
+.timeline-actions {
+  margin-top: 16px;
+}
+
+/* ── Gaps: extended fields ── */
+
+.gap-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gap-head .item-text {
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.gap-confidence {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: #2a2411;
+  border: 1px solid #6b5a22;
+  color: #d8b45c;
+  white-space: nowrap;
+}
+
+.gap-detail {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: #a8c8be;
+}
+
+.gap-detail.gap-alt {
+  color: #8a7a9e;
+}
+
+.gap-signals {
+  margin: 6px 0 0 0;
+  padding-left: 18px;
+  font-size: 0.85rem;
+  color: #90aaa1;
+}
+
+.gap-signals li {
+  margin-bottom: 2px;
+}
+
+/* ── Capability: signal lines ── */
+
+.capability-signal-line {
+  margin: 6px 0 0 0;
+  font-size: 0.88rem;
+  color: #b0d0c6;
+}
+
+/* ── Research section ── */
+
+.research-section .research-status {
+  margin: 0 0 10px 0;
+  font-size: 0.85rem;
+  color: #7ba89e;
+}
+
+.research-section a {
+  color: #6ab8cb;
+  word-break: break-all;
+}
+
+.research-section a:hover {
+  color: #8ed8eb;
+}
+
+/* ── Cards: type pill & criteria ── */
+
+.card-type-pill {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: #1a2a3a;
+  border: 1px solid #2d4a6b;
+  color: #7ab0d8;
+}
+
+.card-criteria {
+  margin-bottom: 10px;
+  font-size: 0.82rem;
+}
+
+.card-criteria summary {
+  cursor: pointer;
+  color: #7ba89e;
+}
+
+.card-criteria summary:hover {
+  color: #b0e0d0;
+}
+
+.card-criteria .gap-signals {
+  margin-top: 6px;
+}
+
+/* ── Report container ── */
+
+.report-container {
+  margin-bottom: 32px;
+}
+
+@media (max-width: 560px) {
+  #app {
+    padding: 16px;
+  }
+
+  .access-surface {
+    min-height: calc(100vh - 32px);
+  }
+
+  .access-panel {
+    padding: 24px 20px;
+  }
+
+  .access-form {
+    flex-direction: column;
+  }
+
+  .btn-access {
+    width: 100%;
+  }
 }

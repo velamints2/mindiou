@@ -2,27 +2,35 @@ import { normalizeReport, generateFallbackReport } from "./mvp0-fallback.js";
 import { prepareArtifactForReport } from "./mvp0-artifact-preprocess.js";
 
 /**
- * MVP-0 clearance report generator.
+ * MVP-0 diagnostic clearance report generator (multi-step pipeline).
  *
- * Uses one chatJson() call to produce the complete six-section report.
- * Falls back to generateFallbackReport() when AI is unavailable or fails.
- * All output passes through normalizeReport() to guarantee schema compliance.
+ * Pipeline:
+ *   Step A "attribution + calibration"  — artifact kind, aiCompleted,
+ *     userContributed, cognitiveProcessesOutsourced, 5-dimension capability.
+ *   Step B "root gap synthesis"         — 2-4 root-capability dangerousGaps +
+ *     cognitiveStructure. USER CONFUSIONS from the collaboration timeline are
+ *     first-class input: every confusion must be addressed by exactly one gap
+ *     or explicitly explained as not-a-capability-gap.
+ *   Step C "bounded research"           — at most 3 queries via the injected
+ *     researchFn, per-query timeout, transparent degradation. Never fatal.
+ *   Step D "cards + next actions"       — 3-5 Feynman cards (cardType +
+ *     evaluationCriteria) and routed nextActions.
  *
- * @param {string} artifactText - Raw input text from the user
- * @param {string} artifactType - Type of artifact (chatgpt, claude, etc.)
- * @param {function|null} chatFn - Injected chatJson function for AI calls (null = fallback only)
- * @returns {Promise<object>} Normalized clearance report
+ * Any AI step failure produces generateFallbackReport() with
+ * generation.fallback=true, generation.error and generation.failedStep.
+ * Research failure alone never fails the report.
+ *
+ * Backward compatible: generateClearanceReport(text, type, chatFn) without
+ * options still works (no timeline, no user confusions, research skipped).
+ *
+ * Audience for every prompt: 产品经理 / 创业者 / 非工程背景的 AI 产品负责人.
+ * This is a diagnostic-teacher report about the USER's mental models,
+ * not an engineer's bug-risk list.
  */
 
 const MAX_TEXT = 30000;
-
-function withGenerationStatus(report, fallback, error = "") {
-  report.generation = {
-    fallback: Boolean(fallback),
-    error: truncate(error, 300)
-  };
-  return report;
-}
+const MAX_RESEARCH_QUERIES = 3;
+const DEFAULT_RESEARCH_TIMEOUT_MS = 15000;
 
 const VALID_ARTIFACT_TYPES = [
   "chatgpt", "claude", "cursor", "codex", "hackathon", "meeting", "article", "other"
@@ -37,192 +45,213 @@ function truncate(value, max) {
   return text.length > max ? text.slice(0, max) : text;
 }
 
-const capabilityCalibrationStep = [
-  "## Step 0: User Capability Calibration (do this BEFORE generating dangerousGaps or feynmanCards)",
+function withGenerationStatus(report, fallback, error = "", failedStep = "") {
+  report.generation = {
+    fallback: Boolean(fallback),
+    error: truncate(error, 300),
+    failedStep: truncate(failedStep, 40)
+  };
+  return report;
+}
+
+/* ── Prompts: the "诊断型教师" (diagnostic teacher), split across steps ── */
+
+const teacherPreamble = [
+  "你是 MindIOU 的诊断型教师。你的读者是产品经理、创业者、非工程背景的 AI 产品负责人，不是工程师。",
+  "你输出的不是工程风险清单，而是关于【用户能力与心智模型】的诊断报告。",
   "",
-  "Before generating gaps or cards, infer the user's capability layer in the current task domain.",
-  "Do NOT assume the user is an implementation-level engineer.",
-  "",
-  "Infer the user's capability from:",
-  "- what the user asks",
-  "- what the user does NOT ask",
-  "- whether the user provides macro goals or implementation details",
-  "- whether the user mentions files, commands, APIs, permissions, tests, logs, validation boundaries",
-  "- whether the user approves AI execution without asking for implementation reasoning",
-  "- whether the user provides product direction but not technical details",
-  "",
-  "Capability dimensions:",
-  "1. domainProductUnderstanding — does the user understand the problem domain?",
-  "2. aiAgentSteering — can the user direct AI effectively?",
-  "3. technicalDomainImplementation — can the user implement in this tech stack?",
-  "4. validationDebugging — can the user verify and debug AI output?",
-  "",
-  "Levels for each dimension:",
-  "L0 unfamiliar — does not know what the objects/concepts are",
-  "L1 macro requester — gives goals, delegates all implementation, asks no technical questions",
-  "L2 guided operator — can follow steps, cannot independently choose approach",
-  "L3 junior implementer — can implement with guidance, cannot debug independently",
-  "L4 independent implementer — can implement and debug independently",
-  "L5 architect/reviewer — can make architecture tradeoffs and review others' work",
-  "",
-  "Generate gaps and Feynman cards at the user's current level + 1.",
-  "Do NOT generate expert-level cards for a beginner.",
-  "Do NOT generate basic-concept cards for an expert.",
-  "",
-  "Include the capability assessment in the output as the 'analysis' field (see Output Format)."
+  "核心准则：",
+  "1. 分析对象是用户的能力与心智模型，不是当前的 Bug。sessionStorage、Vite proxy 这类具体工程问题只是表面信号；",
+  "   你要合成能解释至少 2 个表面信号的根能力缺口，它们必须可迁移、可验证、有掌握标准。",
+  "2. 不得把“没有提到”等同于“不会”。证据有四种状态：proven（材料直接证明会）、partial（部分证明）、",
+  "   unobserved（材料未涉及，不能下结论）、misconception（有直接矛盾证据才能用）。",
+  "3. 深层推断必须走三步：observedSignals（观察到的信号）→ capabilityHypothesis（能力假设）→ diagnosticQuestion（诊断问题）。",
+  "4. 教学方式必须是产品经理友好的：系统图、数据流、类比、场景预测、决策比较。类比必须准确，不得为了通俗而失真。",
+  "5. 已解决的工程问题（已识别+已修复+已测试）不得写成未解决 Bug；把它转化为用户尚未解释的技术决策、验证债务或训练材料。",
+  "6. 教师表达：不羞辱用户。强调“当前材料尚未证明”而不是“用户不懂”。先肯定已具备的能力，再指出下一个成长点。",
+  "7. 只返回合法 JSON，不要 Markdown、解释或额外文字。",
+  "8. 原文是中文时优先用中文输出。"
 ].join("\n");
 
-const clearanceReportSystemPrompt = [
-  "You are MindIOU, an AI cognitive-debt clearance analyst.",
-  "Your job is NOT to summarize the input text.",
-  "Your job is to identify what understanding processes were skipped when AI assisted the user, and produce a structured clearance report.",
+const stepASystemPrompt = [
+  teacherPreamble,
   "",
-  capabilityCalibrationStep,
+  "## Step A：归因与能力校准（attribution + calibration）",
   "",
-  "## Step 1: Artifact Interpretation (do this internally before writing the report)",
+  "任务：判断材料类型，分清 AI 和用户各自完成了什么，识别哪些认知过程被外包给了 AI，并校准用户能力。",
   "",
-  "Before generating any section, classify the input into one of:",
-  "- ai_workflow_transcript: multi-stage interaction with user instructions, AI audit, AI execution, user confirmation, test results, commit messages",
-  "- ai_chat: plain ChatGPT/Claude conversation",
-  "- ai_coding_log: AI coding records, code fixes, tests, commits",
-  "- ai_generated_document: AI-generated plans, articles, reports",
-  "- meeting_notes: meeting minutes",
-  "- unknown: cannot determine",
+  "归因规则：",
+  "- aiCompleted 只列 AI/助手实际完成的工作（分析、修改、解释、操作、测试、总结）。",
+  "- userContributed 只列用户真实提供的东西（产品定位、验收标准、约束、批准、最终判断）。",
+  "- 严禁把用户的验收清单条目当作 AI 完成的工作；有 User:/Assistant: 角色标记时按角色归因；",
+  "  无法判断归因时设 isInference: true。",
+  "- evidence 不得照抄原文，必须解释为什么这段文字证明该归因。",
   "",
-  "If the input contains ANY of: verification requirements, Passed/Failed/Risky items, commit IDs,",
-  "test results, fix summaries, or user confirmation like 'execute'/'执行',",
-  "it MUST be classified as ai_workflow_transcript or ai_coding_log, NOT unknown.",
+  "cognitiveProcessesOutsourced：列出用户把哪些【思考过程】外包给了 AI（不是任务本身），每条含：",
+  "- process：被外包的认知过程（如“方案权衡”“错误定位”“验收判断”）；",
+  "- surfaceTask：它在材料中的表面任务形态；",
+  "- whyItMatters：为什么这个思考过程对产品负责人重要；",
+  "- evidence：支撑证据 + 归因理由；isInference：是否为推断。",
   "",
-  "## Step 2: Role Attribution Rules",
+  "能力校准五个维度（先判断维度等级，再生成后续内容；按用户当前水平 +1 出题）：",
+  "- productProblemFraming：能否自己框定产品问题；",
+  "- aiAgentSteering：能否有效指挥 AI（目标、约束、验收）；",
+  "- systemMentalModel：是否建立了系统如何运转的心智模型；",
+  "- technicalDecisionComprehension：是否理解 AI 代做的技术决策及其后果；",
+  "- validationAndQualityJudgment：能否独立验证和判断产出质量。",
+  "每个维度输出 { level: L0-L5, evidenceStatus: proven|partial|unobserved|misconception, evidence: [证据], confidence: 0-1 }。",
+  "L0 不了解对象；L1 只提宏观目标、全部委托；L2 能跟随步骤；L3 能在指导下实现；L4 能独立实现与调试；L5 能做架构取舍与评审。",
   "",
-  "aiCompleted: ONLY include work actually done by AI/Assistant/Trae, such as:",
-  "- Auditing code or acceptance paths",
-  "- Discovering failed/risky items",
-  "- Proposing minimal fixes",
-  "- Modifying code, adding tests",
-  "- Running tests, generating commits",
-  "- Producing fix summaries",
+  "返回 JSON：",
+  '{"artifactKind":"ai_workflow_transcript|ai_chat|ai_coding_log|ai_generated_document|meeting_notes|unknown",',
+  '"aiCompleted":[{"item":"","evidence":"","isInference":false}],',
+  '"userContributed":[{"item":"","evidence":"","isInference":false}],',
+  '"cognitiveProcessesOutsourced":[{"process":"","surfaceTask":"","whyItMatters":"","evidence":"","isInference":true}],',
+  '"userCapability":{"overall":"L0-L5|mixed","dimensions":{"productProblemFraming":{"level":"L1","evidenceStatus":"unobserved","evidence":[],"confidence":0},',
+  '"aiAgentSteering":{"level":"L1","evidenceStatus":"unobserved","evidence":[],"confidence":0},',
+  '"systemMentalModel":{"level":"L1","evidenceStatus":"unobserved","evidence":[],"confidence":0},',
+  '"technicalDecisionComprehension":{"level":"L1","evidenceStatus":"unobserved","evidence":[],"confidence":0},',
+  '"validationAndQualityJudgment":{"level":"L1","evidenceStatus":"unobserved","evidence":[],"confidence":0}},',
+  '"currentDomain":"","strongestDemonstratedAbility":"","highestPriorityGrowthArea":"","evidenceSignals":[],"recommendedCardLevel":"foundation|intermediate|advanced"}}',
   "",
-  "userContributed: ONLY include things genuinely provided by the user, such as:",
-  "- Product positioning and goals",
-  "- Acceptance criteria / verification standards",
-  "- Constraints (no new features, no refactor, etc.)",
-  "- Approval to execute",
-  "- Final judgment on output quality",
+  "Step A 自检清单：归因区分 AI 与用户；evidence 含归因理由；四种证据状态区分；未观察到的维度标 unobserved 而不是猜；只返回合法 JSON。"
+].join("\n");
+
+const stepBSystemPrompt = [
+  teacherPreamble,
   "",
-  "STRICTLY FORBIDDEN:",
-  "- Treating the user's acceptance checklist items as 'AI completed' work",
-  "- Treating input text headings as contributions",
-  "- Treating requirement text like 'Generate Report / six sections / dangerousGaps exactly 5' as AI-completed work",
-  "- If the text has User:/Assistant: turns, Assistant turns = AI completed, User turns = user contributed",
-  "- If the text has no role markers and you cannot determine who did what, set isInference: true",
+  "## Step B：根能力缺口合成（root gap synthesis）",
   "",
-  "## Step 3: Evidence Rules",
+  "输入包含：Step A 的归因与能力校准结果、协作时间线摘要、以及【用户在时间线上亲手标注的困惑】。",
   "",
-  "evidence must NOT be a copy of the source sentence.",
-  "evidence must explain WHY the excerpt proves the attribution.",
+  "最高优先级规则：用户亲手标注的每一条困惑，都必须被恰好一个缺口的 surfaceSignals/diagnosticQuestion 覆盖；",
+  "如果你判断某条困惑不构成能力缺口，必须在 confusionResolutions 中显式说明理由。不得静默忽略任何一条用户困惑。",
+  "没有用户困惑时，缺口全部来自你的推断，必须相应降低 confidence 并在 alternativeExplanations 中说明。",
   "",
-  "Format: { \"item\": \"...\", \"evidence\": \"source excerpt + attribution reasoning\", \"isInference\": false }",
+  "dangerousGaps 规则：",
+  "- 只产出 2-4 个【根能力缺口】。不得为了凑数把一个根问题拆成多个，也不得填充凑数缺口。",
+  "- 每个缺口必须能解释至少 2 个表面信号（surfaceSignals）；解释不了 2 个就降低 confidence。",
+  "- 每个缺口必须：可迁移（transferScenarios 至少 1 个别的场景）、可验证（diagnosticQuestion）、有掌握标准（masteryCriteria）。",
+  "- 缺口不是 Bug 列表，是用户尚未证明自己理解的根能力。已识别+已修复+已测试的问题转化为理解决策或验证债务。",
+  "- 每个缺口给出 confidence（0-1）和 alternativeExplanations（缺口可能的其他解释）。",
+  "- 按危险程度排序 rank 1 起。",
   "",
-  "WRONG: { \"item\": \"刷新页面后不会导致核心数据丢失\", \"evidence\": \"刷新页面后不会导致核心数据丢失\" }",
-  "RIGHT: { \"item\": \"用户设定了刷新后数据不得丢失的验收标准\", \"evidence\": \"原文将'刷新页面后不会导致核心数据丢失'列为验收项，因此这是用户设定的标准，不是AI完成的工作。\", \"isInference\": false }",
+  "cognitiveStructure：",
+  "- facts：材料中的事实；",
+  "- hypotheses：你的假设，每条带 confidence 和 alternativeExplanation；",
+  "- questions：仍未回答的问题；",
+  "- decisions：材料中的决策，每条标 decisionOwner: user|ai|shared|unclear；",
+  "- tradeoffs：用产品经理语言写——得到什么、放弃什么、依赖什么、失败影响谁。",
   "",
-  "If you cannot determine attribution from the text, set isInference: true and explain your uncertainty.",
+  "返回 JSON：",
+  '{"dangerousGaps":[{"rank":1,"title":"一句话缺口名","gap":"根能力缺口描述","underlyingCapability":"对应的底层能力",',
+  '"surfaceSignals":["至少 2 个表面信号"],"whyDangerous":"为什么对产品负责人危险","transferScenarios":["至少 1 个迁移场景"],',
+  '"confidence":0.0,"alternativeExplanations":[""],"diagnosticQuestion":"一个能诊断该缺口的具体问题","masteryCriteria":["掌握后能做到什么"]}],',
+  '"cognitiveStructure":{"facts":[{"item":"","evidence":"","isInference":false}],',
+  '"hypotheses":[{"item":"","evidence":"","isInference":true,"confidence":0.0,"alternativeExplanation":""}],',
+  '"questions":[{"item":"","evidence":"","isInference":true}],',
+  '"decisions":[{"item":"","evidence":"","isInference":false,"decisionOwner":"user|ai|shared|unclear"}],',
+  '"tradeoffs":[{"item":"","evidence":"","isInference":true}]},',
+  '"confusionResolutions":[{"stepId":"","confusion":"","resolution":"gap|not_capability_gap","gapRank":1,"reason":"resolution 为 not_capability_gap 时必填"}]}',
   "",
-  "## Step 4: Dangerous Gaps Rules (DEPENDS ON Step 0 capability assessment)",
+  "Step B 自检清单：没有 Bug 被当成根缺口；每个缺口解释 ≥2 个表面信号；每条用户困惑都有去向；",
+  "confidence 与 alternativeExplanations 齐备；至少一个迁移场景；只返回合法 JSON。"
+].join("\n");
+
+const stepDSystemPrompt = [
+  teacherPreamble,
   "",
-  "dangerousGaps are NOT bug lists.",
-  "dangerousGaps are understanding debts: things the user has NOT proven they understand.",
-  "Gaps must be calibrated to the user's capability level (from Step 0).",
-  "Generate gaps at user's current level + 1 — the zone where growth is possible.",
+  "## Step D：费曼补偿卡与下一步行动（cards + next actions）",
   "",
-  "If the user is L0-L1 in a dimension:",
-  "- Do NOT ask about advanced architecture tradeoffs",
-  "- DO ask whether they understand the basic concepts and objects in the domain",
-  "If the user is L3-L4 in a dimension:",
-  "- Do NOT ask what basic objects are",
-  "- DO ask about boundaries, tradeoffs, and edge cases they haven't demonstrated",
+  "输入包含：根能力缺口、能力校准结果、用户亲手标注的困惑、以及有界研究摘要（可能不可用）。",
   "",
-  "If a problem was already identified AND fixed AND tested in the input, do NOT list it as a current bug.",
-  "Instead, transform it into a verification debt or understanding debt.",
+  "feynmanCards 规则（3-5 张）：",
+  "- 每张卡必须映射到一个根能力缺口（target 写缺口标题或 dangerousGap-N）。",
+  "- 卡片测的是心智模型，不是术语记忆：让用户画系统图/数据流、打类比、做场景预测、解释决策、比较方案、设计验证。",
+  "- 必须适合产品经理：不要求写代码，不要求背诵实现细节。",
+  "- 用户标注过困惑的缺口优先配卡。",
+  "- 按用户当前水平 +1 出题：不给初学者出架构题，不给专家出概念题。",
+  "- cardType 必须是：system_map | analogy | prediction | decision_explanation | comparison | transfer | validation_design。",
+  "- evaluationCriteria：2-4 条可判定的评分标准（什么算答对），供后续 AI 反馈使用。",
   "",
-  "WRONG gaps (for an L0-L1 user in HarmonyOS development):",
-  "- '用户不理解 API 26 与 HarmonyOS 7 的兼容性矩阵' (too advanced)",
+  "nextActions 规则：",
+  "- 每条行动必须能建设能力，而不是重新修 Bug：verify 验证理解、note 沉淀判断、task 产出练习、ask 请教具体的人。",
+  "- 每条含 relatedCapability（对应五个能力维度之一或根能力名）。",
+  "- 研究摘要可用时，verify 类行动优先指向研究来源；研究不可用时不得编造来源。",
   "",
-  "RIGHT gaps (for an L0-L1 user):",
-  "- '用户尚未证明自己知道 DevEco、SDK、API version、HAP、虚拟机、真机分别是什么'",
-  "- '用户尚未证明自己理解为什么 AI 放弃了 API 24 而不是继续修复'",
+  "返回 JSON：",
+  '{"feynmanCards":[{"id":"card-1","target":"缺口标题或 dangerousGap-1","cardType":"system_map","prompt":"费曼式问题",',
+  '"targetLevel":"L2","difficulty":"foundation|intermediate|advanced","evaluationCriteria":["什么算答对"],',
+  '"userAnswer":"","aiFollowUp":"","answeredAt":null}],',
+  '"nextActions":[{"item":"","route":"verify|note|task|ask","reason":"","relatedCapability":""}]}',
   "",
-  "WRONG gaps (for an L4 user):",
-  "- '用户不知道什么是 HAP' (too basic)",
-  "",
-  "RIGHT gaps (for an L4 user):",
-  "- '用户尚未证明自己理解 API 26 VM 验收与 HarmonyOS 真机验证的边界差异'",
-  "",
-  "Requirements:",
-  "- Exactly 5 gaps, ranked 1-5 by danger level",
-  "- Each gap: { rank, gap, whyDangerous, evidence }",
-  "- Gaps must focus on consequential understanding, not terminology",
-  "",
-  "## Step 5: Feynman Card Rules (DEPENDS ON Step 0 capability assessment)",
-  "",
-  "Feynman cards must test whether the user understands the judgments, code, tests, or engineering tradeoffs that AI made on their behalf.",
-  "Cards must be calibrated to user's current level + 1 (from Step 0).",
-  "",
-  "WRONG card prompt: '为什么刷新页面数据丢失是一个问题？'",
-  "RIGHT card prompt: '为什么只保存 report id 到 sessionStorage 就能在刷新后恢复报告？这个方案的边界是什么？'",
-  "",
-  "Each card: { id, target, prompt, targetLevel, difficulty, userAnswer: \"\", aiFollowUp: \"\", answeredAt: null }",
-  "- targetLevel: the capability level this card is testing (e.g., \"L1\", \"L2\", \"L3\")",
-  "- difficulty: \"foundation\" (basic concepts), \"intermediate\" (process/reasoning), \"advanced\" (tradeoffs/edge cases)",
-  "Each card should target one dangerous gap.",
-  "3-5 cards total.",
-  "",
-  "## Step 6: Next Actions Rules",
-  "",
-  "If a problem was identified + fixed + tested, the nextAction should be about verification or understanding, not re-fixing:",
-  "- verify: verify the fix actually works",
-  "- note: record the engineering judgment for reuse",
-  "- task: add tests or demo samples",
-  "- ask: ask about implementation details not yet understood",
-  "",
-  "Each action: { item, route, reason }",
-  "Explain why each item should enter its route.",
-  "",
-  "## Step 7: Resolved Risk Handling",
-  "",
-  "If the input shows problem identification + fix execution + test passage:",
-  "- Do NOT classify it as an unresolved bug",
-  "- Classify it as: resolved engineering risk, verification debt, or understanding debt",
-  "- The dangerousGap should be about whether the user understands WHY the fix works, not that the bug exists",
-  "",
-  "## Output Format",
-  "",
-  "Return JSON only with this shape:",
-  '{"analysis":{"artifactKind":"ai_workflow_transcript|ai_chat|ai_coding_log|ai_generated_document|meeting_notes|unknown","userCapability":{"overall":"L0|L1|L2|L3|L4|L5|mixed","dimensions":{"domainProductUnderstanding":"L0-L5","aiAgentSteering":"L0-L5","technicalDomainImplementation":"L0-L5","validationDebugging":"L0-L5"},"currentDomain":"brief description","evidenceSignals":["signal1","signal2"],"confidence":0.0,"recommendedCardLevel":"foundation|intermediate|advanced"}},"sections":{"aiCompleted":[],"userContributed":[],"dangerousGaps":[],"cognitiveStructure":{"facts":[],"hypotheses":[],"questions":[],"decisions":[],"tradeoffs":[]},"feynmanCards":[{"id":"","target":"","prompt":"","targetLevel":"L1","difficulty":"foundation","userAnswer":"","aiFollowUp":"","answeredAt":null}],"nextActions":[]}}',
-  "",
-  "Rules:",
-  "- Do not fabricate evidence that does not exist in the source text.",
-  "- Prefer Chinese when the source text is Chinese.",
-  "- If the input is not an AI-assisted work artifact (e.g., it is a dictionary definition or random text), return empty arrays for aiCompleted and userContributed with a note in cognitiveStructure.questions explaining the issue."
+  "Step D 自检清单：卡片测系统理解而非术语；每张卡映射一个缺口；PM 友好、不要求写代码；",
+  "evaluationCriteria 可判定；行动建设能力；只返回合法 JSON。"
 ].join("\n");
 
 /**
- * Build a capability-aware context hint for the user message.
- * This gives the AI additional framing about what to look for.
+ * Get the per-step system prompts. Exported for testing and inspection.
  */
-function buildCapabilityAwarePrompt(artifactText, artifactType, preprocessMetadata = null) {
-  const text = truncate(artifactText, MAX_TEXT);
-  const type = VALID_ARTIFACT_TYPES.includes(artifactType) ? artifactType : "other";
+export function getReportStepPrompts() {
+  return {
+    attribution: stepASystemPrompt,
+    rootGaps: stepBSystemPrompt,
+    cards: stepDSystemPrompt
+  };
+}
 
+/* ── Pipeline helpers ── */
+
+function isFallbackMarker(result) {
+  return Boolean(result?.__fallback || result?.__useFallback);
+}
+
+function fallbackError(result) {
+  return result?.__fallbackError || "AI generation was unavailable";
+}
+
+async function callStep(chatFn, systemPrompt, userPayload) {
+  const messages = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: JSON.stringify(userPayload) }
+  ];
+  const result = await chatFn(messages, () => ({ __useFallback: true }));
+  if (isFallbackMarker(result)) {
+    throw new Error(fallbackError(result));
+  }
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("AI returned malformed step output");
+  }
+  return result;
+}
+
+function validateStepA(step) {
+  if (!Array.isArray(step.aiCompleted) && typeof step.userCapability !== "object") {
+    throw new Error("Step A output missing aiCompleted and userCapability");
+  }
+  return step;
+}
+
+function validateStepB(step) {
+  if (!Array.isArray(step.dangerousGaps)) {
+    throw new Error("Step B output missing dangerousGaps");
+  }
+  return step;
+}
+
+function validateStepD(step) {
+  if (!Array.isArray(step.feynmanCards) && !Array.isArray(step.nextActions)) {
+    throw new Error("Step D output missing feynmanCards and nextActions");
+  }
+  return step;
+}
+
+function detectCapabilitySignals(text) {
   const signals = [];
-
-  // Detect macro-only vs technical detail patterns
   const hasTechnicalTerms = /\b(file|command|api|permission|test|log|debug|build|deploy|config|sdk|port|route|endpoint)\b/i.test(text);
   const hasMacroGoals = /(帮我|给我|做一个|实现一个|我想要|需要|应该|产品|功能|需求|目标)/i.test(text);
   const hasApprovalWithoutReasoning = /(执行吧|继续|好的|可以|没问题|go ahead|proceed|do it)/i.test(text);
   const hasQuestions = /[?？]/.test(text);
-
   if (hasMacroGoals && !hasTechnicalTerms) {
     signals.push("User provides macro goals but does not mention technical implementation details.");
   }
@@ -232,99 +261,209 @@ function buildCapabilityAwarePrompt(artifactText, artifactType, preprocessMetada
   if (!hasQuestions) {
     signals.push("User does not ask technical questions in the artifact.");
   }
+  return signals;
+}
 
+function buildTimelineDigest(timeline) {
+  const steps = Array.isArray(timeline?.steps) ? timeline.steps : [];
+  if (steps.length === 0) return null;
+  return steps.map(step => ({
+    id: truncate(step.id, 100),
+    title: truncate(step.title, 120),
+    keyConcepts: Array.isArray(step.keyConcepts) ? step.keyConcepts.slice(0, 3).map(c => truncate(c, 80)) : [],
+    userConfusion: truncate(step.userConfusion, 1000)
+  }));
+}
+
+function normalizeConfusionsInput(confusions) {
+  if (!Array.isArray(confusions)) return [];
+  return confusions.slice(0, 20).map(entry => ({
+    stepId: truncate(entry?.stepId, 100),
+    stepTitle: truncate(entry?.stepTitle, 120),
+    text: truncate(entry?.text, 1000)
+  })).filter(entry => entry.text);
+}
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`research timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function extractResearchSources(result) {
+  const sources = Array.isArray(result?.sources) ? result.sources : [];
+  return sources.map(source => ({
+    title: truncate(source?.title || "", 200),
+    url: truncate(source?.url || "", 500),
+    snippet: truncate(source?.snippet || source?.text || "", 500)
+  })).filter(source => source.title || source.url);
+}
+
+/**
+ * Step C: bounded research. At most MAX_RESEARCH_QUERIES queries extracted
+ * from the root gaps, each with its own timeout. Any failure degrades to
+ * status "unavailable" transparently; sources are never fabricated.
+ */
+async function runBoundedResearch(gaps, researchFn, timeoutMs) {
+  if (typeof researchFn !== "function") {
+    return { status: "skipped", queries: [], sources: [] };
+  }
+  const queries = [];
+  const seen = new Set();
+  for (const gap of gaps) {
+    const query = clean(gap.underlyingCapability || gap.title || gap.gap);
+    if (!query || seen.has(query)) continue;
+    seen.add(query);
+    queries.push(query);
+    if (queries.length >= MAX_RESEARCH_QUERIES) break;
+  }
+  if (queries.length === 0) {
+    return { status: "skipped", queries: [], sources: [] };
+  }
+  const queryResults = [];
+  const sources = [];
+  let okCount = 0;
+  for (const query of queries) {
+    try {
+      const result = await withTimeout(Promise.resolve(researchFn(query)), timeoutMs);
+      queryResults.push({ query, status: "ok", error: "" });
+      sources.push(...extractResearchSources(result));
+      okCount += 1;
+    } catch (error) {
+      queryResults.push({
+        query,
+        status: "unavailable",
+        error: truncate(error instanceof Error ? error.message : String(error), 300)
+      });
+    }
+  }
   return {
-    artifactText: text,
-    artifactType: type,
-    charCount: clean(text).length,
-    preprocess: preprocessMetadata,
-    hint: [
-      "Analyze this artifact for cognitive debt.",
-      "First calibrate the user's capability (Step 0), then determine artifact type (Step 1).",
-      "Apply role attribution rules (Step 2). Evidence must explain WHY the excerpt proves attribution (Step 3).",
-      "Generate gaps and cards at user's current level + 1 (Steps 4-5).",
-      "Capability signals detected: " + (signals.length > 0 ? signals.join(" ") : "none auto-detected; infer from content."),
-      preprocessMetadata?.didCompress
-        ? `Input strategy: ${preprocessMetadata.strategy}. Treat this as a balanced evidence digest from a larger artifact, not as the full chronological transcript.`
-        : "Input strategy: plain text."
-    ].join(" ")
+    status: okCount > 0 ? "ok" : "unavailable",
+    queries: queryResults,
+    sources: sources.slice(0, 10)
   };
 }
 
 /**
- * Generate a clearance report using AI, with fallback on failure.
+ * Generate a diagnostic clearance report using the multi-step AI pipeline.
  *
  * @param {string} artifactText - Raw input text from the user
  * @param {string} artifactType - Type of artifact
- * @param {function|null} chatFn - Injected chatJson(messages, fallbackFn) function. null = fallback only.
- * @returns {Promise<object>} Normalized clearance report with all six sections
+ * @param {function|null} chatFn - Injected chatJson(messages, fallbackFn). null = fallback only.
+ * @param {object} [options]
+ * @param {function|null} [options.researchFn] - async (query) => { sources?: [{title,url,snippet}] }
+ * @param {object|null} [options.timeline] - Collaboration timeline ({ steps: [...] })
+ * @param {Array} [options.confusions] - [{ stepId, stepTitle, text }] user-annotated confusions
+ * @param {number} [options.researchTimeoutMs] - Per-query research timeout
+ * @returns {Promise<object>} Normalized clearance report with all seven sections
  */
-export async function generateClearanceReport(artifactText, artifactType, chatFn) {
+export async function generateClearanceReport(artifactText, artifactType, chatFn, options = {}) {
   const type = VALID_ARTIFACT_TYPES.includes(artifactType) ? artifactType : "other";
   const prepared = prepareArtifactForReport(artifactText, type, { maxText: MAX_TEXT });
   const text = truncate(prepared.text, MAX_TEXT);
   const preprocess = prepared.metadata;
+  const researchFn = typeof options.researchFn === "function" ? options.researchFn : null;
+  const researchTimeoutMs = Number(options.researchTimeoutMs) || DEFAULT_RESEARCH_TIMEOUT_MS;
+  const timeline = options.timeline && typeof options.timeline === "object" ? options.timeline : null;
+  const confusions = normalizeConfusionsInput(options.confusions);
 
-  // If no chat function is provided, use fallback directly
-  if (!chatFn) {
-    const fallbackReport = generateFallbackReport(text, type);
-    fallbackReport.input.preprocess = preprocess;
-    return withGenerationStatus(fallbackReport, true, "AI is not configured");
+  function fallbackReport(error, failedStep) {
+    const report = generateFallbackReport(text, type);
+    report.input.preprocess = preprocess;
+    report.input.confusions = confusions;
+    return withGenerationStatus(report, true, error, failedStep);
   }
 
+  if (!chatFn) {
+    return fallbackReport("AI is not configured", "attribution");
+  }
+
+  const timelineDigest = buildTimelineDigest(timeline);
+  const confusionNote = confusions.length > 0
+    ? `用户亲手标注了 ${confusions.length} 条困惑，必须全部处理（见 userConfusions）。`
+    : "未提供用户困惑标注：缺口全部来自你的推断，请相应降低 confidence 并在 alternativeExplanations 中说明。";
+
+  let currentStep = "attribution";
   try {
-    const userPayload = buildCapabilityAwarePrompt(text, type, preprocess);
-    const messages = [
-      { role: "system", content: clearanceReportSystemPrompt },
-      { role: "user", content: JSON.stringify(userPayload) }
-    ];
+    // ── Step A: attribution + calibration ──
+    const stepA = validateStepA(await callStep(chatFn, stepASystemPrompt, {
+      artifactText: text,
+      artifactType: type,
+      charCount: clean(text).length,
+      preprocess,
+      hint: [
+        "分析这份材料中的认知债务：先归因，再校准能力。",
+        "Capability signals detected: " + (detectCapabilitySignals(text).join(" ") || "none auto-detected; infer from content."),
+        preprocess?.didCompress
+          ? `Input strategy: ${preprocess.strategy}. Treat this as a balanced evidence digest from a larger artifact, not the full chronological transcript.`
+          : "Input strategy: plain text."
+      ].join(" ")
+    }));
 
-    // The fallback function returns a marker; if chatJson calls it,
-    // we generate the full fallback report after the call returns.
-    const fallbackMarker = () => ({ __useFallback: true });
-    const result = await chatFn(messages, fallbackMarker);
+    // ── Step B: root gap synthesis (user confusions are first-class input) ──
+    currentStep = "root_gaps";
+    const stepB = validateStepB(await callStep(chatFn, stepBSystemPrompt, {
+      artifactKind: stepA.artifactKind || "unknown",
+      aiCompleted: Array.isArray(stepA.aiCompleted) ? stepA.aiCompleted : [],
+      userContributed: Array.isArray(stepA.userContributed) ? stepA.userContributed : [],
+      cognitiveProcessesOutsourced: Array.isArray(stepA.cognitiveProcessesOutsourced)
+        ? stepA.cognitiveProcessesOutsourced
+        : [],
+      userCapability: stepA.userCapability || null,
+      timelineDigest,
+      userConfusions: confusions,
+      confusionNote
+    }));
 
-    // If AI was unavailable (chatJson returned fallback marker)
-    if (result.__fallback || result.__useFallback) {
-      const fallbackReport = generateFallbackReport(text, type);
-      fallbackReport.input.preprocess = preprocess;
-      return withGenerationStatus(
-        fallbackReport,
-        true,
-        result.__fallbackError || "AI generation was unavailable"
-      );
-    }
+    // ── Step C: bounded research (never fatal) ──
+    const researchDigest = await runBoundedResearch(
+      Array.isArray(stepB.dangerousGaps) ? stepB.dangerousGaps : [],
+      researchFn,
+      researchTimeoutMs
+    );
 
-    // AI succeeded: normalize the output through the schema enforcer.
-    // We override input fields with our controlled values to ensure
-    // the stored artifact text and type match what the user provided.
+    // ── Step D: cards + next actions ──
+    currentStep = "cards";
+    const stepD = validateStepD(await callStep(chatFn, stepDSystemPrompt, {
+      dangerousGaps: stepB.dangerousGaps,
+      userCapability: stepA.userCapability || null,
+      userConfusions: confusions,
+      researchDigest: {
+        status: researchDigest.status,
+        sources: researchDigest.sources
+      }
+    }));
+
     const report = normalizeReport({
-      ...result,
+      analysis: {
+        artifactKind: stepA.artifactKind,
+        userCapability: stepA.userCapability
+      },
+      sections: {
+        aiCompleted: stepA.aiCompleted,
+        userContributed: stepA.userContributed,
+        cognitiveProcessesOutsourced: stepA.cognitiveProcessesOutsourced,
+        dangerousGaps: stepB.dangerousGaps,
+        cognitiveStructure: stepB.cognitiveStructure,
+        feynmanCards: stepD.feynmanCards,
+        nextActions: stepD.nextActions
+      },
+      research: researchDigest,
+      confusionResolutions: stepB.confusionResolutions,
       input: {
         artifactText: text,
         artifactType: type,
         charCount: clean(text).length,
-        preprocess
+        preprocess,
+        confusions
       }
     });
 
     return withGenerationStatus(report, false);
   } catch (error) {
-    // Any AI failure (network, parse, timeout) falls back to structural report
-    const fallbackReport = generateFallbackReport(text, type);
-    fallbackReport.input.preprocess = preprocess;
-    return withGenerationStatus(
-      fallbackReport,
-      true,
-      error instanceof Error ? error.message : String(error)
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    return fallbackReport(message, currentStep);
   }
-}
-
-/**
- * Get the system prompt used for clearance report generation.
- * Exported for testing and inspection.
- */
-export function getClearanceReportSystemPrompt() {
-  return clearanceReportSystemPrompt;
 }

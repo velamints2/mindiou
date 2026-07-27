@@ -198,6 +198,20 @@ describe("MVP-1 HTTP vertical slice", () => {
     expect((await legacy.json())._adminChannel).toBe(true);
   });
 
+  it("exposes the same latest-report entry for Mentra glasses", async () => {
+    const response = await fetch(`${BASE}/api/mentra/clearance-entry`);
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.platform).toBe("mentra");
+    expect(data.entry).toMatchObject({
+      reportId: seededReport.id,
+      cardId: "mvp1-card",
+      cardNumber: 1,
+      cardCount: 1
+    });
+    expect(data.entry.prompt).toContain("reachable API");
+  });
+
   it("starts from a persisted card without exposing the hidden scaffold", async () => {
     const response = await fetch(`${BASE}/api/mvp1/sessions`, {
       method: "POST",
@@ -235,6 +249,48 @@ describe("MVP-1 HTTP vertical slice", () => {
     expect(data.result.status).toBe("provisionally_cleared");
     expect(data.result.sourceReviewRequired).toBe(false);
     expect(data.session.state).toBe("ended");
+  });
+
+  it("returns 404 for an unknown session id", async () => {
+    const response = await fetch(`${BASE}/api/mvp1/sessions/does-not-exist`, {
+      headers: { cookie: alice.cookie }
+    });
+    expect(response.status).toBe(404);
+    const data = await response.json();
+    expect(data.ok).toBe(false);
+  });
+
+  it("restores an in-flight session via GET for Web refresh recovery", async () => {
+    const created = await fetch(`${BASE}/api/mvp1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: alice.cookie },
+      body: JSON.stringify({ reportId: seededReport.id, cardId: "mvp1-card" })
+    });
+    const { session: fresh } = await created.json();
+
+    const beforeAnswer = await fetch(`${BASE}/api/mvp1/sessions/${fresh.id}`, {
+      headers: { cookie: alice.cookie }
+    });
+    expect(beforeAnswer.status).toBe(200);
+    const beforeData = await beforeAnswer.json();
+    expect(beforeData.session.id).toBe(fresh.id);
+    expect(beforeData.session.state).toBe("awaiting_answer");
+    expect(beforeData.session.scaffold).toBeUndefined();
+
+    await fetch(`${BASE}/api/mvp1/sessions/${fresh.id}/answers`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: alice.cookie },
+      body: JSON.stringify({ answer: "The request may reach the server, but CORS can stop JavaScript from reading the response." })
+    });
+
+    const afterAnswer = await fetch(`${BASE}/api/mvp1/sessions/${fresh.id}`, {
+      headers: { cookie: alice.cookie }
+    });
+    expect(afterAnswer.status).toBe(200);
+    const afterData = await afterAnswer.json();
+    expect(afterData.session.attempts).toHaveLength(1);
+    expect(afterData.session.scaffold).toHaveLength(1);
+    expect(afterData.session.state).toBe("ready_to_end");
   });
 });
 

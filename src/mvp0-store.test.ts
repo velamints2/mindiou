@@ -304,6 +304,131 @@ describe("MVP-0 store", () => {
     });
   });
 
+  describe("drafts", () => {
+    function makeDraft(overrides = {}) {
+      return {
+        input: {
+          artifactText: overrides.artifactText || "User: 帮我做个产品\nAssistant: 好的，先分析需求。",
+          artifactType: overrides.artifactType || "chatgpt",
+          charCount: 42
+        },
+        timeline: {
+          steps: overrides.steps || [
+            { id: "step-1", title: "需求分析", aiDid: "AI 分析了需求", keyActions: [], keyConcepts: ["需求"], userConfusion: "" },
+            { id: "step-2", title: "方案设计", aiDid: "AI 设计了方案", keyActions: ["write plan"], keyConcepts: [], userConfusion: "" }
+          ]
+        },
+        generation: { fallback: true, error: "AI is not configured" },
+        status: overrides.status || "timeline"
+      };
+    }
+
+    it("saves a draft with normalized timeline steps", async () => {
+      const saved = await store.saveDraft(makeDraft());
+      expect(saved.id).toBeTruthy();
+      expect(saved.status).toBe("timeline");
+      expect(saved.timeline.steps).toHaveLength(2);
+      expect(saved.timeline.steps[0].userConfusion).toBe("");
+      expect(saved.createdAt).toBeTruthy();
+      expect(saved.updatedAt).toBeTruthy();
+    });
+
+    it("updates an existing draft with the same id and keeps createdAt", async () => {
+      const first = await store.saveDraft(makeDraft());
+      const second = await store.saveDraft({
+        ...makeDraft({ status: "timeline" }),
+        id: first.id,
+        createdAt: first.createdAt
+      });
+      expect(second.id).toBe(first.id);
+      expect(second.createdAt).toBe(first.createdAt);
+      expect(store.listDrafts()).toHaveLength(1);
+    });
+
+    it("listDrafts returns drafts sorted by updatedAt descending", async () => {
+      await store.saveDraft({ ...makeDraft(), id: "old", createdAt: "2026-07-01T00:00:00.000Z" });
+      await new Promise(resolve => setTimeout(resolve, 5));
+      await store.saveDraft({ ...makeDraft(), id: "new", createdAt: "2026-07-02T00:00:00.000Z" });
+      const drafts = store.listDrafts();
+      expect(drafts.map(d => d.id)).toEqual(["new", "old"]);
+    });
+
+    it("getDraft throws a clear error when not found", () => {
+      expect(() => store.getDraft("missing")).toThrow("Draft not found: missing");
+    });
+
+    it("updateDraftConfusions writes confusions onto matching steps only", async () => {
+      const draft = await store.saveDraft(makeDraft());
+      const updated = await store.updateDraftConfusions(draft.id, [
+        { stepId: "step-2", text: "我不懂为什么这样设计" },
+        { stepId: "step-999", text: "不存在的步骤" }
+      ]);
+      expect(updated.timeline.steps[0].userConfusion).toBe("");
+      expect(updated.timeline.steps[1].userConfusion).toBe("我不懂为什么这样设计");
+    });
+
+    it("updateDraftConfusions throws when draft not found", async () => {
+      await expect(
+        store.updateDraftConfusions("missing", [{ stepId: "step-1", text: "x" }])
+      ).rejects.toThrow("Draft not found: missing");
+    });
+
+    it("attachReportToDraft links the report and marks the draft reported", async () => {
+      const draft = await store.saveDraft(makeDraft());
+      const updated = await store.attachReportToDraft(draft.id, "report-xyz");
+      expect(updated.reportId).toBe("report-xyz");
+      expect(updated.status).toBe("reported");
+    });
+
+    it("drafts persist across store instances", async () => {
+      const draft = await store.saveDraft(makeDraft());
+      await store.updateDraftConfusions(draft.id, [{ stepId: "step-1", text: "困惑一" }]);
+      const store2 = createMvp0Store(storePath);
+      await store2.load();
+      const found = store2.getDraft(draft.id);
+      expect(found.timeline.steps[0].userConfusion).toBe("困惑一");
+    });
+  });
+
+  describe("report new fields", () => {
+    it("preserves confusions, research, confusionResolutions, failedStep, and draftId", async () => {
+      const saved = await store.saveReport({
+        ...makeReport({ id: "rich-report" }),
+        draftId: "draft-1",
+        input: {
+          artifactText: "text",
+          artifactType: "chatgpt",
+          charCount: 4,
+          confusions: [{ stepId: "step-1", stepTitle: "步骤一", text: "我不懂这一步" }]
+        },
+        generation: { fallback: true, error: "boom", failedStep: "root_gaps" },
+        research: {
+          status: "unavailable",
+          queries: [{ query: "q1", status: "unavailable", error: "timeout" }],
+          sources: []
+        },
+        confusionResolutions: [
+          { stepId: "step-1", confusion: "我不懂这一步", resolution: "not_capability_gap", gapRank: 0, reason: "操作疑问" }
+        ]
+      });
+      expect(saved.draftId).toBe("draft-1");
+      expect(saved.input.confusions).toHaveLength(1);
+      expect(saved.input.confusions[0].text).toBe("我不懂这一步");
+      expect(saved.generation.failedStep).toBe("root_gaps");
+      expect(saved.research.status).toBe("unavailable");
+      expect(saved.research.queries[0].error).toBe("timeout");
+      expect(saved.confusionResolutions[0].resolution).toBe("not_capability_gap");
+    });
+
+    it("defaults research to skipped and confusionResolutions to empty for legacy reports", async () => {
+      const saved = await store.saveReport(makeReport({ id: "legacy-report" }));
+      expect(saved.research).toEqual({ status: "skipped", queries: [], sources: [] });
+      expect(saved.confusionResolutions).toEqual([]);
+      expect(saved.input.confusions).toEqual([]);
+      expect(saved.draftId).toBe("");
+    });
+  });
+
   describe("persistence", () => {
     it("persists across store instances", async () => {
       await store.saveReport(makeReport({ id: "persisted-report" }));
