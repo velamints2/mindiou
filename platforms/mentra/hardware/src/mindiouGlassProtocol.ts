@@ -132,12 +132,19 @@ export class FrameDecoder {
     const continuation = (Number(flags) & FLAG_CONTINUATION) !== 0;
 
     if (!continuation) {
-      if (this.buffer) throw new ProtocolError("上一组分片未结束就来了新首帧");
+      if (this.buffer) {
+        // 协议规定「上一组作废」：丢弃残留分片再报错，
+        // 下一个首帧即可重新同步（丢包/重复包后的恢复路径）。
+        this.buffer = null;
+        throw new ProtocolError("上一组分片未结束就来了新首帧");
+      }
       if (!more) return [{ type: Number(type), seq: Number(seq), payload }];
       this.buffer = { type: Number(type), seq: Number(seq), parts: [payload] };
       return [];
     }
     if (!this.buffer || this.buffer.seq !== Number(seq) || this.buffer.type !== Number(type)) {
+      // 乱序/错配的续帧：作废当前组并报错，等待下一个首帧重新同步。
+      this.buffer = null;
       throw new ProtocolError("续帧与首帧不匹配");
     }
     this.buffer.parts.push(payload);

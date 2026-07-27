@@ -71,6 +71,76 @@ describe("encodeMessage / FrameDecoder", () => {
     const [other] = encodeMessage(MSG_DISPLAY_PAGE, 6, new Uint8Array([1]));
     expect(() => decoder.push(other!)).toThrow(ProtocolError);
   });
+
+  it("丢包报错后能重新同步：下一条消息正常解码（上一组按协议作废）", () => {
+    const payload = new Uint8Array(CHUNK_PAYLOAD_MAX + 10);
+    const chunks = encodeMessage(MSG_DISPLAY_PAGE, 5, payload);
+    const decoder = new FrameDecoder();
+    decoder.push(chunks[0]!); // 首帧，续帧丢失
+    const [lost] = encodeMessage(MSG_DISPLAY_PAGE, 6, new Uint8Array([1]));
+    expect(() => decoder.push(lost!)).toThrow(ProtocolError);
+    // 重发一条全新消息：解码器必须恢复，而不是永久卡死。
+    const [fresh] = encodeMessage(MSG_DISPLAY_PAGE, 7, new TextEncoder().encode("重新同步"));
+    const frames = decoder.push(fresh!);
+    expect(frames).toHaveLength(1);
+    expect(new TextDecoder().decode(frames[0]!.payload)).toBe("重新同步");
+  });
+
+  it("重复首帧报错且不污染后续重组", () => {
+    const payload = new Uint8Array(CHUNK_PAYLOAD_MAX + 10);
+    const chunks = encodeMessage(MSG_DISPLAY_PAGE, 5, payload);
+    const decoder = new FrameDecoder();
+    decoder.push(chunks[0]!);
+    expect(() => decoder.push(chunks[0]!)).toThrow(ProtocolError); // 重复首帧
+    // 重新发送完整分片序列可正常重组。
+    const done: ReturnType<FrameDecoder["push"]> = [];
+    for (const chunk of chunks) done.push(...decoder.push(chunk));
+    expect(done).toHaveLength(1);
+    expect(done[0]!.payload.length).toBe(payload.length);
+  });
+
+  it("乱序续帧（seq 不匹配）报错并可恢复", () => {
+    const payloadA = new Uint8Array(CHUNK_PAYLOAD_MAX + 10).fill(1);
+    const payloadB = new Uint8Array(CHUNK_PAYLOAD_MAX + 10).fill(2);
+    const chunksA = encodeMessage(MSG_DISPLAY_PAGE, 5, payloadA);
+    const chunksB = encodeMessage(MSG_DISPLAY_PAGE, 6, payloadB);
+    const decoder = new FrameDecoder();
+    decoder.push(chunksA[0]!);
+    expect(() => decoder.push(chunksB[1]!)).toThrow(ProtocolError); // B 的续帧错配
+    const [fresh] = encodeMessage(MSG_DISPLAY_PAGE, 7, new Uint8Array([9]));
+    expect(decoder.push(fresh!)).toHaveLength(1);
+  });
+
+  it("帧过短与长度不一致都被拒绝", () => {
+    const decoder = new FrameDecoder();
+    expect(() => decoder.push(new Uint8Array([1, 2, 3]))).toThrow(ProtocolError);
+    const [frame] = encodeMessage(MSG_DISPLAY_PAGE, 1, new Uint8Array([1, 2, 3]));
+    const truncated = frame!.subarray(0, frame!.length - 2); // 少一字节 → 长度不符
+    expect(() => decoder.push(truncated)).toThrow(ProtocolError);
+  });
+
+  it("恰好 CHUNK_PAYLOAD_MAX 的负载保持单帧", () => {
+    const chunks = encodeMessage(MSG_DISPLAY_PAGE, 3, new Uint8Array(CHUNK_PAYLOAD_MAX));
+    expect(chunks).toHaveLength(1);
+    const decoder = new FrameDecoder();
+    expect(decoder.push(chunks[0]!)).toHaveLength(1);
+  });
+
+  it("seq 回绕 255 可正常往返", () => {
+    const [frame] = encodeMessage(MSG_DISPLAY_PAGE, 255, new Uint8Array([1]));
+    const frames = new FrameDecoder().push(frame!);
+    expect(frames[0]!.seq).toBe(255);
+  });
+
+  it("空负载消息（PING/DISPLAY_CLEAR）往返", () => {
+    const decoder = new FrameDecoder();
+    for (const type of [0x10, 0x01]) {
+      const [frame] = encodeMessage(type, 1, new Uint8Array(0));
+      const frames = decoder.push(frame!);
+      expect(frames).toHaveLength(1);
+      expect(frames[0]!.payload.length).toBe(0);
+    }
+  });
 });
 
 describe("DISPLAY_PAGE 负载", () => {
@@ -126,5 +196,23 @@ describe("decodeGlassesEvent", () => {
       firmware: "1.2",
       capabilities: 1
     });
+  });
+
+  it("ACK 成功与失败", () => {
+    expect(decodeGlassesEvent(frameOf(0x84, [42, 0]))).toEqual({ kind: "ack", ackedSeq: 42, ok: true });
+    expect(decodeGlassesEvent(frameOf(0x84, [42, 1]))).toEqual({ kind: "ack", ackedSeq: 42, ok: false });
+  });
+
+  it("非法上行消息类型被明确拒绝", () => {
+    expect(() => decodeGlassesEvent(frameOf(0x90, [1]))).toThrow(ProtocolError);
+    // 手机下行消息不应进入眼镜事件解码器
+    expect(() => decodeGlassesEvent(frameOf(MSG_DISPLAY_PAGE, [1]))).toThrow(ProtocolError);
+  });
+
+  it("负载过短的事件被明确拒绝", () => {
+    expect(() => decodeGlassesEvent(frameOf(MSG_EVENT_BUTTON, [0]))).toThrow(ProtocolError);
+    expect(() => decodeGlassesEvent(frameOf(MSG_EVENT_TOUCH, []))).toThrow(ProtocolError);
+    expect(() => decodeGlassesEvent(frameOf(MSG_EVENT_BATTERY, [80]))).toThrow(ProtocolError);
+    expect(() => decodeGlassesEvent(frameOf(MSG_HELLO, [1, 2]))).toThrow(ProtocolError);
   });
 });
