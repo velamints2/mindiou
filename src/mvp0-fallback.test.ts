@@ -18,30 +18,34 @@ const EMPTY_TEXT = "";
 
 describe("generateFallbackReport", () => {
   describe("schema compliance", () => {
-    it("produces a report with all six sections", () => {
+    it("produces a report with all seven sections", () => {
       const report = generateFallbackReport(SAMPLE_TEXT, "chatgpt");
       expect(report.sections).toBeDefined();
       expect(report.sections.aiCompleted).toBeDefined();
       expect(report.sections.userContributed).toBeDefined();
+      expect(report.sections.cognitiveProcessesOutsourced).toBeDefined();
       expect(report.sections.dangerousGaps).toBeDefined();
       expect(report.sections.cognitiveStructure).toBeDefined();
       expect(report.sections.feynmanCards).toBeDefined();
       expect(report.sections.nextActions).toBeDefined();
     });
 
-    it("produces exactly 5 dangerousGaps", () => {
+    it("produces 2-4 dangerousGaps", () => {
       const report = generateFallbackReport(SAMPLE_TEXT, "claude");
-      expect(report.sections.dangerousGaps).toHaveLength(5);
+      expect(report.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
+      expect(report.sections.dangerousGaps.length).toBeLessThanOrEqual(4);
     });
 
-    it("produces exactly 5 dangerousGaps even with short text", () => {
+    it("produces 2-4 dangerousGaps even with short text", () => {
       const report = generateFallbackReport(SHORT_TEXT, "cursor");
-      expect(report.sections.dangerousGaps).toHaveLength(5);
+      expect(report.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
+      expect(report.sections.dangerousGaps.length).toBeLessThanOrEqual(4);
     });
 
-    it("produces exactly 5 dangerousGaps even with empty text", () => {
+    it("produces 2-4 dangerousGaps even with empty text", () => {
       const report = generateFallbackReport(EMPTY_TEXT, "other");
-      expect(report.sections.dangerousGaps).toHaveLength(5);
+      expect(report.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
+      expect(report.sections.dangerousGaps.length).toBeLessThanOrEqual(4);
     });
 
     it("produces 3-5 feynmanCards", () => {
@@ -64,6 +68,12 @@ describe("generateFallbackReport", () => {
         expect(["verify", "note", "task", "ask"]).toContain(action.route);
       }
     });
+
+    it("marks research as skipped and confusionResolutions as empty", () => {
+      const report = generateFallbackReport(SAMPLE_TEXT, "chatgpt");
+      expect(report.research).toEqual({ status: "skipped", queries: [], sources: [] });
+      expect(report.confusionResolutions).toEqual([]);
+    });
   });
 
   describe("inference labeling", () => {
@@ -82,10 +92,19 @@ describe("generateFallbackReport", () => {
       }
     });
 
-    it("marks gap evidence as inference", () => {
+    it("marks outsourced processes as inference", () => {
+      const report = generateFallbackReport(SAMPLE_TEXT, "chatgpt");
+      expect(report.sections.cognitiveProcessesOutsourced.length).toBeGreaterThan(0);
+      for (const item of report.sections.cognitiveProcessesOutsourced) {
+        expect(item.isInference).toBe(true);
+      }
+    });
+
+    it("gives every fallback gap at least one surface signal and zero confidence", () => {
       const report = generateFallbackReport(SAMPLE_TEXT, "chatgpt");
       for (const gap of report.sections.dangerousGaps) {
-        expect(gap.evidence).toBeTruthy();
+        expect(gap.surfaceSignals.length).toBeGreaterThan(0);
+        expect(gap.confidence).toBe(0);
       }
     });
   });
@@ -145,10 +164,10 @@ describe("generateFallbackReport", () => {
   });
 
   describe("gap ranking", () => {
-    it("assigns ranks 1 through 5 in order", () => {
+    it("assigns sequential ranks starting at 1", () => {
       const report = generateFallbackReport(SAMPLE_TEXT, "chatgpt");
       const ranks = report.sections.dangerousGaps.map(g => g.rank);
-      expect(ranks).toEqual([1, 2, 3, 4, 5]);
+      expect(ranks).toEqual(ranks.map((_, idx) => idx + 1));
     });
   });
 
@@ -183,7 +202,8 @@ describe("normalizeReport", () => {
     const normalized = normalizeReport(raw);
     expect(normalized.sections.aiCompleted).toEqual([]);
     expect(normalized.sections.userContributed).toEqual([]);
-    expect(normalized.sections.dangerousGaps).toHaveLength(5);
+    expect(normalized.sections.cognitiveProcessesOutsourced).toEqual([]);
+    expect(normalized.sections.dangerousGaps).toHaveLength(2);
     expect(normalized.sections.cognitiveStructure.facts).toEqual([]);
     expect(normalized.sections.cognitiveStructure.hypotheses).toEqual([]);
     expect(normalized.sections.cognitiveStructure.questions).toEqual([]);
@@ -256,7 +276,7 @@ describe("normalizeReport", () => {
     expect(normalized.sections.feynmanCards[0].target).toBe("用户尚未证明自己理解结构契约和语义质量的区别");
   });
 
-  it("sorts dangerousGaps by rank", () => {
+  it("sorts dangerousGaps by rank and re-numbers sequentially", () => {
     const raw = {
       sections: {
         dangerousGaps: [
@@ -267,9 +287,8 @@ describe("normalizeReport", () => {
       }
     };
     const normalized = normalizeReport(raw);
-    // 3 input gaps are sorted first, then padded to 5
-    expect(normalized.sections.dangerousGaps).toHaveLength(5);
-    expect(normalized.sections.dangerousGaps.map(g => g.rank)).toEqual([1, 2, 3, 4, 5]);
+    expect(normalized.sections.dangerousGaps).toHaveLength(3);
+    expect(normalized.sections.dangerousGaps.map(g => g.rank)).toEqual([1, 2, 3]);
     expect(normalized.sections.dangerousGaps[0].gap).toBe("first");
     expect(normalized.sections.dangerousGaps[1].gap).toBe("second");
     expect(normalized.sections.dangerousGaps[2].gap).toBe("third");
@@ -287,6 +306,33 @@ describe("normalizeReport", () => {
     const normalized = normalizeReport(raw);
     expect(normalized.sections.dangerousGaps[0].rank).toBe(1);
     expect(normalized.sections.dangerousGaps[1].rank).toBe(2);
+  });
+
+  it("folds legacy gap.evidence into surfaceSignals", () => {
+    const raw = {
+      sections: {
+        dangerousGaps: [
+          { rank: 1, gap: "legacy gap", whyDangerous: "d1", evidence: "legacy single evidence string" },
+          { rank: 2, gap: "another legacy gap", whyDangerous: "d2", evidence: "second evidence" }
+        ]
+      }
+    };
+    const normalized = normalizeReport(raw);
+    expect(normalized.sections.dangerousGaps[0].surfaceSignals).toContain("legacy single evidence string");
+  });
+
+  it("caps gap confidence at 0.5 when fewer than two surface signals", () => {
+    const raw = {
+      sections: {
+        dangerousGaps: [
+          { rank: 1, gap: "weakly grounded gap", whyDangerous: "d1", surfaceSignals: ["only one"], confidence: 0.95 },
+          { rank: 2, gap: "well grounded gap", whyDangerous: "d2", surfaceSignals: ["s1", "s2"], confidence: 0.9 }
+        ]
+      }
+    };
+    const normalized = normalizeReport(raw);
+    expect(normalized.sections.dangerousGaps[0].confidence).toBeLessThanOrEqual(0.5);
+    expect(normalized.sections.dangerousGaps[1].confidence).toBe(0.9);
   });
 
   it("normalizes invalid route to 'task'", () => {
@@ -331,6 +377,22 @@ describe("normalizeReport", () => {
     expect(normalized.sections.feynmanCards[0].answeredAt).toBeNull();
   });
 
+  it("normalizes invalid cardType to system_map and keeps valid ones", () => {
+    const raw = {
+      sections: {
+        feynmanCards: [
+          { target: "g1", prompt: "p1", cardType: "not-a-type" },
+          { target: "g2", prompt: "p2", cardType: "analogy" },
+          { target: "g3", prompt: "p3", cardType: "prediction" }
+        ]
+      }
+    };
+    const normalized = normalizeReport(raw);
+    expect(normalized.sections.feynmanCards[0].cardType).toBe("system_map");
+    expect(normalized.sections.feynmanCards[1].cardType).toBe("analogy");
+    expect(normalized.sections.feynmanCards[2].cardType).toBe("prediction");
+  });
+
   it("defaults invalid status to 'generated'", () => {
     const raw = { status: "invalid-status", sections: {} };
     const normalized = normalizeReport(raw);
@@ -373,6 +435,22 @@ describe("normalizeReport", () => {
     expect(normalized.sections.cognitiveStructure.tradeoffs).toEqual([]);
   });
 
+  it("normalizes decisionOwner on decisions", () => {
+    const raw = {
+      sections: {
+        cognitiveStructure: {
+          decisions: [
+            { item: "Use Supabase", decisionOwner: "ai" },
+            { item: "Ship on Friday", decisionOwner: "boss" }
+          ]
+        }
+      }
+    };
+    const normalized = normalizeReport(raw);
+    expect(normalized.sections.cognitiveStructure.decisions[0].decisionOwner).toBe("ai");
+    expect(normalized.sections.cognitiveStructure.decisions[1].decisionOwner).toBe("unclear");
+  });
+
   it("handles non-object input gracefully", () => {
     expect(() => normalizeReport(null)).toThrow("requires a report object");
     expect(() => normalizeReport(undefined)).toThrow("requires a report object");
@@ -409,12 +487,13 @@ describe("normalizeReport", () => {
   it("passes through a fallback report without breaking", () => {
     const fallback = generateFallbackReport(SAMPLE_TEXT, "chatgpt");
     const renormalized = normalizeReport(fallback);
-    expect(renormalized.sections.dangerousGaps).toHaveLength(5);
+    expect(renormalized.sections.dangerousGaps.length).toBeGreaterThanOrEqual(2);
+    expect(renormalized.sections.dangerousGaps.length).toBeLessThanOrEqual(4);
     expect(renormalized.sections.feynmanCards.length).toBeGreaterThanOrEqual(3);
     expect(renormalized.status).toBe("generated");
   });
 
-  it("enforces exactly 5 gaps even when AI returns more", () => {
+  it("enforces the 4-gap maximum when AI returns more", () => {
     const raw = {
       sections: {
         dangerousGaps: [
@@ -429,11 +508,11 @@ describe("normalizeReport", () => {
       }
     };
     const normalized = normalizeReport(raw);
-    expect(normalized.sections.dangerousGaps).toHaveLength(5);
-    expect(normalized.sections.dangerousGaps.map(g => g.gap)).toEqual(["g1", "g2", "g3", "g4", "g5"]);
+    expect(normalized.sections.dangerousGaps).toHaveLength(4);
+    expect(normalized.sections.dangerousGaps.map(g => g.gap)).toEqual(["g1", "g2", "g3", "g4"]);
   });
 
-  it("enforces exactly 5 gaps when AI returns fewer", () => {
+  it("enforces the 2-gap minimum when AI returns fewer", () => {
     const raw = {
       sections: {
         dangerousGaps: [
@@ -442,7 +521,7 @@ describe("normalizeReport", () => {
       }
     };
     const normalized = normalizeReport(raw);
-    expect(normalized.sections.dangerousGaps).toHaveLength(5);
+    expect(normalized.sections.dangerousGaps).toHaveLength(2);
     expect(normalized.sections.dangerousGaps[0].gap).toBe("only one");
     expect(normalized.sections.dangerousGaps[1].gap).toBe("Manual review required");
   });
@@ -472,5 +551,81 @@ describe("normalizeReport", () => {
     };
     const normalized = normalizeReport(raw);
     expect(normalized.sections.feynmanCards).toHaveLength(5);
+  });
+
+  it("normalizes research digests and drops sourceless entries", () => {
+    const raw = {
+      sections: {},
+      research: {
+        status: "ok",
+        queries: [{ query: "q1", status: "ok" }, { query: "q2", status: "bogus-status" }],
+        sources: [
+          { title: "Docs", url: "https://example.com", snippet: "s" },
+          { title: "", url: "" }
+        ]
+      }
+    };
+    const normalized = normalizeReport(raw);
+    expect(normalized.research.status).toBe("ok");
+    expect(normalized.research.queries[1].status).toBe("unavailable");
+    expect(normalized.research.sources).toHaveLength(1);
+  });
+
+  it("defaults missing research to skipped", () => {
+    const normalized = normalizeReport({ sections: {} });
+    expect(normalized.research).toEqual({ status: "skipped", queries: [], sources: [] });
+  });
+
+  it("normalizes confusionResolutions with resolution coercion", () => {
+    const raw = {
+      sections: {},
+      confusionResolutions: [
+        { stepId: "step-1", confusion: "为什么这样选", resolution: "gap", gapRank: 2 },
+        { stepId: "step-2", confusion: "页面怎么刷新", resolution: "other-value", reason: "操作疑问" }
+      ]
+    };
+    const normalized = normalizeReport(raw);
+    expect(normalized.confusionResolutions).toHaveLength(2);
+    expect(normalized.confusionResolutions[0].resolution).toBe("gap");
+    expect(normalized.confusionResolutions[0].gapRank).toBe(2);
+    expect(normalized.confusionResolutions[1].resolution).toBe("not_capability_gap");
+  });
+
+  it("maps legacy string capability dimensions onto the new dimension objects", () => {
+    const raw = {
+      sections: {},
+      analysis: {
+        artifactKind: "ai_workflow_transcript",
+        userCapability: {
+          overall: "mixed",
+          dimensions: {
+            domainProductUnderstanding: "L3",
+            aiAgentSteering: "L4",
+            technicalDomainImplementation: "L1",
+            validationDebugging: "L1"
+          },
+          currentDomain: "MindIOU MVP-0",
+          recommendedCardLevel: "foundation"
+        }
+      }
+    };
+    const normalized = normalizeReport(raw);
+    const dims = normalized.analysis.userCapability.dimensions;
+    expect(dims.productProblemFraming.level).toBe("L3");
+    expect(dims.productProblemFraming.evidenceStatus).toBe("partial");
+    expect(dims.aiAgentSteering.level).toBe("L4");
+    expect(dims.technicalDecisionComprehension.level).toBe("L1");
+    expect(dims.validationAndQualityJudgment.level).toBe("L1");
+    expect(dims.systemMentalModel.evidenceStatus).toBe("unobserved");
+  });
+
+  it("fills a default analysis when missing", () => {
+    const normalized = normalizeReport({ sections: {} });
+    expect(normalized.analysis.artifactKind).toBe("unknown");
+    expect(normalized.analysis.userCapability.overall).toBe("mixed");
+    expect(normalized.analysis.userCapability.recommendedCardLevel).toBe("foundation");
+    for (const dim of Object.values(normalized.analysis.userCapability.dimensions)) {
+      expect(dim.evidenceStatus).toBe("unobserved");
+    }
   });
 });

@@ -5,6 +5,11 @@ import crypto from "node:crypto";
  * Used when AI is unavailable. Produces a schema-valid clearance report
  * with visibly degraded quality (all items marked as inference).
  *
+ * Schema (seven sections):
+ *   aiCompleted, userContributed, cognitiveProcessesOutsourced,
+ *   dangerousGaps (2-4 root-capability gaps), cognitiveStructure,
+ *   feynmanCards (3-5), nextActions.
+ *
  * No OpenAI calls. No UI. No server endpoints.
  */
 
@@ -13,8 +18,32 @@ const VALID_STATUSES = ["generated", "interacted", "corrected"];
 const VALID_ARTIFACT_TYPES = [
   "chatgpt", "claude", "cursor", "codex", "hackathon", "meeting", "article", "other"
 ];
+const VALID_CARD_TYPES = [
+  "system_map", "analogy", "prediction", "decision_explanation",
+  "comparison", "transfer", "validation_design"
+];
+const VALID_EVIDENCE_STATUSES = ["proven", "partial", "unobserved", "misconception"];
+const VALID_RESEARCH_STATUSES = ["ok", "unavailable", "failed", "skipped"];
+const VALID_DECISION_OWNERS = ["user", "ai", "shared", "unclear"];
+const CAPABILITY_DIMENSIONS = [
+  "productProblemFraming",
+  "aiAgentSteering",
+  "systemMentalModel",
+  "technicalDecisionComprehension",
+  "validationAndQualityJudgment"
+];
+// Legacy MVP-0 reports used four dimensions with plain string levels.
+// Map them onto the new dimension keys so old reports still load and render.
+const LEGACY_DIMENSION_MAP = {
+  domainProductUnderstanding: "productProblemFraming",
+  aiAgentSteering: "aiAgentSteering",
+  technicalDomainImplementation: "technicalDecisionComprehension",
+  validationDebugging: "validationAndQualityJudgment"
+};
 const MAX_TEXT = 30000;
-const TARGET_GAPS = 5;
+const MIN_GAPS = 2;
+const MAX_GAPS = 4;
+const FALLBACK_GAP_COUNT = 3;
 const MIN_CARDS = 3;
 const MAX_CARDS = 5;
 
@@ -25,6 +54,20 @@ function clean(value) {
 function truncate(value, max) {
   const text = clean(value);
   return text.length > max ? text.slice(0, max) : text;
+}
+
+function clamp01(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.min(1, num));
+}
+
+function textArray(value, maxItems, maxLength) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(item => truncate(item, maxLength))
+    .filter(Boolean)
+    .slice(0, maxItems);
 }
 
 function uuid() {
@@ -69,12 +112,19 @@ function makeInferenceItem(item, evidence) {
 }
 
 function makeGap(rank, text) {
-  const excerpt = truncate(text, 150);
+  const excerpt = truncate(text, 300);
   return {
     rank,
-    gap: excerpt || `Understanding gap ${rank}`,
-    whyDangerous: "AI unavailable; cannot assess danger. Manual review required.",
-    evidence: "inference"
+    title: "需要人工复核的理解缺口",
+    gap: excerpt || `Understanding gap ${rank}: manual review required`,
+    underlyingCapability: "unknown",
+    surfaceSignals: excerpt ? [truncate(excerpt, 150)] : ["AI 输出缺口数量不足"],
+    whyDangerous: "AI unavailable or returned too few gaps; cannot assess danger. Manual review required.",
+    transferScenarios: [],
+    confidence: 0,
+    alternativeExplanations: ["材料可能确实只有少量高价值缺口"],
+    diagnosticQuestion: "",
+    masteryCriteria: []
   };
 }
 
@@ -82,9 +132,11 @@ function makeCard(id, target, prompt) {
   return {
     id,
     target: truncate(target, 150),
+    cardType: "system_map",
     prompt: truncate(prompt, 300),
     targetLevel: "L1",
     difficulty: "foundation",
+    evaluationCriteria: [],
     userAnswer: "",
     aiFollowUp: "",
     answeredAt: null
@@ -95,7 +147,8 @@ function makeAction(item, route, reason) {
   return {
     item: truncate(item, 500),
     route: VALID_ROUTES.includes(route) ? route : "task",
-    reason: truncate(reason, 300)
+    reason: truncate(reason, 300),
+    relatedCapability: ""
   };
 }
 
@@ -111,9 +164,20 @@ function normalizePreprocess(raw) {
   };
 }
 
+function normalizeConfusions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 20).map(entry => ({
+    stepId: truncate(entry?.stepId, 100),
+    stepTitle: truncate(entry?.stepTitle, 120),
+    text: truncate(entry?.text, 1000)
+  })).filter(entry => entry.text);
+}
+
 /**
  * Normalize any report-like object into a schema-valid clearance report.
  * Fills missing fields, enforces constraints, and labels inferences.
+ * Tolerates legacy six-section reports (plain-string capability dimensions,
+ * gaps without root-capability fields) by mapping them into the new schema.
  *
  * @param {object} raw - Partial report object (may be from AI or fallback)
  * @returns {object} Normalized report matching the MVP-0 schema
@@ -126,7 +190,7 @@ export function normalizeReport(raw) {
   const now = new Date().toISOString();
   const sections = raw.sections || {};
 
-  // Normalize each section array
+  // Normalize { item, evidence, isInference } arrays
   function normalizeItemArray(arr) {
     if (!Array.isArray(arr)) return [];
     return arr.map(item => {
@@ -149,6 +213,28 @@ export function normalizeReport(raw) {
     });
   }
 
+  function normalizeOutsourcedArray(arr) {
+    if (!Array.isArray(arr)) return [];
+    return arr.map(entry => {
+      if (typeof entry !== "object" || entry === null) {
+        return {
+          process: truncate(String(entry), 200),
+          surfaceTask: "",
+          whyItMatters: "",
+          evidence: "",
+          isInference: true
+        };
+      }
+      return {
+        process: truncate(entry.process, 200),
+        surfaceTask: truncate(entry.surfaceTask, 300),
+        whyItMatters: truncate(entry.whyItMatters, 300),
+        evidence: truncate(entry.evidence || "", 300),
+        isInference: entry.isInference !== undefined ? Boolean(entry.isInference) : true
+      };
+    }).filter(entry => entry.process);
+  }
+
   function normalizeGapArray(arr) {
     if (!Array.isArray(arr)) arr = [];
     const gaps = arr
@@ -156,28 +242,66 @@ export function normalizeReport(raw) {
         if (typeof gap !== "object" || gap === null) {
           return makeGap(idx + 1, String(gap));
         }
+        const surfaceSignals = textArray(gap.surfaceSignals, 6, 300);
+        // Legacy gaps carried a single `evidence` string; fold it into surfaceSignals.
+        if (surfaceSignals.length === 0 && gap.evidence) {
+          surfaceSignals.push(truncate(gap.evidence, 300));
+        }
+        const gapText = truncate(gap.gap, 500);
+        // A root-capability gap must explain at least two surface signals;
+        // otherwise lower confidence instead of padding signals.
+        let confidence = clamp01(gap.confidence);
+        if (surfaceSignals.length < 2) {
+          confidence = Math.min(confidence, 0.5);
+        }
         return {
           rank: Number(gap.rank) || (idx + 1),
-          gap: truncate(gap.gap, 500),
+          title: truncate(gap.title, 120) || truncate(gapText, 60) || `理解缺口 ${idx + 1}`,
+          gap: gapText,
+          underlyingCapability: truncate(gap.underlyingCapability, 200),
+          surfaceSignals,
           whyDangerous: truncate(gap.whyDangerous || "Manual review required.", 300),
-          evidence: truncate(gap.evidence || "inference", 300)
+          transferScenarios: textArray(gap.transferScenarios, 4, 300),
+          confidence,
+          alternativeExplanations: textArray(gap.alternativeExplanations, 4, 300),
+          diagnosticQuestion: truncate(gap.diagnosticQuestion, 500),
+          masteryCriteria: textArray(gap.masteryCriteria, 5, 300)
         };
       })
       .sort((a, b) => a.rank - b.rank);
-    // Enforce exactly TARGET_GAPS (5)
-    while (gaps.length < TARGET_GAPS) {
+    // Enforce 2-4 root gaps: pad with cautious manual-review gaps, truncate extras.
+    while (gaps.length < MIN_GAPS) {
       gaps.push(makeGap(gaps.length + 1, "Manual review required"));
     }
-    return gaps.slice(0, TARGET_GAPS);
+    return gaps.slice(0, MAX_GAPS).map((gap, idx) => ({ ...gap, rank: idx + 1 }));
   }
 
   function normalizeCognitiveStructure(cs) {
     const structure = cs || {};
     return {
       facts: normalizeItemArray(structure.facts),
-      hypotheses: normalizeItemArray(structure.hypotheses),
+      hypotheses: (Array.isArray(structure.hypotheses) ? structure.hypotheses : []).map(item => {
+        const base = typeof item === "object" && item !== null ? item : { item: String(item) };
+        return {
+          item: truncate(base.item, 500),
+          evidence: truncate(base.evidence || "", 300),
+          isInference: base.isInference !== undefined ? Boolean(base.isInference) : true,
+          confidence: clamp01(base.confidence),
+          alternativeExplanation: truncate(base.alternativeExplanation, 300)
+        };
+      }),
       questions: normalizeItemArray(structure.questions),
-      decisions: normalizeItemArray(structure.decisions),
+      decisions: (Array.isArray(structure.decisions) ? structure.decisions : []).map(item => {
+        const base = typeof item === "object" && item !== null ? item : { item: String(item) };
+        return {
+          item: truncate(base.item, 500),
+          evidence: truncate(base.evidence || "", 300),
+          isInference: base.isInference !== undefined ? Boolean(base.isInference) : true,
+          decisionOwner: VALID_DECISION_OWNERS.includes(base.decisionOwner)
+            ? base.decisionOwner
+            : "unclear"
+        };
+      }),
       tradeoffs: normalizeItemArray(structure.tradeoffs)
     };
   }
@@ -201,9 +325,11 @@ export function normalizeReport(raw) {
       return {
         id: clean(card.id || uuid()).slice(0, 100),
         target: normalizeCardTarget(card.target),
+        cardType: VALID_CARD_TYPES.includes(card.cardType) ? card.cardType : "system_map",
         prompt: truncate(card.prompt, 300),
         targetLevel: validLevels.includes(card.targetLevel) ? card.targetLevel : "L1",
         difficulty: validDifficulties.includes(card.difficulty) ? card.difficulty : "foundation",
+        evaluationCriteria: textArray(card.evaluationCriteria, 5, 300),
         userAnswer: truncate(card.userAnswer, 2000),
         aiFollowUp: truncate(card.aiFollowUp, 500),
         answeredAt: card.answeredAt || null
@@ -226,25 +352,49 @@ export function normalizeReport(raw) {
       if (typeof action !== "object" || action === null) {
         return makeAction(String(action), "task", "AI unavailable; manual review required.");
       }
-      return makeAction(action.item, action.route, action.reason);
+      return {
+        ...makeAction(action.item, action.route, action.reason),
+        relatedCapability: truncate(action.relatedCapability, 100)
+      };
     });
   }
 
-  function normalizeAnalysis(raw) {
-    if (typeof raw !== "object" || raw === null) {
+  function normalizeDimension(rawDim) {
+    const fallback = { level: "L1", evidenceStatus: "unobserved", evidence: [], confidence: 0 };
+    if (typeof rawDim === "string") {
+      // Legacy plain-string level
+      const validLevels = ["L0", "L1", "L2", "L3", "L4", "L5"];
+      return validLevels.includes(rawDim)
+        ? { ...fallback, level: rawDim, evidenceStatus: "partial" }
+        : fallback;
+    }
+    if (typeof rawDim !== "object" || rawDim === null) return fallback;
+    const validLevels = ["L0", "L1", "L2", "L3", "L4", "L5"];
+    return {
+      level: validLevels.includes(rawDim.level) ? rawDim.level : "L1",
+      evidenceStatus: VALID_EVIDENCE_STATUSES.includes(rawDim.evidenceStatus)
+        ? rawDim.evidenceStatus
+        : "unobserved",
+      evidence: textArray(rawDim.evidence, 5, 300),
+      confidence: clamp01(rawDim.confidence)
+    };
+  }
+
+  function normalizeAnalysis(rawAnalysis) {
+    const validLevels = ["L0", "L1", "L2", "L3", "L4", "L5", "mixed"];
+    const validCardLevels = ["foundation", "intermediate", "advanced"];
+    if (typeof rawAnalysis !== "object" || rawAnalysis === null) {
       return {
         artifactKind: "unknown",
         userCapability: {
           overall: "mixed",
-          dimensions: {
-            domainProductUnderstanding: "L1",
-            aiAgentSteering: "L1",
-            technicalDomainImplementation: "L1",
-            validationDebugging: "L1"
-          },
+          dimensions: Object.fromEntries(
+            CAPABILITY_DIMENSIONS.map(dim => [dim, normalizeDimension(null)])
+          ),
           currentDomain: "unknown",
+          strongestDemonstratedAbility: "",
+          highestPriorityGrowthArea: "",
           evidenceSignals: [],
-          confidence: 0,
           recommendedCardLevel: "foundation"
         }
       };
@@ -253,33 +403,70 @@ export function normalizeReport(raw) {
       "ai_workflow_transcript", "ai_chat", "ai_coding_log",
       "ai_generated_document", "meeting_notes", "unknown"
     ];
-    const validLevels = ["L0", "L1", "L2", "L3", "L4", "L5", "mixed"];
-    const validCardLevels = ["foundation", "intermediate", "advanced"];
-    const rawCap = raw.userCapability || {};
+    const rawCap = rawAnalysis.userCapability || {};
     const rawDims = rawCap.dimensions || {};
+    // Start from legacy-mapped keys, then overlay new-style keys.
+    const mappedDims = {};
+    for (const [legacyKey, newKey] of Object.entries(LEGACY_DIMENSION_MAP)) {
+      if (rawDims[legacyKey] !== undefined && mappedDims[newKey] === undefined) {
+        mappedDims[newKey] = rawDims[legacyKey];
+      }
+    }
+    for (const dim of CAPABILITY_DIMENSIONS) {
+      if (rawDims[dim] !== undefined) mappedDims[dim] = rawDims[dim];
+    }
     return {
-      artifactKind: validKinds.includes(raw.artifactKind) ? raw.artifactKind : "unknown",
+      artifactKind: validKinds.includes(rawAnalysis.artifactKind) ? rawAnalysis.artifactKind : "unknown",
       userCapability: {
         overall: validLevels.includes(rawCap.overall) ? rawCap.overall : "mixed",
-        dimensions: {
-          domainProductUnderstanding: validLevels.includes(rawDims.domainProductUnderstanding)
-            ? rawDims.domainProductUnderstanding : "L1",
-          aiAgentSteering: validLevels.includes(rawDims.aiAgentSteering)
-            ? rawDims.aiAgentSteering : "L1",
-          technicalDomainImplementation: validLevels.includes(rawDims.technicalDomainImplementation)
-            ? rawDims.technicalDomainImplementation : "L1",
-          validationDebugging: validLevels.includes(rawDims.validationDebugging)
-            ? rawDims.validationDebugging : "L1"
-        },
+        dimensions: Object.fromEntries(
+          CAPABILITY_DIMENSIONS.map(dim => [dim, normalizeDimension(mappedDims[dim])])
+        ),
         currentDomain: truncate(rawCap.currentDomain || "unknown", 100),
+        strongestDemonstratedAbility: truncate(rawCap.strongestDemonstratedAbility, 200),
+        highestPriorityGrowthArea: truncate(rawCap.highestPriorityGrowthArea, 200),
         evidenceSignals: Array.isArray(rawCap.evidenceSignals)
           ? rawCap.evidenceSignals.slice(0, 10).map(s => truncate(s, 300))
           : [],
-        confidence: Math.max(0, Math.min(1, Number(rawCap.confidence) || 0)),
         recommendedCardLevel: validCardLevels.includes(rawCap.recommendedCardLevel)
           ? rawCap.recommendedCardLevel : "foundation"
       }
     };
+  }
+
+  function normalizeResearch(rawResearch) {
+    const empty = { status: "skipped", queries: [], sources: [] };
+    if (typeof rawResearch !== "object" || rawResearch === null) return empty;
+    return {
+      status: VALID_RESEARCH_STATUSES.includes(rawResearch.status) ? rawResearch.status : "skipped",
+      queries: (Array.isArray(rawResearch.queries) ? rawResearch.queries : []).slice(0, 5).map(query => ({
+        query: truncate(query?.query, 300),
+        status: VALID_RESEARCH_STATUSES.includes(query?.status) ? query.status : "unavailable",
+        error: truncate(query?.error || "", 300)
+      })),
+      sources: (Array.isArray(rawResearch.sources) ? rawResearch.sources : [])
+        .slice(0, 10)
+        .map(source => ({
+          title: truncate(source?.title, 200),
+          url: truncate(source?.url, 500),
+          snippet: truncate(source?.snippet, 500)
+        }))
+        .filter(source => source.title || source.url)
+    };
+  }
+
+  function normalizeConfusionResolutions(rawResolutions) {
+    if (!Array.isArray(rawResolutions)) return [];
+    return rawResolutions.slice(0, 20).map(entry => {
+      const resolution = entry?.resolution === "gap" ? "gap" : "not_capability_gap";
+      return {
+        stepId: truncate(entry?.stepId, 100),
+        confusion: truncate(entry?.confusion, 1000),
+        resolution,
+        gapRank: Number(entry?.gapRank) || 0,
+        reason: truncate(entry?.reason || "", 300)
+      };
+    });
   }
 
   const normalized = {
@@ -291,17 +478,21 @@ export function normalizeReport(raw) {
         ? raw.input.artifactType
         : "other",
       charCount: Number(raw.input?.charCount) || (raw.input?.artifactText ? clean(raw.input.artifactText).length : 0),
-      preprocess: normalizePreprocess(raw.input?.preprocess)
+      preprocess: normalizePreprocess(raw.input?.preprocess),
+      confusions: normalizeConfusions(raw.input?.confusions)
     },
     analysis: normalizeAnalysis(raw.analysis),
     sections: {
       aiCompleted: normalizeItemArray(sections.aiCompleted),
       userContributed: normalizeItemArray(sections.userContributed),
+      cognitiveProcessesOutsourced: normalizeOutsourcedArray(sections.cognitiveProcessesOutsourced),
       dangerousGaps: normalizeGapArray(sections.dangerousGaps),
       cognitiveStructure: normalizeCognitiveStructure(sections.cognitiveStructure),
       feynmanCards: normalizeCardArray(sections.feynmanCards),
       nextActions: normalizeActionArray(sections.nextActions)
     },
+    research: normalizeResearch(raw.research),
+    confusionResolutions: normalizeConfusionResolutions(raw.confusionResolutions),
     corrections: Array.isArray(raw.corrections)
       ? raw.corrections.map(c => ({
           id: clean(c.id || uuid()).slice(0, 100),
@@ -325,9 +516,10 @@ export function normalizeReport(raw) {
  * Strategy:
  * - Split text into rough chunks by sentence boundaries
  * - Use chunks to populate aiCompleted and userContributed as inference-only
- * - Generate exactly 5 dangerousGaps from sentence excerpts
+ * - Generate FALLBACK_GAP_COUNT cautious dangerousGaps from sentence excerpts
  * - Generate 3-5 feynmanCards from first sentences
  * - All nextActions default to "task" with AI-unavailable reason
+ * - Research is marked skipped (it never ran)
  *
  * @param {string} artifactText - Raw input text from the user
  * @param {string} artifactType - Type of artifact (chatgpt, claude, etc.)
@@ -363,9 +555,18 @@ export function generateFallbackReport(artifactText, artifactType) {
     )
   ];
 
-  // Dangerous gaps: exactly 5
+  // Outsourced cognitive processes: single cautious placeholder
+  const cognitiveProcessesOutsourced = [{
+    process: "Unable to identify outsourced cognitive processes; AI unavailable",
+    surfaceTask: "",
+    whyItMatters: "Manual review required to identify which thinking steps were delegated to AI",
+    evidence: "inference",
+    isInference: true
+  }];
+
+  // Dangerous gaps: cautious placeholders
   const dangerousGaps = [];
-  for (let i = 0; i < TARGET_GAPS; i++) {
+  for (let i = 0; i < FALLBACK_GAP_COUNT; i++) {
     const source = sentences[i] || chunks[i] || `Section ${i + 1}`;
     dangerousGaps.push(makeGap(i + 1, source));
   }
@@ -430,32 +631,32 @@ export function generateFallbackReport(artifactText, artifactType) {
     input: {
       artifactText: text,
       artifactType: type,
-      charCount: clean(text).length
+      charCount: clean(text).length,
+      confusions: []
     },
     analysis: {
       artifactKind: "unknown",
       userCapability: {
         overall: "mixed",
-        dimensions: {
-          domainProductUnderstanding: "L1",
-          aiAgentSteering: "L1",
-          technicalDomainImplementation: "L1",
-          validationDebugging: "L1"
-        },
+        dimensions: {},
         currentDomain: "unknown",
+        strongestDemonstratedAbility: "",
+        highestPriorityGrowthArea: "",
         evidenceSignals: [],
-        confidence: 0,
         recommendedCardLevel: "foundation"
       }
     },
     sections: {
       aiCompleted,
       userContributed,
+      cognitiveProcessesOutsourced,
       dangerousGaps,
       cognitiveStructure,
       feynmanCards,
       nextActions
     },
+    research: { status: "skipped", queries: [], sources: [] },
+    confusionResolutions: [],
     corrections: [],
     status: "generated"
   };
