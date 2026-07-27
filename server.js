@@ -1377,7 +1377,25 @@ const server = createServer(async (req, res) => {
     if (req.method === "PATCH" && mvp0DraftMatch) {
       try {
         const draftId = decodeURIComponent(mvp0DraftMatch[1]);
-        const draft = await mvp0Store.updateDraftConfusions(draftId, payload.confusions);
+        const confusions = payload.confusions;
+        const confusionsValid =
+          confusions === undefined ||
+          (Array.isArray(confusions) &&
+            confusions.every(
+              entry =>
+                entry !== null &&
+                typeof entry === "object" &&
+                typeof entry.stepId === "string" &&
+                typeof entry.text === "string"
+            ));
+        if (!confusionsValid) {
+          jsonResponse(res, 400, {
+            ok: false,
+            error: "confusions must be an array of { stepId, text }"
+          });
+          return;
+        }
+        const draft = await mvp0Store.updateDraftConfusions(draftId, confusions);
         jsonResponse(res, 200, { ok: true, draft });
       } catch (error) {
         jsonResponse(res, /not found/i.test(String(error.message)) ? 404 : 400, {

@@ -166,6 +166,30 @@ describe("MVP-0 API endpoints", () => {
       expect(data.ok).toBe(false);
       expect(data.error).toContain("Draft not found");
     });
+
+    it("returns 400 when confusions is not an array", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confusions: { "step-1": "我不理解这一步" } })
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+      expect(data.error).toBe("confusions must be an array of { stepId, text }");
+    });
+
+    it("returns 400 when a confusions entry is malformed", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confusions: [{ stepId: 123, text: "我不理解这一步" }] })
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+      expect(data.error).toBe("confusions must be an array of { stepId, text }");
+    });
   });
 
   describe("POST /api/mvp0/report", () => {
