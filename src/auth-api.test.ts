@@ -213,6 +213,43 @@ describe("auth API", () => {
     const me = await fetch(`${BASE}/api/auth/me`, { headers: { cookie } });
     expect(me.status).toBe(401);
   });
+
+  it("issues, lists and revokes a device token for the authenticated user", async () => {
+    const { cookie } = await registerUser("device@example.com");
+
+    const created = await fetch(`${BASE}/api/auth/device-token`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ name: "rokid" })
+    });
+    expect(created.status).toBe(201);
+    const { deviceToken } = await created.json();
+    expect(deviceToken.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(deviceToken.name).toBe("rokid");
+
+    const list = await fetch(`${BASE}/api/auth/device-tokens`, { headers: { cookie } });
+    expect(list.status).toBe(200);
+    const { deviceTokens } = await list.json();
+    expect(deviceTokens).toHaveLength(1);
+    expect(deviceTokens[0].id).toBe(deviceToken.id);
+    expect(deviceTokens[0].token).toBeUndefined();
+    expect(deviceTokens[0].revokedAt).toBeNull();
+
+    const revoked = await fetch(`${BASE}/api/auth/device-token/${deviceToken.id}`, {
+      method: "DELETE",
+      headers: { cookie }
+    });
+    expect(revoked.status).toBe(200);
+    const afterRevoke = await fetch(`${BASE}/api/auth/device-tokens`, { headers: { cookie } });
+    expect((await afterRevoke.json()).deviceTokens[0].revokedAt).toBeTruthy();
+
+    const anonymous = await fetch(`${BASE}/api/auth/device-token`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "anon" })
+    });
+    expect(anonymous.status).toBe(401);
+  });
 });
 
 describe("MVP-0/MVP-1 route protection and isolation", () => {

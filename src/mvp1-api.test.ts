@@ -167,10 +167,22 @@ describe("MVP-1 HTTP vertical slice", () => {
   });
 
   it("exposes a compact latest-report entry for Rokid glasses", async () => {
-    const response = await fetch(`${BASE}/api/rokid/clearance-entry`);
+    // A device token identifies the owning user on the Rokid channel.
+    const tokenResponse = await fetch(`${BASE}/api/auth/device-token`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: alice.cookie },
+      body: JSON.stringify({ name: "rokid-test" })
+    });
+    expect(tokenResponse.status).toBe(201);
+    const { deviceToken } = await tokenResponse.json();
+
+    const response = await fetch(`${BASE}/api/rokid/clearance-entry`, {
+      headers: { authorization: `Bearer ${deviceToken.token}` }
+    });
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.platform).toBe("rokid-aiui");
+    expect(data._adminChannel).toBeUndefined();
     expect(data.entry).toMatchObject({
       reportId: seededReport.id,
       cardId: "mvp1-card",
@@ -178,6 +190,12 @@ describe("MVP-1 HTTP vertical slice", () => {
       cardCount: 1
     });
     expect(data.entry.prompt).toContain("reachable API");
+
+    // Without a configured LEARNING_API_TOKEN the admin channel stays open
+    // (local development) and is labelled as such.
+    const legacy = await fetch(`${BASE}/api/rokid/clearance-entry`);
+    expect(legacy.status).toBe(200);
+    expect((await legacy.json())._adminChannel).toBe(true);
   });
 
   it("starts from a persisted card without exposing the hidden scaffold", async () => {

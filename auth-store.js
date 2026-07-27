@@ -37,6 +37,15 @@ export function createAuthStore(dbPath) {
       expires_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id)
     );
+    CREATE TABLE IF NOT EXISTS device_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      name TEXT,
+      created_at TEXT NOT NULL,
+      revoked_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    );
   `);
 
   function publicUser(row) {
@@ -113,11 +122,59 @@ export function createAuthStore(dbPath) {
     return row ? publicUser(row) : null;
   }
 
+  // The plaintext token is returned exactly once here; only its bcrypt hash
+  // is persisted. Device tokens stay valid until manually revoked.
+  function generateDeviceToken(userId, name) {
+    const id = crypto.randomUUID();
+    const token = crypto.randomBytes(32).toString("hex");
+    const createdAt = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO device_tokens (id, user_id, token_hash, name, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(id, String(userId), bcrypt.hashSync(token, BCRYPT_COST), name ? String(name) : null, createdAt);
+    return { id, token, name: name ? String(name) : null, createdAt };
+  }
+
+  function revokeDeviceToken(tokenId, userId) {
+    const result = db.prepare(
+      "UPDATE device_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL"
+    ).run(new Date().toISOString(), String(tokenId || ""), String(userId || ""));
+    return result.changes > 0;
+  }
+
+  function validateDeviceToken(token) {
+    const raw = String(token || "");
+    if (!raw) return null;
+    const rows = db.prepare(
+      "SELECT id, user_id, token_hash FROM device_tokens WHERE revoked_at IS NULL"
+    ).all();
+    for (const row of rows) {
+      if (bcrypt.compareSync(raw, row.token_hash)) {
+        return { userId: row.user_id, tokenId: row.id };
+      }
+    }
+    return null;
+  }
+
+  function listDeviceTokens(userId) {
+    return db.prepare(
+      "SELECT id, name, created_at, revoked_at FROM device_tokens WHERE user_id = ? ORDER BY created_at DESC"
+    ).all(String(userId || "")).map(row => ({
+      id: row.id,
+      name: row.name,
+      createdAt: row.created_at,
+      revokedAt: row.revoked_at
+    }));
+  }
+
   return {
     register,
     login,
     logout,
     getUserBySession,
-    getUserById
+    getUserById,
+    generateDeviceToken,
+    revokeDeviceToken,
+    validateDeviceToken,
+    listDeviceTokens
   };
 }

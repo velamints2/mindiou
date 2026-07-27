@@ -159,12 +159,49 @@ function readBody(req) {
   });
 }
 
+// Admin channel: LEARNING_API_TOKEN authorizes service-to-service calls and
+// debugging with an unfiltered view of the data. When it is not configured,
+// the admin channel stays open (local development), matching previous
+// behavior.
 function requireToken(req, res) {
-  if (!apiToken) return true;
-  const header = req.headers.authorization || "";
-  if (header === `Bearer ${apiToken}`) return true;
+  if (isAdminToken(req)) return true;
   jsonResponse(res, 401, { ok: false, error: "Invalid token" });
   return false;
+}
+
+function isAdminToken(req) {
+  if (!apiToken) return true;
+  const header = req.headers.authorization || "";
+  return header === `Bearer ${apiToken}`;
+}
+
+function readBearer(req) {
+  const header = req.headers.authorization || "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
+}
+
+function requireDeviceToken(req, res) {
+  const identity = authStore.validateDeviceToken(readBearer(req));
+  if (!identity) {
+    jsonResponse(res, 401, { ok: false, error: "Invalid device token" });
+    return null;
+  }
+  return identity;
+}
+
+// Device channels (Rokid/G2 glasses): a per-user device token identifies the
+// owning user and restricts the response to that user's data. The admin
+// token remains accepted as a fallback and is labelled in the response.
+function resolveDeviceChannel(req, res) {
+  const bearer = readBearer(req);
+  if (bearer) {
+    const identity = authStore.validateDeviceToken(bearer);
+    if (identity) return { userId: identity.userId, adminChannel: false };
+  }
+  if (isAdminToken(req)) return { userId: null, adminChannel: true };
+  jsonResponse(res, 401, { ok: false, error: "Invalid device token" });
+  return null;
 }
 
 function parseJson(text) {
@@ -1215,6 +1252,33 @@ const server = createServer(async (req, res) => {
       jsonResponse(res, 200, { ok: true, user });
       return;
     }
+    if (url.pathname === "/api/auth/device-token" && req.method === "POST") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const payload = parseJson(await readBody(req));
+      const deviceToken = authStore.generateDeviceToken(user.id, payload.name);
+      // The plaintext token is returned only in this response.
+      jsonResponse(res, 201, { ok: true, deviceToken });
+      return;
+    }
+    if (url.pathname === "/api/auth/device-tokens" && req.method === "GET") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      jsonResponse(res, 200, { ok: true, deviceTokens: authStore.listDeviceTokens(user.id) });
+      return;
+    }
+    const deviceTokenMatch = url.pathname.match(/^\/api\/auth\/device-token\/([^/]+)$/);
+    if (deviceTokenMatch && req.method === "DELETE") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const revoked = authStore.revokeDeviceToken(decodeURIComponent(deviceTokenMatch[1]), user.id);
+      if (!revoked) {
+        jsonResponse(res, 404, { ok: false, error: "Device token not found" });
+        return;
+      }
+      jsonResponse(res, 200, { ok: true });
+      return;
+    }
 
     // ── Web MVP-0/MVP-1 routes: cookie session auth, per-user data isolation ──
 
@@ -1420,6 +1484,58 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // ── Device channels (Rokid/G2 glasses): a per-user device token scopes
+    // the response to its owner; the admin token stays as a labelled
+    // fallback. These routes must run before the admin-token gate below. ──
+
+    if (req.method === "GET" && url.pathname === "/api/rokid/clearance-entry") {
+      const channel = resolveDeviceChannel(req, res);
+      if (!channel) return;
+      const reports = channel.adminChannel ? mvp0Store.listReports() : mvp0Store.listReports(channel.userId);
+      const requestedReportId = url.searchParams.get("reportId") || "";
+      const requestedCardId = url.searchParams.get("cardId") || "";
+      const report = requestedReportId
+        ? reports.find(item => item.id === requestedReportId)
+        : reports.find(item => item.sections?.feynmanCards?.length);
+      if (!report || !report.sections?.feynmanCards?.length) {
+        jsonResponse(res, 200, {
+          ok: true,
+          platform: "rokid-aiui",
+          ...(channel.adminChannel ? { _adminChannel: true } : {}),
+          entry: null
+        });
+        return;
+      }
+      const cards = report.sections.feynmanCards;
+      const card = (requestedCardId && cards.find(item => item.id === requestedCardId)) ||
+        cards.find(item => !item.userAnswer) || cards[0];
+      const cardIndex = cards.findIndex(item => item.id === card.id);
+      jsonResponse(res, 200, {
+        ok: true,
+        platform: "rokid-aiui",
+        ...(channel.adminChannel ? { _adminChannel: true } : {}),
+        entry: {
+          reportId: report.id,
+          cardId: card.id,
+          nextCardId: cards.length > 1 ? cards[(cardIndex + 1) % cards.length].id : "",
+          createdAt: report.createdAt,
+          domain: clean(report.analysis?.userCapability?.currentDomain || "认知债务"),
+          target: clean(card.target || "理解缺口"),
+          prompt: clean(card.prompt || "请用自己的话解释这个问题。"),
+          cardNumber: cardIndex + 1,
+          cardCount: cards.length
+        }
+      });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/g2/session") {
+      const channel = resolveDeviceChannel(req, res);
+      if (!channel) return;
+      const session = spiralStore.buildSession(url.searchParams.get("duration"));
+      jsonResponse(res, 200, { ok: true, session, ...(channel.adminChannel ? { _adminChannel: true } : {}) });
+      return;
+    }
+
     if (!requireToken(req, res)) return;
     if (req.method === "GET" && url.pathname === "/api/learn/events") {
       const since = url.searchParams.get("since");
@@ -1457,43 +1573,12 @@ const server = createServer(async (req, res) => {
       jsonResponse(res, 200, { ok: true, mode, card: spiralStore.nextReview() });
       return;
     }
-    if (req.method === "GET" && url.pathname === "/api/g2/session") {
-      const session = spiralStore.buildSession(url.searchParams.get("duration"));
-      jsonResponse(res, 200, { ok: true, session });
-      return;
-    }
     if (req.method === "GET" && url.pathname === "/api/rokid/session") {
       jsonResponse(
         res,
         200,
         rokidSession(url.searchParams.get("duration"), url.searchParams.get("demo") === "1")
       );
-      return;
-    }
-    if (req.method === "GET" && url.pathname === "/api/rokid/clearance-entry") {
-      const report = mvp0Store.listReports().find(item => item.sections?.feynmanCards?.length);
-      if (!report) {
-        jsonResponse(res, 200, { ok: true, platform: "rokid-aiui", entry: null });
-        return;
-      }
-      const cards = report.sections.feynmanCards;
-      const card = cards.find(item => !item.userAnswer) || cards[0];
-      const cardIndex = cards.findIndex(item => item.id === card.id);
-      jsonResponse(res, 200, {
-        ok: true,
-        platform: "rokid-aiui",
-        entry: {
-          reportId: report.id,
-          cardId: card.id,
-          nextCardId: cards.length > 1 ? cards[(cardIndex + 1) % cards.length].id : "",
-          createdAt: report.createdAt,
-          domain: clean(report.analysis?.userCapability?.currentDomain || "认知债务"),
-          target: clean(card.target || "理解缺口"),
-          prompt: clean(card.prompt || "请用自己的话解释这个问题。"),
-          cardNumber: cardIndex + 1,
-          cardCount: cards.length
-        }
-      });
       return;
     }
 
