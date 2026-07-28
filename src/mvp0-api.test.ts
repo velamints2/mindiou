@@ -80,10 +80,19 @@ describe("MVP-0 API endpoints", () => {
   let createdDraftId: string;
 
   describe("POST /api/mvp0/timelines", () => {
-    it("creates a draft with a collaboration timeline", async () => {
+    it("rejects anonymous requests with 401", async () => {
       const res = await fetch(`${BASE}/api/mvp0/timelines`, {
         method: "POST",
         headers: { "content-type": "application/json" },
+        body: JSON.stringify({ artifactText: SAMPLE_ARTIFACT, artifactType: "chatgpt" })
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("creates a draft with a collaboration timeline", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/timelines`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({
           artifactText: SAMPLE_ARTIFACT,
           artifactType: "chatgpt"
@@ -108,7 +117,7 @@ describe("MVP-0 API endpoints", () => {
     it("returns 400 when artifactText is missing", async () => {
       const res = await fetch(`${BASE}/api/mvp0/timelines`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({ artifactType: "chatgpt" })
       });
       expect(res.status).toBe(400);
@@ -119,8 +128,13 @@ describe("MVP-0 API endpoints", () => {
   });
 
   describe("GET /api/mvp0/drafts", () => {
-    it("lists drafts sorted by updatedAt descending", async () => {
+    it("rejects anonymous requests with 401", async () => {
       const res = await fetch(`${BASE}/api/mvp0/drafts`);
+      expect(res.status).toBe(401);
+    });
+
+    it("lists drafts sorted by updatedAt descending", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/drafts`, { headers: { cookie: authCookie } });
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.ok).toBe(true);
@@ -133,8 +147,13 @@ describe("MVP-0 API endpoints", () => {
   });
 
   describe("GET /api/mvp0/drafts/:id", () => {
-    it("returns the draft when found", async () => {
+    it("rejects anonymous requests with 401", async () => {
       const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`);
+      expect(res.status).toBe(401);
+    });
+
+    it("returns the draft when found", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, { headers: { cookie: authCookie } });
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.ok).toBe(true);
@@ -142,7 +161,21 @@ describe("MVP-0 API endpoints", () => {
     });
 
     it("returns 404 when draft not found", async () => {
-      const res = await fetch(`${BASE}/api/mvp0/drafts/nonexistent-id`);
+      const res = await fetch(`${BASE}/api/mvp0/drafts/nonexistent-id`, { headers: { cookie: authCookie } });
+      expect(res.status).toBe(404);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+      expect(data.error).toContain("Draft not found");
+    });
+
+    it("returns 404 when draft belongs to another user", async () => {
+      const otherRegister = await fetch(`${BASE}/api/auth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "mvp0-other@example.com", password: "test-secret-2" })
+      });
+      const otherCookie = (otherRegister.headers.get("set-cookie") || "").split(";")[0];
+      const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, { headers: { cookie: otherCookie } });
       expect(res.status).toBe(404);
       const data = await res.json();
       expect(data.ok).toBe(false);
@@ -151,14 +184,23 @@ describe("MVP-0 API endpoints", () => {
   });
 
   describe("PATCH /api/mvp0/drafts/:id", () => {
+    it("rejects anonymous requests with 401", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confusions: [] })
+      });
+      expect(res.status).toBe(401);
+    });
+
     it("writes user confusions onto timeline steps", async () => {
-      const draftRes = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`);
+      const draftRes = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, { headers: { cookie: authCookie } });
       const draft = (await draftRes.json()).draft;
       const stepId = draft.timeline.steps[0].id;
 
       const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({
           confusions: [{ stepId, text: "我不理解这一步 AI 为什么这样做" }]
         })
@@ -173,7 +215,7 @@ describe("MVP-0 API endpoints", () => {
     it("returns 404 when draft not found", async () => {
       const res = await fetch(`${BASE}/api/mvp0/drafts/nonexistent-id`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({ confusions: [] })
       });
       expect(res.status).toBe(404);
@@ -185,7 +227,7 @@ describe("MVP-0 API endpoints", () => {
     it("returns 400 when confusions is not an array", async () => {
       const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({ confusions: { "step-1": "我不理解这一步" } })
       });
       expect(res.status).toBe(400);
@@ -197,7 +239,7 @@ describe("MVP-0 API endpoints", () => {
     it("returns 400 when a confusions entry is malformed", async () => {
       const res = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: authCookie },
         body: JSON.stringify({ confusions: [{ stepId: 123, text: "我不理解这一步" }] })
       });
       expect(res.status).toBe(400);
@@ -251,7 +293,7 @@ describe("MVP-0 API endpoints", () => {
       expect(data.report.input.confusions[0].text).toContain("我不理解这一步");
 
       // Draft is marked as reported and linked to the saved report
-      const draftRes = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`);
+      const draftRes = await fetch(`${BASE}/api/mvp0/drafts/${createdDraftId}`, { headers: { cookie: authCookie } });
       const draft = (await draftRes.json()).draft;
       expect(draft.status).toBe("reported");
       expect(draft.reportId).toBe(data.report.id);

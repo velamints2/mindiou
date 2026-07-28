@@ -1639,7 +1639,7 @@ const server = createServer(async (req, res) => {
         const draftId = clean(payload.draftId || "");
         if (draftId) {
           try {
-            draft = mvp0Store.getDraft(draftId);
+            draft = mvp0Store.getDraft(draftId, user.id);
           } catch (error) {
             jsonResponse(res, 404, { ok: false, error: error.message });
             return;
@@ -1669,7 +1669,7 @@ const server = createServer(async (req, res) => {
         report.userId = user.id;
         const saved = await mvp0Store.saveReport(report);
         if (draft) {
-          await mvp0Store.attachReportToDraft(draft.id, saved.id);
+          await mvp0Store.attachReportToDraft(draft.id, saved.id, user.id);
         }
         const isFallback = Boolean(saved.generation?.fallback);
         jsonResponse(res, 200, {
@@ -1848,19 +1848,106 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/mvp0/drafts") {
-      jsonResponse(res, 200, { ok: true, drafts: mvp0Store.listDrafts() });
-      return;
-    }
+    // ── MVP-0 drafts & timelines: cookie session auth, per-user isolation ──
+    // 与 reports/sessions 权限边界一致：写操作会真实调用 AI，必须登录以防匿名滥用。
     const mvp0DraftMatch = url.pathname.match(/^\/api\/mvp0\/drafts\/([^/]+)$/);
-    if (req.method === "GET" && mvp0DraftMatch) {
-      try {
-        const draft = mvp0Store.getDraft(decodeURIComponent(mvp0DraftMatch[1]));
-        jsonResponse(res, 200, { ok: true, draft });
-      } catch (error) {
-        jsonResponse(res, 404, { ok: false, error: error.message });
+    const isDraftOrTimelineRoute =
+      url.pathname === "/api/mvp0/drafts" ||
+      url.pathname === "/api/mvp0/timelines" ||
+      Boolean(mvp0DraftMatch);
+    if (isDraftOrTimelineRoute) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+
+      if (req.method === "GET" && url.pathname === "/api/mvp0/drafts") {
+        jsonResponse(res, 200, { ok: true, drafts: mvp0Store.listDrafts(user.id) });
+        return;
       }
-      return;
+      if (req.method === "GET" && mvp0DraftMatch) {
+        try {
+          const draft = mvp0Store.getDraft(decodeURIComponent(mvp0DraftMatch[1]), user.id);
+          jsonResponse(res, 200, { ok: true, draft });
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+        }
+        return;
+      }
+
+      if (req.method !== "POST" && req.method !== "PATCH") {
+        jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
+        return;
+      }
+
+      const payload = parseJson(await readBody(req));
+
+      // ── MVP-0: collaboration timeline (step 1 of the report pipeline) ──
+
+      if (req.method === "POST" && url.pathname === "/api/mvp0/timelines") {
+        const artifactText = String(payload.artifactText || "").trim();
+        let artifactType = clean(payload.artifactType || "");
+        if (!artifactText) {
+          jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
+          return;
+        }
+        if (!artifactType) {
+          artifactType = detectArtifactType(artifactText);
+        }
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const timeline = await generateCollaborationTimeline(artifactText, artifactType, chatFn);
+        const draft = await mvp0Store.saveDraft({
+          userId: user.id,
+          input: {
+            artifactText: artifactText.slice(0, 30000),
+            artifactType,
+            charCount: clean(artifactText).length
+          },
+          timeline: { steps: timeline.steps },
+          generation: timeline.generation,
+          status: "timeline"
+        });
+        const isFallback = Boolean(timeline.generation?.fallback);
+        jsonResponse(res, 200, {
+          ok: true,
+          draft,
+          timeline: { steps: draft.timeline.steps, ...(timeline.note ? { note: timeline.note } : {}) },
+          fallback: isFallback,
+          ...(isFallback && timeline.generation?.error ? { error: timeline.generation.error } : {}),
+          detectedType: artifactType
+        });
+        return;
+      }
+
+      if (req.method === "PATCH" && mvp0DraftMatch) {
+        try {
+          const draftId = decodeURIComponent(mvp0DraftMatch[1]);
+          const confusions = payload.confusions;
+          const confusionsValid =
+            confusions === undefined ||
+            (Array.isArray(confusions) &&
+              confusions.every(
+                entry =>
+                  entry !== null &&
+                  typeof entry === "object" &&
+                  typeof entry.stepId === "string" &&
+                  typeof entry.text === "string"
+              ));
+          if (!confusionsValid) {
+            jsonResponse(res, 400, {
+              ok: false,
+              error: "confusions must be an array of { stepId, text }"
+            });
+            return;
+          }
+          const draft = await mvp0Store.updateDraftConfusions(draftId, confusions, user.id);
+          jsonResponse(res, 200, { ok: true, draft });
+        } catch (error) {
+          jsonResponse(res, /not found/i.test(String(error.message)) ? 404 : 400, {
+            ok: false,
+            error: error.message
+          });
+        }
+        return;
+      }
     }
 
     if (req.method !== "POST" && req.method !== "PATCH") {
@@ -1869,74 +1956,6 @@ const server = createServer(async (req, res) => {
     }
 
     const payload = parseJson(await readBody(req));
-
-    // ── MVP-0: collaboration timeline (step 1 of the report pipeline) ──
-
-    if (req.method === "POST" && url.pathname === "/api/mvp0/timelines") {
-      const artifactText = String(payload.artifactText || "").trim();
-      let artifactType = clean(payload.artifactType || "");
-      if (!artifactText) {
-        jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
-        return;
-      }
-      if (!artifactType) {
-        artifactType = detectArtifactType(artifactText);
-      }
-      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-      const timeline = await generateCollaborationTimeline(artifactText, artifactType, chatFn);
-      const draft = await mvp0Store.saveDraft({
-        input: {
-          artifactText: artifactText.slice(0, 30000),
-          artifactType,
-          charCount: clean(artifactText).length
-        },
-        timeline: { steps: timeline.steps },
-        generation: timeline.generation,
-        status: "timeline"
-      });
-      const isFallback = Boolean(timeline.generation?.fallback);
-      jsonResponse(res, 200, {
-        ok: true,
-        draft,
-        timeline: { steps: draft.timeline.steps, ...(timeline.note ? { note: timeline.note } : {}) },
-        fallback: isFallback,
-        ...(isFallback && timeline.generation?.error ? { error: timeline.generation.error } : {}),
-        detectedType: artifactType
-      });
-      return;
-    }
-
-    if (req.method === "PATCH" && mvp0DraftMatch) {
-      try {
-        const draftId = decodeURIComponent(mvp0DraftMatch[1]);
-        const confusions = payload.confusions;
-        const confusionsValid =
-          confusions === undefined ||
-          (Array.isArray(confusions) &&
-            confusions.every(
-              entry =>
-                entry !== null &&
-                typeof entry === "object" &&
-                typeof entry.stepId === "string" &&
-                typeof entry.text === "string"
-            ));
-        if (!confusionsValid) {
-          jsonResponse(res, 400, {
-            ok: false,
-            error: "confusions must be an array of { stepId, text }"
-          });
-          return;
-        }
-        const draft = await mvp0Store.updateDraftConfusions(draftId, confusions);
-        jsonResponse(res, 200, { ok: true, draft });
-      } catch (error) {
-        jsonResponse(res, /not found/i.test(String(error.message)) ? 404 : 400, {
-          ok: false,
-          error: error.message
-        });
-      }
-      return;
-    }
 
     if (url.pathname === "/api/learn/events") {
       jsonResponse(res, 200, { ok: true, event: recordEvent(payload) });

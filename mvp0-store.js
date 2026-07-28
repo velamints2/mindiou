@@ -266,6 +266,7 @@ export function createMvp0Store(filePath) {
     const existing = state.drafts.find(item => item.id === id);
     const record = {
       id,
+      userId: clean(draft.userId || existing?.userId || "").slice(0, 100),
       createdAt: draft.createdAt || existing?.createdAt || now,
       updatedAt: now,
       reportId: clean(draft.reportId || existing?.reportId || "").slice(0, 100),
@@ -293,21 +294,25 @@ export function createMvp0Store(filePath) {
     return record;
   }
 
-  function getDraft(id) {
+  function getDraft(id, userId) {
     const draft = state.drafts.find(item => item.id === id);
     if (!draft) {
+      throw new Error(`Draft not found: ${id}`);
+    }
+    if (userId && draft.userId && draft.userId !== userId) {
       throw new Error(`Draft not found: ${id}`);
     }
     return draft;
   }
 
-  function listDrafts() {
+  function listDrafts(userId) {
     return [...state.drafts]
+      .filter(item => !userId || !item.userId || item.userId === userId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  async function updateDraftConfusions(id, confusions) {
-    const draft = getDraft(id);
+  async function updateDraftConfusions(id, confusions, userId) {
+    const draft = getDraft(id, userId);
     const byStepId = new Map(
       (Array.isArray(confusions) ? confusions : [])
         .map(entry => [clean(entry?.stepId || ""), clean(entry?.text || "").slice(0, 1000)])
@@ -322,8 +327,8 @@ export function createMvp0Store(filePath) {
     return draft;
   }
 
-  async function attachReportToDraft(id, reportId) {
-    const draft = getDraft(id);
+  async function attachReportToDraft(id, reportId, userId) {
+    const draft = getDraft(id, userId);
     draft.reportId = clean(reportId || "").slice(0, 100);
     draft.status = "reported";
     draft.updatedAt = new Date().toISOString();
