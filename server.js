@@ -2075,6 +2075,7 @@ const server = createServer(async (req, res) => {
         }
         return;
       }
+    } // close isDraftOrTimelineRoute
 
     if (req.method !== "POST" && req.method !== "PATCH") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
@@ -2219,6 +2220,8 @@ const server = createServer(async (req, res) => {
     // ── MVP-0: collaboration timeline (step 1 of the report pipeline) ──
 
     if (req.method === "POST" && url.pathname === "/api/mvp0/timelines") {
+      const user = requireAuth(req, res);
+      if (!user) return;
       const artifactText = String(payload.artifactText || "").trim();
       let artifactType = clean(payload.artifactType || "");
       if (!artifactText) {
@@ -2254,6 +2257,8 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "PATCH" && mvp0DraftMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
       try {
         const draftId = decodeURIComponent(mvp0DraftMatch[1]);
         const confusions = payload.confusions;
@@ -2284,7 +2289,6 @@ const server = createServer(async (req, res) => {
       }
       return;
     }
-    } // close isDraftOrTimelineRoute
 
     if (url.pathname === "/api/learn/events") {
       jsonResponse(res, 200, { ok: true, event: recordEvent(payload) });
