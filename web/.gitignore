@@ -22,3 +22,6 @@ tmp/
 # 日志
 *.log
 npm-debug.log*
+
+# 设计 QA 临时截图证据（结论已记录在 design-qa.md）
+qa/
