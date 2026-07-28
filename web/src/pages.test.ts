@@ -12,6 +12,7 @@ vi.mock("./api", () => ({
   setAccessToken: vi.fn(),
   validateAccessToken: vi.fn().mockResolvedValue(true),
   checkAccessSession: vi.fn().mockResolvedValue(true),
+  fetchCurrentUser: vi.fn().mockResolvedValue(null),
   fetchSession: vi.fn()
 }));
 

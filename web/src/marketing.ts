@@ -20,14 +20,16 @@ function renderPublicHeader(parent: HTMLElement, active: 'landing' | 'how-it-wor
   ;(navHow as HTMLAnchorElement).href = '#/how-it-works'
   nav.appendChild(navHome)
   nav.appendChild(navHow)
-  header.appendChild(nav)
 
   // 右侧 CTA：已登录显示进入产品，未登录显示开始体验
   const ctaWrap = el('div', 'site-header-cta')
   const cta = el('button', 'btn btn-primary btn-sm', getAccessToken() ? '进入工作区' : '开始体验')
   cta.onclick = () => navigate(getAccessToken() ? { name: 'app' } : { name: 'login' })
   ctaWrap.appendChild(cta)
-  header.appendChild(ctaWrap)
+  const controls = el('div', 'site-header-controls')
+  controls.appendChild(nav)
+  controls.appendChild(ctaWrap)
+  header.appendChild(controls)
 
   parent.appendChild(header)
 }
@@ -40,17 +42,57 @@ export function renderLandingPage(root: HTMLElement): void {
 
   // Hero
   const hero = el('section', 'landing-hero')
-  hero.appendChild(el('h1', 'hero-title', '把 AI 帮你跳过的理解，变成真实的能力'))
-  hero.appendChild(el('p', 'hero-subtitle', 'MindIOU 识别 AI 代劳的认知工作，生成一份「认知债务报告」，再用费曼式清偿帮你真正掌握——而不是让理解停留在 AI 那一侧。'))
+  const heroCopy = el('div', 'hero-copy')
+  heroCopy.appendChild(el('p', 'hero-eyebrow', 'AI 完成任务，不等于你获得能力'))
+  heroCopy.appendChild(el('h1', 'hero-title', '看见 AI 替你跳过的那段理解'))
+  heroCopy.appendChild(el('p', 'hero-subtitle', '识别被代劳的推理，生成一笔可解释、可验证、可清偿的认知欠条。'))
 
   const heroCta = el('div', 'hero-cta')
-  const primaryBtn = el('button', 'btn btn-primary btn-lg', '开始体验')
+  const primaryBtn = el('button', 'btn btn-primary btn-lg glass-button glass-button-dark', '生成我的认知欠条')
   primaryBtn.onclick = () => navigate(getAccessToken() ? { name: 'app' } : { name: 'login' })
-  const secondaryBtn = el('button', 'btn btn-ghost btn-lg', '了解原理')
+  const secondaryBtn = el('button', 'btn btn-ghost btn-lg glass-button', '看看它如何工作')
   secondaryBtn.onclick = () => navigate({ name: 'how-it-works' })
   heroCta.appendChild(primaryBtn)
   heroCta.appendChild(secondaryBtn)
-  hero.appendChild(heroCta)
+  heroCopy.appendChild(heroCta)
+  hero.appendChild(heroCopy)
+
+  const heroVisual = el('div', 'hero-visual')
+  heroVisual.setAttribute('aria-label', '一段 AI 推理路径中，被跳过的理解生成了一笔认知欠条')
+  const pathLabelTop = el('div', 'trajectory-label trajectory-label-top')
+  pathLabelTop.appendChild(el('span', 'trajectory-label-title', '拆解问题'))
+  pathLabelTop.appendChild(el('span', 'trajectory-label-meta', '识别所需能力与边界'))
+  const pathLabelGap = el('div', 'trajectory-label trajectory-label-gap glass-chip')
+  pathLabelGap.appendChild(el('span', 'trajectory-label-title', '被跳过的推理'))
+  pathLabelGap.appendChild(el('span', 'trajectory-label-meta', 'AI 已为你跨越'))
+  const pathLabelBottom = el('div', 'trajectory-label trajectory-label-bottom')
+  pathLabelBottom.appendChild(el('span', 'trajectory-label-title', '形成方案'))
+  pathLabelBottom.appendChild(el('span', 'trajectory-label-meta', '整合策略与取舍'))
+  heroVisual.appendChild(pathLabelTop)
+  heroVisual.appendChild(pathLabelGap)
+  heroVisual.appendChild(pathLabelBottom)
+
+  const debtCard = el('article', 'hero-debt-card liquid-glass')
+  const debtHeader = el('div', 'hero-debt-header')
+  debtHeader.appendChild(el('span', 'hero-debt-id', '认知欠条 01'))
+  debtHeader.appendChild(el('span', 'hero-debt-status', '待解释'))
+  debtCard.appendChild(debtHeader)
+  debtCard.appendChild(el('p', 'hero-debt-kicker', '被跳过的推理'))
+  debtCard.appendChild(el('h2', 'hero-debt-question', '为什么这个方案在高并发下仍然安全？'))
+  const debtFooter = el('div', 'hero-debt-footer')
+  debtFooter.appendChild(el('span', undefined, '欠条生成于 10:42'))
+  debtFooter.appendChild(el('span', 'hero-debt-open', '打开欠条'))
+  debtCard.appendChild(debtFooter)
+  debtCard.onclick = () => navigate(getAccessToken() ? { name: 'app' } : { name: 'login' })
+  debtCard.tabIndex = 0
+  debtCard.onkeydown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      debtCard.click()
+    }
+  }
+  heroVisual.appendChild(debtCard)
+  hero.appendChild(heroVisual)
   page.appendChild(hero)
 
   // 痛点区
