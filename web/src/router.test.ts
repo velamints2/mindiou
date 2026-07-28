@@ -1,0 +1,101 @@
+import { describe, expect, it } from "vitest";
+import { isPublicRoute, navigate, parseRoute } from "./router";
+
+describe("parseRoute", () => {
+  it("returns landing for empty hash", () => {
+    expect(parseRoute().name).toBe("landing");
+  });
+
+  it("parses public routes", () => {
+    location.hash = "#/how-it-works";
+    expect(parseRoute().name).toBe("how-it-works");
+  });
+
+  it("parses login route", () => {
+    location.hash = "#/login";
+    expect(parseRoute().name).toBe("login");
+  });
+
+  it("parses app route", () => {
+    location.hash = "#/app";
+    expect(parseRoute().name).toBe("app");
+  });
+
+  it("parses timeline with draftId", () => {
+    location.hash = "#/timeline/draft-123";
+    const route = parseRoute();
+    expect(route.name).toBe("timeline");
+    if (route.name === "timeline") expect(route.draftId).toBe("draft-123");
+  });
+
+  it("parses report with reportId", () => {
+    location.hash = "#/report/rpt-456";
+    const route = parseRoute();
+    expect(route.name).toBe("report");
+    if (route.name === "report") expect(route.reportId).toBe("rpt-456");
+  });
+
+  it("parses session with sessionId", () => {
+    location.hash = "#/session/ses-789";
+    const route = parseRoute();
+    expect(route.name).toBe("session");
+    if (route.name === "session") expect(route.sessionId).toBe("ses-789");
+  });
+
+  it("returns not-found for missing params", () => {
+    location.hash = "#/timeline";
+    expect(parseRoute().name).toBe("not-found");
+  });
+
+  it("returns not-found for unknown path", () => {
+    location.hash = "#/unknown";
+    expect(parseRoute().name).toBe("not-found");
+  });
+
+  it("decodes URI-encoded params", () => {
+    location.hash = "#/report/rpt%20with%20space";
+    const route = parseRoute();
+    if (route.name === "report") expect(route.reportId).toBe("rpt with space");
+  });
+});
+
+describe("isPublicRoute", () => {
+  it("landing and how-it-works are public", () => {
+    expect(isPublicRoute({ name: "landing" })).toBe(true);
+    expect(isPublicRoute({ name: "how-it-works" })).toBe(true);
+  });
+
+  it("product routes are not public", () => {
+    expect(isPublicRoute({ name: "app" })).toBe(false);
+    expect(isPublicRoute({ name: "login" })).toBe(false);
+    expect(isPublicRoute({ name: "timeline", draftId: "d" })).toBe(false);
+    expect(isPublicRoute({ name: "report", reportId: "r" })).toBe(false);
+    expect(isPublicRoute({ name: "session", sessionId: "s" })).toBe(false);
+  });
+
+  it("admin is not public", () => {
+    expect(isPublicRoute({ name: "admin" })).toBe(false);
+  });
+});
+
+describe("navigate", () => {
+  it("sets hash for landing", () => {
+    navigate({ name: "landing" });
+    expect(location.hash).toBe("");
+  });
+
+  it("sets hash for app", () => {
+    navigate({ name: "app" });
+    expect(location.hash).toBe("#/app");
+  });
+
+  it("sets hash with encoded param", () => {
+    navigate({ name: "report", reportId: "rpt/123" });
+    expect(location.hash).toBe("#/report/rpt%2F123");
+  });
+
+  it("sets hash for session", () => {
+    navigate({ name: "session", sessionId: "s-1" });
+    expect(location.hash).toBe("#/session/s-1");
+  });
+});

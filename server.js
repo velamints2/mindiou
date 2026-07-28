@@ -2,6 +2,8 @@ import { createServer } from "node:http";
 import crypto from "node:crypto";
 import { createSpiralStore } from "./spiral-store.js";
 import { createMvp0Store } from "./mvp0-store.js";
+import { createMvp1Store } from "./mvp1-store.js";
+import { createAuthStore } from "./auth-store.js";
 import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport } from "./mvp0-report.js";
 import { generateCollaborationTimeline } from "./mvp0-timeline.js";
@@ -60,12 +62,18 @@ const sttPrompt = process.env.OPENAI_STT_PROMPT || [
 ].join(" ");
 const learningStorePath = process.env.LEARNING_STORE_PATH || "tmp/spiral-store.json";
 const mvp0StorePath = process.env.MVP0_STORE_PATH || "tmp/mvp0-store.json";
+const mvp1StorePath = process.env.MVP1_STORE_PATH || "tmp/mvp1-store.json";
+const authStorePath = process.env.AUTH_STORE_PATH || "tmp/auth-store.sqlite";
 const eventLog = [];
 const spiralStore = createSpiralStore(learningStorePath);
 await spiralStore.load();
 const mvp0Store = createMvp0Store(mvp0StorePath);
 await mvp0Store.load();
-const mvp1Sessions = new Map();
+const mvp1Store = createMvp1Store(mvp1StorePath);
+await mvp1Store.load();
+// 兼容 admin 补丁的只读视图：账户体系分支以 mvp1Store 持久化替代原内存 Map
+const mvp1Sessions = { values: () => mvp1Store.listSessions() };
+const authStore = createAuthStore(authStorePath);
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: researchApiKey,
   baseUrl: researchBaseUrl,
@@ -124,7 +132,7 @@ const rokidDemoCards = [
   }
 ];
 
-function jsonResponse(res, statusCode, payload) {
+function jsonResponse(res, statusCode, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
   res.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
@@ -132,7 +140,9 @@ function jsonResponse(res, statusCode, payload) {
     "cache-control": "no-store",
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
-    "access-control-allow-headers": "content-type,authorization"
+    "access-control-allow-headers": "content-type,authorization,cookie",
+    "access-control-allow-credentials": "true",
+    ...extraHeaders
   });
   res.end(body);
 }
@@ -141,7 +151,8 @@ function optionsResponse(res) {
   res.writeHead(204, {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
-    "access-control-allow-headers": "content-type,authorization",
+    "access-control-allow-headers": "content-type,authorization,cookie",
+    "access-control-allow-credentials": "true",
     "access-control-max-age": "86400"
   });
   res.end();
@@ -222,7 +233,7 @@ function readSession(req) {
   }
 }
 
-function sessionCookie(req, value, maxAge) {
+function earlyAccessSessionCookie(req, value, maxAge) {
   const requestIsHttps = String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
   return [
     `mindiou_session=${value}`,
@@ -266,11 +277,51 @@ function readBody(req) {
   });
 }
 
+// Admin channel: LEARNING_API_TOKEN authorizes service-to-service calls and
+// debugging with an unfiltered view of the data. When it is not configured,
+// the admin channel stays open (local development), matching previous
+// behavior.
 function requireToken(req, res) {
+  if (isAdminToken(req)) return true;
   if (!accessControlEnabled()) return true;
   if (authorizeRequest(req)) return true;
-  jsonResponse(res, 401, { ok: false, error: "请先使用体验邀请码登录。" });
+  jsonResponse(res, 401, { ok: false, error: "Invalid token" });
   return false;
+}
+
+function isAdminToken(req) {
+  if (!apiToken) return true;
+  const header = req.headers.authorization || "";
+  return header === `Bearer ${apiToken}`;
+}
+
+function readBearer(req) {
+  const header = req.headers.authorization || "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
+}
+
+function requireDeviceToken(req, res) {
+  const identity = authStore.validateDeviceToken(readBearer(req));
+  if (!identity) {
+    jsonResponse(res, 401, { ok: false, error: "Invalid device token" });
+    return null;
+  }
+  return identity;
+}
+
+// Device channels (Rokid/G2 glasses): a per-user device token identifies the
+// owning user and restricts the response to that user's data. The admin
+// token remains accepted as a fallback and is labelled in the response.
+function resolveDeviceChannel(req, res) {
+  const bearer = readBearer(req);
+  if (bearer) {
+    const identity = authStore.validateDeviceToken(bearer);
+    if (identity) return { userId: identity.userId, adminChannel: false };
+  }
+  if (isAdminToken(req)) return { userId: null, adminChannel: true };
+  jsonResponse(res, 401, { ok: false, error: "Invalid device token" });
+  return null;
 }
 
 function parseJson(text) {
@@ -280,6 +331,54 @@ function parseJson(text) {
 
 function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+const sessionCookieName = "session";
+const sessionCookieMaxAge = 604800; // 7 days, matches auth-store session TTL
+
+function authSessionCookie(sessionId) {
+  const parts = [
+    `${sessionCookieName}=${sessionId}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    "Path=/",
+    `Max-Age=${sessionCookieMaxAge}`
+  ];
+  if (process.env.NODE_ENV === "production") parts.push("Secure");
+  return parts.join("; ");
+}
+
+function clearSessionCookie() {
+  const parts = [
+    `${sessionCookieName}=`,
+    "HttpOnly",
+    "SameSite=Lax",
+    "Path=/",
+    "Max-Age=0"
+  ];
+  if (process.env.NODE_ENV === "production") parts.push("Secure");
+  return parts.join("; ");
+}
+
+function requireAuth(req, res) {
+  const sessionId = parseCookies(req)[sessionCookieName] || "";
+  const user = sessionId ? authStore.getUserBySession(sessionId) : null;
+  if (user) return user;
+  // Fallback: accept legacy early-access session (invite-code cookie)
+  const earlySession = readSession(req);
+  if (earlySession) {
+    return { id: `early-access:${earlySession.label}`, email: null };
+  }
+  jsonResponse(res, 401, { ok: false, error: "Authentication required" });
+  return null;
+}
+
+function loadOwnedMvp1Session(id, userId) {
+  try {
+    return mvp1Store.getSession(id, userId);
+  } catch {
+    return null;
+  }
 }
 
 function detectArtifactType(text) {
@@ -1286,6 +1385,71 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── Auth: web user accounts (no LEARNING_API_TOKEN required) ──
+
+    if (url.pathname === "/api/auth/register" && req.method === "POST") {
+      const payload = parseJson(await readBody(req));
+      try {
+        const { user, sessionId } = authStore.register(payload.email, payload.password);
+        jsonResponse(res, 201, { ok: true, user }, { "set-cookie": authSessionCookie(sessionId) });
+      } catch (error) {
+        const status = /already registered/i.test(String(error.message)) ? 409 : 400;
+        jsonResponse(res, status, { ok: false, error: error.message });
+      }
+      return;
+    }
+    if (url.pathname === "/api/auth/login" && req.method === "POST") {
+      const payload = parseJson(await readBody(req));
+      try {
+        const { user, sessionId } = authStore.login(payload.email, payload.password);
+        jsonResponse(res, 200, { ok: true, user }, { "set-cookie": authSessionCookie(sessionId) });
+      } catch {
+        jsonResponse(res, 401, { ok: false, error: "Invalid email or password" });
+      }
+      return;
+    }
+    if (url.pathname === "/api/auth/logout" && req.method === "POST") {
+      const sessionId = parseCookies(req)[sessionCookieName];
+      if (sessionId) authStore.logout(sessionId);
+      jsonResponse(res, 200, { ok: true }, { "set-cookie": clearSessionCookie() });
+      return;
+    }
+    if (url.pathname === "/api/auth/me" && req.method === "GET") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      jsonResponse(res, 200, { ok: true, user });
+      return;
+    }
+    if (url.pathname === "/api/auth/device-token" && req.method === "POST") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const payload = parseJson(await readBody(req));
+      const deviceToken = authStore.generateDeviceToken(user.id, payload.name);
+      // The plaintext token is returned only in this response.
+      jsonResponse(res, 201, { ok: true, deviceToken });
+      return;
+    }
+    if (url.pathname === "/api/auth/device-tokens" && req.method === "GET") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      jsonResponse(res, 200, { ok: true, deviceTokens: authStore.listDeviceTokens(user.id) });
+      return;
+    }
+    const deviceTokenMatch = url.pathname.match(/^\/api\/auth\/device-token\/([^/]+)$/);
+    if (deviceTokenMatch && req.method === "DELETE") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const revoked = authStore.revokeDeviceToken(decodeURIComponent(deviceTokenMatch[1]), user.id);
+      if (!revoked) {
+        jsonResponse(res, 404, { ok: false, error: "Device token not found" });
+        return;
+      }
+      jsonResponse(res, 200, { ok: true });
+      return;
+    }
+
+    // ── Legacy early-access login (kept for backward compatibility) ──
+
     if (req.method === "POST" && url.pathname === "/api/access/login") {
       if (!earlyAccessCodes.length) {
         jsonResponse(res, 503, { ok: false, error: "体验邀请码登录尚未启用。" });
@@ -1313,7 +1477,7 @@ const server = createServer(async (req, res) => {
         expiresAt,
         jti: crypto.randomBytes(9).toString("base64url")
       });
-      res.setHeader("set-cookie", sessionCookie(req, token, sessionTtlSeconds));
+      res.setHeader("set-cookie", earlyAccessSessionCookie(req, token, sessionTtlSeconds));
       jsonResponse(res, 200, {
         ok: true,
         user: { label: user.label },
@@ -1327,14 +1491,14 @@ const server = createServer(async (req, res) => {
       if (session) {
         revokeSessionToken(parseCookies(req).mindiou_session, session.expiresAt);
       }
-      res.setHeader("set-cookie", sessionCookie(req, "", 0));
+      res.setHeader("set-cookie", earlyAccessSessionCookie(req, "", 0));
       jsonResponse(res, 200, { ok: true });
       return;
     }
 
     // ── 运营后台路由（独立鉴权，不走邀请码）──
     if (handleAdminRoute(req, res, url.pathname, req.method, {
-      mvp0Store, spiralStore, eventLog, mvp1Sessions
+      mvp0Store, spiralStore, eventLog, mvp1Sessions: mvp1Store.listSessions()
     })) return;
 
     // ── 公开埋点端点：未登录访客也可发送，不鉴权 ──
@@ -1342,6 +1506,284 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/learn/events") {
       const trackingPayload = parseJson(await readBody(req));
       jsonResponse(res, 200, { ok: true, event: recordEvent(trackingPayload) });
+      return;
+    }
+
+    // ── Web MVP-0/MVP-1 routes: cookie session auth, per-user data isolation ──
+
+    const mvp1SessionMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)$/);
+    const mvp0ReportMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)$/);
+    const mvp1AnswerMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/answers$/);
+    const mvp1EndMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/end$/);
+    const mvp0CardAnswerMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)\/cards\/([^/]+)\/answer$/);
+    const mvp0CorrectionMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)\/corrections$/);
+    const isWebMvpRoute =
+      (req.method === "GET" && (url.pathname === "/api/mvp0/reports" || mvp1SessionMatch || mvp0ReportMatch)) ||
+      (req.method === "POST" && (
+        url.pathname === "/api/mvp1/sessions" || mvp1AnswerMatch || mvp1EndMatch ||
+        url.pathname === "/api/mvp0/report" || mvp0CardAnswerMatch || mvp0CorrectionMatch
+      ));
+    if (isWebMvpRoute) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+
+      if (req.method === "GET" && url.pathname === "/api/mvp0/reports") {
+        jsonResponse(res, 200, { ok: true, reports: mvp0Store.listReports(user.id) });
+        return;
+      }
+      if (req.method === "GET" && mvp1SessionMatch) {
+        const session = loadOwnedMvp1Session(decodeURIComponent(mvp1SessionMatch[1]), user.id);
+        if (!session) {
+          jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
+          return;
+        }
+        jsonResponse(res, 200, { ok: true, session: publicSession(session, { revealScaffold: session.attempts.length > 0 }) });
+        return;
+      }
+      if (req.method === "GET" && mvp0ReportMatch) {
+        try {
+          const report = mvp0Store.getReport(decodeURIComponent(mvp0ReportMatch[1]), user.id);
+          jsonResponse(res, 200, { ok: true, report });
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+        }
+        return;
+      }
+
+      const payload = parseJson(await readBody(req));
+
+      // ── MVP-1: source-grounded debt clearance ──
+
+      if (url.pathname === "/api/mvp1/sessions") {
+        try {
+          if (!aiApiKey || disableAi) {
+            jsonResponse(res, 503, { ok: false, error: "MVP-1 external research requires an active OpenAI API configuration" });
+            return;
+          }
+          const reportId = clean(payload.reportId || "");
+          const cardId = clean(payload.cardId || "");
+          if (!reportId || !cardId) {
+            jsonResponse(res, 400, { ok: false, error: "Missing reportId or cardId" });
+            return;
+          }
+          const report = mvp0Store.getReport(reportId, user.id);
+          const session = await startClearanceSession({ report, cardId, researchFn: researchClearanceContext });
+          session.userId = user.id;
+          await mvp1Store.saveSession(session);
+          jsonResponse(res, 200, { ok: true, session: publicSession(session) });
+        } catch (error) {
+          const status = /not found/i.test(String(error.message)) ? 404 : 502;
+          jsonResponse(res, status, { ok: false, error: error.message });
+        }
+        return;
+      }
+
+      if (mvp1AnswerMatch) {
+        try {
+          const session = loadOwnedMvp1Session(decodeURIComponent(mvp1AnswerMatch[1]), user.id);
+          if (!session) {
+            jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
+            return;
+          }
+          const attempt = await submitClearanceAnswer({
+            session,
+            answer: payload.answer,
+            analyzeFn: analyzeClearanceAnswer
+          });
+          await mvp1Store.saveSession(session);
+          jsonResponse(res, 200, {
+            ok: true,
+            attempt,
+            session: publicSession(session, { revealScaffold: true })
+          });
+        } catch (error) {
+          jsonResponse(res, 400, { ok: false, error: error.message });
+        }
+        return;
+      }
+
+      if (mvp1EndMatch) {
+        const session = loadOwnedMvp1Session(decodeURIComponent(mvp1EndMatch[1]), user.id);
+        if (!session) {
+          jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
+          return;
+        }
+        const result = endClearanceSession(session);
+        try {
+          await mvp0Store.updateCardClearance(session.reportId, session.cardId, {
+            sessionId: session.id,
+            status: result.status,
+            sourceReviewRequired: result.sourceReviewRequired,
+            endedAt: session.endedAt,
+            nextRecommendation: result.nextRecommendation,
+            remainingGaps: result.remainingGaps
+          }, user.id);
+        } catch (error) {
+          console.warn(`MVP-1 clearance write-back failed for session ${session.id}: ${error.message}`);
+        }
+        await mvp1Store.saveSession(session);
+        jsonResponse(res, 200, {
+          ok: true,
+          result,
+          session: publicSession(session, { revealScaffold: true })
+        });
+        return;
+      }
+
+      // ── MVP-0: cognitive-debt clearance report ──
+
+      if (url.pathname === "/api/mvp0/report") {
+        let draft = null;
+        const draftId = clean(payload.draftId || "");
+        if (draftId) {
+          try {
+            draft = mvp0Store.getDraft(draftId);
+          } catch (error) {
+            jsonResponse(res, 404, { ok: false, error: error.message });
+            return;
+          }
+        }
+        const artifactText = String(draft ? draft.input.artifactText : payload.artifactText || "").trim();
+        let artifactType = clean(draft ? draft.input.artifactType : payload.artifactType || "");
+        if (!artifactText) {
+          jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
+          return;
+        }
+        // Auto-detect type if not provided or empty
+        if (!artifactType) {
+          artifactType = detectArtifactType(artifactText);
+        }
+        const timeline = draft ? draft.timeline : (payload.timeline && typeof payload.timeline === "object" ? payload.timeline : null);
+        const confusions = draft
+          ? confusionsFromTimeline(draft.timeline)
+          : (Array.isArray(payload.confusions) ? payload.confusions : []);
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const report = await generateClearanceReport(artifactText, artifactType, chatFn, {
+          researchFn: mvp0ResearchFn,
+          timeline,
+          confusions
+        });
+        if (draft) report.draftId = draft.id;
+        report.userId = user.id;
+        const saved = await mvp0Store.saveReport(report);
+        if (draft) {
+          await mvp0Store.attachReportToDraft(draft.id, saved.id);
+        }
+        const isFallback = Boolean(saved.generation?.fallback);
+        jsonResponse(res, 200, {
+          ok: true,
+          report: saved,
+          fallback: isFallback,
+          ...(isFallback && saved.generation?.error ? { error: saved.generation.error } : {}),
+          detectedType: artifactType
+        });
+        return;
+      }
+
+      if (mvp0CardAnswerMatch) {
+        try {
+          const reportId = decodeURIComponent(mvp0CardAnswerMatch[1]);
+          const cardId = decodeURIComponent(mvp0CardAnswerMatch[2]);
+          const answer = clean(payload.answer || "");
+          if (!answer) {
+            jsonResponse(res, 400, { ok: false, error: "Missing answer" });
+            return;
+          }
+          const report = mvp0Store.getReport(reportId, user.id);
+          const card = report.sections.feynmanCards?.find(item => item.id === cardId);
+          if (!card) {
+            jsonResponse(res, 404, { ok: false, error: `Feynman card not found: ${cardId} in report ${reportId}` });
+            return;
+          }
+          const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+          const followUpResult = await feynmanFollowUp(card, answer, chatFn);
+          const aiFollowUp = followUpResult.shouldFollowUp
+            ? followUpResult.followUp
+            : followUpResult.summary;
+          const result = await mvp0Store.updateCardAnswer(reportId, cardId, answer, aiFollowUp, user.id);
+          jsonResponse(res, 200, {
+            ok: true,
+            card: result.card,
+            shouldFollowUp: followUpResult.shouldFollowUp,
+            fallback: (!aiApiKey || disableAi)
+          });
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+        }
+        return;
+      }
+
+      if (mvp0CorrectionMatch) {
+        try {
+          const reportId = decodeURIComponent(mvp0CorrectionMatch[1]);
+          const result = await mvp0Store.addCorrection(reportId, {
+            target: payload.target,
+            targetId: payload.targetId,
+            originalValue: payload.originalValue,
+            correctedValue: payload.correctedValue,
+            reason: payload.reason
+          }, user.id);
+          jsonResponse(res, 200, {
+            ok: true,
+            correction: result.correction,
+            report: result.report
+          });
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+        }
+        return;
+      }
+    }
+
+    // ── Device channels (Rokid/G2 glasses): a per-user device token scopes
+    // the response to its owner; the admin token stays as a labelled
+    // fallback. These routes must run before the admin-token gate below. ──
+
+    if (req.method === "GET" && url.pathname === "/api/rokid/clearance-entry") {
+      const channel = resolveDeviceChannel(req, res);
+      if (!channel) return;
+      const reports = channel.adminChannel ? mvp0Store.listReports() : mvp0Store.listReports(channel.userId);
+      const requestedReportId = url.searchParams.get("reportId") || "";
+      const requestedCardId = url.searchParams.get("cardId") || "";
+      const report = requestedReportId
+        ? reports.find(item => item.id === requestedReportId)
+        : reports.find(item => item.sections?.feynmanCards?.length);
+      if (!report || !report.sections?.feynmanCards?.length) {
+        jsonResponse(res, 200, {
+          ok: true,
+          platform: "rokid-aiui",
+          ...(channel.adminChannel ? { _adminChannel: true } : {}),
+          entry: null
+        });
+        return;
+      }
+      const cards = report.sections.feynmanCards;
+      const card = (requestedCardId && cards.find(item => item.id === requestedCardId)) ||
+        cards.find(item => !item.userAnswer) || cards[0];
+      const cardIndex = cards.findIndex(item => item.id === card.id);
+      jsonResponse(res, 200, {
+        ok: true,
+        platform: "rokid-aiui",
+        ...(channel.adminChannel ? { _adminChannel: true } : {}),
+        entry: {
+          reportId: report.id,
+          cardId: card.id,
+          nextCardId: cards.length > 1 ? cards[(cardIndex + 1) % cards.length].id : "",
+          createdAt: report.createdAt,
+          domain: clean(report.analysis?.userCapability?.currentDomain || "认知债务"),
+          target: clean(card.target || "理解缺口"),
+          prompt: clean(card.prompt || "请用自己的话解释这个问题。"),
+          cardNumber: cardIndex + 1,
+          cardCount: cards.length
+        }
+      });
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/g2/session") {
+      const channel = resolveDeviceChannel(req, res);
+      if (!channel) return;
+      const session = spiralStore.buildSession(url.searchParams.get("duration"));
+      jsonResponse(res, 200, { ok: true, session, ...(channel.adminChannel ? { _adminChannel: true } : {}) });
       return;
     }
 
@@ -1391,11 +1833,6 @@ const server = createServer(async (req, res) => {
       jsonResponse(res, 200, { ok: true, mode, card: spiralStore.nextReview() });
       return;
     }
-    if (req.method === "GET" && url.pathname === "/api/g2/session") {
-      const session = spiralStore.buildSession(url.searchParams.get("duration"));
-      jsonResponse(res, 200, { ok: true, session });
-      return;
-    }
     if (req.method === "GET" && url.pathname === "/api/rokid/session") {
       jsonResponse(
         res,
@@ -1404,39 +1841,8 @@ const server = createServer(async (req, res) => {
       );
       return;
     }
-    if (req.method === "GET" && url.pathname === "/api/rokid/clearance-entry") {
-      jsonResponse(res, 200, clearanceEntryPayload("rokid-aiui"));
-      return;
-    }
     if (req.method === "GET" && url.pathname === "/api/mentra/clearance-entry") {
       jsonResponse(res, 200, clearanceEntryPayload("mentra"));
-      return;
-    }
-
-    // ── MVP-0: cognitive-debt clearance report ──
-
-    if (req.method === "GET" && url.pathname === "/api/mvp0/reports") {
-      jsonResponse(res, 200, { ok: true, reports: mvp0Store.listReports() });
-      return;
-    }
-    const mvp1SessionMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)$/);
-    if (req.method === "GET" && mvp1SessionMatch) {
-      const session = mvp1Sessions.get(decodeURIComponent(mvp1SessionMatch[1]));
-      if (!session) {
-        jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
-        return;
-      }
-      jsonResponse(res, 200, { ok: true, session: publicSession(session, { revealScaffold: session.attempts.length > 0 }) });
-      return;
-    }
-    const mvp0ReportMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)$/);
-    if (req.method === "GET" && mvp0ReportMatch) {
-      try {
-        const report = mvp0Store.getReport(decodeURIComponent(mvp0ReportMatch[1]));
-        jsonResponse(res, 200, { ok: true, report });
-      } catch (error) {
-        jsonResponse(res, 404, { ok: false, error: error.message });
-      }
       return;
     }
 
@@ -1461,71 +1867,6 @@ const server = createServer(async (req, res) => {
     }
 
     const payload = parseJson(await readBody(req));
-
-    // ── MVP-1: source-grounded debt clearance ──
-
-    if (url.pathname === "/api/mvp1/sessions") {
-      try {
-        if (!aiApiKey || disableAi) {
-          jsonResponse(res, 503, { ok: false, error: "MVP-1 external research requires an active OpenAI API configuration" });
-          return;
-        }
-        const reportId = clean(payload.reportId || "");
-        const cardId = clean(payload.cardId || "");
-        if (!reportId || !cardId) {
-          jsonResponse(res, 400, { ok: false, error: "Missing reportId or cardId" });
-          return;
-        }
-        const report = mvp0Store.getReport(reportId);
-        const session = await startClearanceSession({ report, cardId, researchFn: researchClearanceContext });
-        mvp1Sessions.set(session.id, session);
-        jsonResponse(res, 200, { ok: true, session: publicSession(session) });
-      } catch (error) {
-        const status = /not found/i.test(String(error.message)) ? 404 : 502;
-        jsonResponse(res, status, { ok: false, error: error.message });
-      }
-      return;
-    }
-
-    const mvp1AnswerMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/answers$/);
-    if (mvp1AnswerMatch) {
-      try {
-        const session = mvp1Sessions.get(decodeURIComponent(mvp1AnswerMatch[1]));
-        if (!session) {
-          jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
-          return;
-        }
-        const attempt = await submitClearanceAnswer({
-          session,
-          answer: payload.answer,
-          analyzeFn: analyzeClearanceAnswer
-        });
-        jsonResponse(res, 200, {
-          ok: true,
-          attempt,
-          session: publicSession(session, { revealScaffold: true })
-        });
-      } catch (error) {
-        jsonResponse(res, 400, { ok: false, error: error.message });
-      }
-      return;
-    }
-
-    const mvp1EndMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/end$/);
-    if (mvp1EndMatch) {
-      const session = mvp1Sessions.get(decodeURIComponent(mvp1EndMatch[1]));
-      if (!session) {
-        jsonResponse(res, 404, { ok: false, error: "Clearance session not found" });
-        return;
-      }
-      const result = endClearanceSession(session);
-      jsonResponse(res, 200, {
-        ok: true,
-        result,
-        session: publicSession(session, { revealScaffold: true })
-      });
-      return;
-    }
 
     // ── MVP-0: collaboration timeline (step 1 of the report pipeline) ──
 
@@ -1591,115 +1932,6 @@ const server = createServer(async (req, res) => {
           ok: false,
           error: error.message
         });
-      }
-      return;
-    }
-
-    // ── MVP-0: cognitive-debt clearance report ──
-
-    if (req.method === "POST" && url.pathname === "/api/mvp0/report") {
-      let draft = null;
-      const draftId = clean(payload.draftId || "");
-      if (draftId) {
-        try {
-          draft = mvp0Store.getDraft(draftId);
-        } catch (error) {
-          jsonResponse(res, 404, { ok: false, error: error.message });
-          return;
-        }
-      }
-      const artifactText = String(draft ? draft.input.artifactText : payload.artifactText || "").trim();
-      let artifactType = clean(draft ? draft.input.artifactType : payload.artifactType || "");
-      if (!artifactText) {
-        jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
-        return;
-      }
-      // Auto-detect type if not provided or empty
-      if (!artifactType) {
-        artifactType = detectArtifactType(artifactText);
-      }
-      const timeline = draft ? draft.timeline : (payload.timeline && typeof payload.timeline === "object" ? payload.timeline : null);
-      const confusions = draft
-        ? confusionsFromTimeline(draft.timeline)
-        : (Array.isArray(payload.confusions) ? payload.confusions : []);
-      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-      const report = await generateClearanceReport(artifactText, artifactType, chatFn, {
-        researchFn: mvp0ResearchFn,
-        timeline,
-        confusions
-      });
-      if (draft) report.draftId = draft.id;
-      const saved = await mvp0Store.saveReport(report);
-      if (draft) {
-        await mvp0Store.attachReportToDraft(draft.id, saved.id);
-      }
-      const isFallback = Boolean(saved.generation?.fallback);
-      jsonResponse(res, 200, {
-        ok: true,
-        report: saved,
-        fallback: isFallback,
-        ...(isFallback && saved.generation?.error ? { error: saved.generation.error } : {}),
-        detectedType: artifactType
-      });
-      return;
-    }
-
-    const mvp0CardAnswerMatch = url.pathname.match(
-      /^\/api\/mvp0\/reports\/([^/]+)\/cards\/([^/]+)\/answer$/
-    );
-    if (mvp0CardAnswerMatch) {
-      try {
-        const reportId = decodeURIComponent(mvp0CardAnswerMatch[1]);
-        const cardId = decodeURIComponent(mvp0CardAnswerMatch[2]);
-        const answer = clean(payload.answer || "");
-        if (!answer) {
-          jsonResponse(res, 400, { ok: false, error: "Missing answer" });
-          return;
-        }
-        const report = mvp0Store.getReport(reportId);
-        const card = report.sections.feynmanCards?.find(item => item.id === cardId);
-        if (!card) {
-          jsonResponse(res, 404, { ok: false, error: `Feynman card not found: ${cardId} in report ${reportId}` });
-          return;
-        }
-        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-        const followUpResult = await feynmanFollowUp(card, answer, chatFn);
-        const aiFollowUp = followUpResult.shouldFollowUp
-          ? followUpResult.followUp
-          : followUpResult.summary;
-        const result = await mvp0Store.updateCardAnswer(reportId, cardId, answer, aiFollowUp);
-        jsonResponse(res, 200, {
-          ok: true,
-          card: result.card,
-          shouldFollowUp: followUpResult.shouldFollowUp,
-          fallback: (!aiApiKey || disableAi)
-        });
-      } catch (error) {
-        jsonResponse(res, 404, { ok: false, error: error.message });
-      }
-      return;
-    }
-
-    const mvp0CorrectionMatch = url.pathname.match(
-      /^\/api\/mvp0\/reports\/([^/]+)\/corrections$/
-    );
-    if (mvp0CorrectionMatch) {
-      try {
-        const reportId = decodeURIComponent(mvp0CorrectionMatch[1]);
-        const result = await mvp0Store.addCorrection(reportId, {
-          target: payload.target,
-          targetId: payload.targetId,
-          originalValue: payload.originalValue,
-          correctedValue: payload.correctedValue,
-          reason: payload.reason
-        });
-        jsonResponse(res, 200, {
-          ok: true,
-          correction: result.correction,
-          report: result.report
-        });
-      } catch (error) {
-        jsonResponse(res, 404, { ok: false, error: error.message });
       }
       return;
     }

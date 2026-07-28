@@ -1078,6 +1078,28 @@ a {
   box-shadow: var(--shadow-sm);
 }
 
+/* ── Demo ── */
+
+.demo-bar {
+  margin-bottom: 2px;
+}
+
+.btn-demo-sample {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.btn-demo-sample:hover {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
 .artifact-input {
   min-height: 310px;
   padding: 20px;

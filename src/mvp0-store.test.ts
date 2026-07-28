@@ -204,6 +204,63 @@ describe("MVP-0 store", () => {
     });
   });
 
+  describe("updateCardClearance", () => {
+    it("writes the cautious clearance result onto the card", async () => {
+      await store.saveReport(makeReport({ id: "report-001" }));
+      const result = await store.updateCardClearance("report-001", "card-001", {
+        sessionId: "session-9",
+        status: "needs_practice",
+        sourceReviewRequired: false,
+        endedAt: "2026-07-26T12:00:00.000Z",
+        nextRecommendation: "请复习教学反馈，再用自己的话解释一次。",
+        remainingGaps: ["CORS boundary"]
+      });
+      expect(result.card.clearance).toMatchObject({
+        sessionId: "session-9",
+        status: "needs_practice",
+        sourceReviewRequired: false,
+        endedAt: "2026-07-26T12:00:00.000Z"
+      });
+      expect(result.card.clearance.nextRecommendation).toContain("复习");
+      expect(result.card.clearance.remainingGaps).toEqual(["CORS boundary"]);
+    });
+
+    it("overwrites the clearance result on repeat calls and persists it", async () => {
+      await store.saveReport(makeReport({ id: "report-001" }));
+      await store.updateCardClearance("report-001", "card-001", { sessionId: "s-1", status: "needs_practice" });
+      await store.updateCardClearance("report-001", "card-001", { sessionId: "s-2", status: "provisionally_cleared" });
+      const store2 = createMvp0Store(storePath);
+      await store2.load();
+      const card = store2.getReport("report-001").sections.feynmanCards.find(item => item.id === "card-001");
+      expect(card.clearance.sessionId).toBe("s-2");
+      expect(card.clearance.status).toBe("provisionally_cleared");
+    });
+
+    it("caps remainingGaps at eight cleaned entries", async () => {
+      await store.saveReport(makeReport({ id: "report-001" }));
+      const result = await store.updateCardClearance("report-001", "card-001", {
+        sessionId: "s-1",
+        status: "needs_practice",
+        remainingGaps: Array.from({ length: 10 }, (_, index) => `  gap   ${index + 1}  `)
+      });
+      expect(result.card.clearance.remainingGaps).toHaveLength(8);
+      expect(result.card.clearance.remainingGaps[0]).toBe("gap 1");
+    });
+
+    it("throws clear error when report not found", async () => {
+      await expect(
+        store.updateCardClearance("nonexistent", "card-001", { sessionId: "s-1", status: "needs_practice" })
+      ).rejects.toThrow("Report not found: nonexistent");
+    });
+
+    it("throws clear error when card not found", async () => {
+      await store.saveReport(makeReport({ id: "report-001" }));
+      await expect(
+        store.updateCardClearance("report-001", "nonexistent-card", { sessionId: "s-1", status: "needs_practice" })
+      ).rejects.toThrow("Feynman card not found: nonexistent-card in report report-001");
+    });
+  });
+
   describe("addCorrection", () => {
     it("appends a correction to the report", async () => {
       await store.saveReport(makeReport({ id: "report-001" }));
