@@ -189,10 +189,10 @@ export function createDemoResearchFallback(request, error) {
 export function createDemoAnswerFallback(input) {
   const answer = clean(input?.answer).toLowerCase();
   const signals = [
-    /d-state|uninterruptible|不可中断|阻塞/.test(answer),
-    /i\/o|io wait|等待.*(磁盘|存储|输入输出)|磁盘|存储/.test(answer),
-    /不是.*根因|症状|不一定.*nginx|restart|重启.*(不|未必)/.test(answer),
-    /日志|latency|延迟|iostat|pressure|proc|监控|指标|验证/.test(answer)
+    /d[-\s]*state|d\s*状态|uninterruptible|不可中断|阻塞/.test(answer),
+    /i\/o|io\s*wait|iowait|等待.*(磁盘|存储|输入输出)|磁盘|存储/.test(answer),
+    /不是.*根因|症状|不一定.*nginx|restart|重启.*(不|未必)|暂时.*缓解|没有.*解决.*根因|减少.*而不是.*解决/.test(answer),
+    /日志|latency|延迟|iostat|pressure|proc|监控|指标|验证|systemd|dmesg|负载/.test(answer)
   ];
   const coverage = signals.filter(Boolean).length / signals.length;
   const missing = [
