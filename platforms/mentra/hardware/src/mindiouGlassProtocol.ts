@@ -66,8 +66,8 @@ export function crc8(data: Uint8Array): number {
 
 /* ---------- 编码 ---------- */
 
-function encodeSingleFrame(type: number, seq: number, flags: number, payload: Uint8Array): Uint8Array {
-  if (payload.length > 250) throw new Error("单帧负载超过 250 字节");
+export function encodeSingleFrame(type: number, seq: number, flags: number, payload: Uint8Array): Uint8Array {
+  if (payload.length > 250) throw new ProtocolError("单帧负载超过 250 字节");
   const frame = new Uint8Array(5 + payload.length + 1);
   frame[0] = PROTOCOL_VERSION;
   frame[1] = type;

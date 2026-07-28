@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { isPublicRoute, navigate, parseRoute } from "./router";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  forgetSessionId,
+  isPublicRoute,
+  navigate,
+  parseRoute,
+  recallDraftId,
+  recallReportId,
+  recallSessionId,
+  rememberDraftId,
+  rememberReportId,
+  rememberSessionId
+} from "./router";
 
 describe("parseRoute", () => {
   it("returns landing for empty hash", () => {
@@ -97,5 +108,40 @@ describe("navigate", () => {
   it("sets hash for session", () => {
     navigate({ name: "session", sessionId: "s-1" });
     expect(location.hash).toBe("#/session/s-1");
+  });
+});
+
+// sessionStorage 持久化：刷新可恢复的 reportId / draftId / sessionId
+describe("session persistence", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it("remembers and recalls report id", () => {
+    rememberReportId("rpt-persist-1");
+    expect(recallReportId()).toBe("rpt-persist-1");
+  });
+
+  it("remembers and recalls draft id", () => {
+    rememberDraftId("draft-persist-1");
+    expect(recallDraftId()).toBe("draft-persist-1");
+  });
+
+  it("remembers and recalls session id", () => {
+    rememberSessionId("ses-persist-1");
+    expect(recallSessionId()).toBe("ses-persist-1");
+  });
+
+  it("forgets session id after rememberSessionId", () => {
+    rememberSessionId("ses-persist-2");
+    expect(recallSessionId()).toBe("ses-persist-2");
+    forgetSessionId();
+    expect(recallSessionId()).toBeNull();
+  });
+
+  it("returns null when nothing has been set", () => {
+    expect(recallReportId()).toBeNull();
+    expect(recallDraftId()).toBeNull();
+    expect(recallSessionId()).toBeNull();
   });
 });

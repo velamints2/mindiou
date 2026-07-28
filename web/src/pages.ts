@@ -617,6 +617,15 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
   header.appendChild(headerActions)
   page.appendChild(header)
 
+  // 降级模式提示：策展备用研究或生成兜底，需对用户透明
+  // ClearanceSession 类型未声明 generation，运行时可能存在，用类型断言安全访问
+  const hasGenerationFallback =
+    Boolean((session as { generation?: { fallback?: boolean } }).generation?.fallback)
+  if (session.researchMode === 'curated_demo_fallback' || hasGenerationFallback) {
+    page.appendChild(el('div', 'notice notice-fallback',
+      '当前为策展备用模式，研究来源为预设材料'))
+  }
+
   // 清偿问题
   const questionBox = el('section', 'session-question')
   questionBox.appendChild(el('p', 'session-question-label', '清偿问题'))

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { renderAppPage } from "./pages";
+import { fetchSession } from "./api";
+import { renderAppPage, renderSessionPage } from "./pages";
 import { el } from "./router";
 
 // Mock API module to avoid network calls
@@ -10,7 +11,8 @@ vi.mock("./api", () => ({
   getAccessToken: vi.fn().mockReturnValue("fake-token"),
   setAccessToken: vi.fn(),
   validateAccessToken: vi.fn().mockResolvedValue(true),
-  checkAccessSession: vi.fn().mockResolvedValue(true)
+  checkAccessSession: vi.fn().mockResolvedValue(true),
+  fetchSession: vi.fn()
 }));
 
 // Mock router navigate
@@ -77,5 +79,43 @@ describe("renderAppPage", () => {
     const steps = root.querySelectorAll(".step-dot");
     expect(steps.length).toBe(3);
     expect(steps[0].classList.contains("is-active")).toBe(true);
+  });
+});
+
+// 策展备用模式降级通知：研究来源为预设材料，必须对用户透明
+describe("renderSessionPage", () => {
+  let root: HTMLElement;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    root = el("div");
+    document.body.appendChild(root);
+  });
+
+  it("shows fallback notice when session.researchMode is curated_demo_fallback", async () => {
+    const fallbackSession = {
+      id: "s-fallback-1",
+      reportId: "r-1",
+      cardId: "c-1",
+      createdAt: "2026-07-27T00:00:00.000Z",
+      endedAt: null,
+      state: "awaiting_answer",
+      originalCard: { id: "c-1", target: "目标能力", prompt: "解释提示" },
+      clearanceQuestion: "请解释这个问题",
+      researchMode: "curated_demo_fallback",
+      sources: [],
+      attempts: [],
+      finalResult: null
+    };
+    vi.mocked(fetchSession).mockResolvedValue({
+      ok: true,
+      session: fallbackSession as never
+    });
+
+    await renderSessionPage(root, "s-fallback-1");
+
+    const notice = root.querySelector(".notice-fallback");
+    expect(notice).not.toBeNull();
+    expect(notice?.textContent).toContain("策展备用模式");
   });
 });

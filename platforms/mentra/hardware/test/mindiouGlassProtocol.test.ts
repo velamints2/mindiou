@@ -4,6 +4,7 @@ import {
   FrameDecoder,
   Gesture,
   MSG_DISPLAY_PAGE,
+  MSG_DISPLAY_TOAST,
   MSG_EVENT_BATTERY,
   MSG_EVENT_BUTTON,
   MSG_EVENT_TOUCH,
@@ -13,7 +14,9 @@ import {
   decodeDisplayPage,
   decodeGlassesEvent,
   encodeDisplayPage,
-  encodeMessage
+  encodeMessage,
+  encodeSingleFrame,
+  encodeToast
 } from "../src/mindiouGlassProtocol.js";
 
 describe("crc8", () => {
@@ -214,5 +217,125 @@ describe("decodeGlassesEvent", () => {
     expect(() => decodeGlassesEvent(frameOf(MSG_EVENT_TOUCH, []))).toThrow(ProtocolError);
     expect(() => decodeGlassesEvent(frameOf(MSG_EVENT_BATTERY, [80]))).toThrow(ProtocolError);
     expect(() => decodeGlassesEvent(frameOf(MSG_HELLO, [1, 2]))).toThrow(ProtocolError);
+  });
+});
+
+describe("P0 边界测试", () => {
+  // 复用解码辅助：把上行事件 payload 编码成完整帧再解出来
+  function frameOf(type: number, payload: number[]) {
+    const decoder = new FrameDecoder();
+    const [bytes] = encodeMessage(type, 1, new Uint8Array(payload));
+    return decoder.push(bytes!)[0]!;
+  }
+
+  it("CHUNK_PAYLOAD_MAX - 1 仍为单帧", () => {
+    const payload = new Uint8Array(CHUNK_PAYLOAD_MAX - 1);
+    const chunks = encodeMessage(MSG_DISPLAY_PAGE, 1, payload);
+    expect(chunks).toHaveLength(1);
+  });
+
+  it("CHUNK_PAYLOAD_MAX + 1 触发 2 片分片", () => {
+    const payload = new Uint8Array(CHUNK_PAYLOAD_MAX + 1);
+    const chunks = encodeMessage(MSG_DISPLAY_PAGE, 1, payload);
+    expect(chunks).toHaveLength(2);
+    // 验证分片重组后内容一致
+    const decoder = new FrameDecoder();
+    const done: ReturnType<FrameDecoder["push"]> = [];
+    for (const chunk of chunks) done.push(...decoder.push(chunk));
+    expect(done).toHaveLength(1);
+    expect(Array.from(done[0]!.payload)).toEqual(Array.from(payload));
+  });
+
+  it("DISPLAY_PAGE 空正文（titleLen > 0, body 为空字符串）", () => {
+    const payload = encodeDisplayPage("只有标题", "");
+    expect(decodeDisplayPage(payload)).toEqual({ title: "只有标题", body: "" });
+  });
+
+  it("DISPLAY_PAGE titleLen 越界应抛 ProtocolError", () => {
+    // 构造 titleLen=10 但实际 title 仅 3 字节
+    const payload = new Uint8Array([10, 0x41, 0x42, 0x43]);
+    expect(() => decodeDisplayPage(payload)).toThrow(ProtocolError);
+    expect(() => decodeDisplayPage(payload)).toThrow("DISPLAY_PAGE 标题长度越界");
+  });
+
+  it("DISPLAY_PAGE 超长 title（>250 UTF-8 字节）应抛 ProtocolError", () => {
+    const longTitle = "a".repeat(251);
+    expect(() => encodeDisplayPage(longTitle, "正文")).toThrow(ProtocolError);
+    expect(() => encodeDisplayPage(longTitle, "正文")).toThrow("标题过长");
+  });
+
+  it("HELLO capabilities 位掩码完整解析（bit0=1, bit1=2, bit2=4, 组合 0b111=7）", () => {
+    expect(decodeGlassesEvent(frameOf(MSG_HELLO, [1, 2, 0b001]))).toEqual({
+      kind: "hello", firmware: "1.2", capabilities: 1
+    });
+    expect(decodeGlassesEvent(frameOf(MSG_HELLO, [1, 2, 0b010]))).toEqual({
+      kind: "hello", firmware: "1.2", capabilities: 2
+    });
+    expect(decodeGlassesEvent(frameOf(MSG_HELLO, [1, 2, 0b100]))).toEqual({
+      kind: "hello", firmware: "1.2", capabilities: 4
+    });
+    expect(decodeGlassesEvent(frameOf(MSG_HELLO, [1, 2, 0b111]))).toEqual({
+      kind: "hello", firmware: "1.2", capabilities: 7
+    });
+  });
+
+  it("ACK 非零错误码全部判 ok:false（0x02, 0x03, 0xFF）", () => {
+    for (const code of [0x02, 0x03, 0xff]) {
+      expect(decodeGlassesEvent(frameOf(0x84, [42, code]))).toEqual({
+        kind: "ack",
+        ackedSeq: 42,
+        ok: false
+      });
+    }
+  });
+
+  it("触控手势枚举完整覆盖", () => {
+    // 使用源码实际枚举值：TAP=1, DOUBLE_TAP=2, TRIPLE_TAP=3,
+    // PRESS_HOLD=4, SWIPE_UP=5, SWIPE_DOWN=6
+    const cases: Array<[number, keyof typeof Gesture]> = [
+      [Gesture.TAP, "TAP"],
+      [Gesture.DOUBLE_TAP, "DOUBLE_TAP"],
+      [Gesture.TRIPLE_TAP, "TRIPLE_TAP"],
+      [Gesture.PRESS_HOLD, "PRESS_HOLD"],
+      [Gesture.SWIPE_UP, "SWIPE_UP"],
+      [Gesture.SWIPE_DOWN, "SWIPE_DOWN"]
+    ];
+    for (const [code, name] of cases) {
+      expect(decodeGlassesEvent(frameOf(MSG_EVENT_TOUCH, [code]))).toEqual({
+        kind: "touch",
+        gesture: name
+      });
+    }
+  });
+});
+
+describe("P1 异常路径测试", () => {
+  it("续帧 type 与首帧不匹配（同 seq 不同 type）应报错", () => {
+    const payloadA = new Uint8Array(CHUNK_PAYLOAD_MAX + 10).fill(1);
+    const chunksA = encodeMessage(MSG_DISPLAY_PAGE, 5, payloadA);
+    const decoder = new FrameDecoder();
+    decoder.push(chunksA[0]!); // 首帧: type=MSG_DISPLAY_PAGE, seq=5
+
+    // 构造同 seq 但不同 type 的分片消息
+    const payloadB = new Uint8Array(CHUNK_PAYLOAD_MAX + 10).fill(2);
+    const chunksB = encodeMessage(MSG_DISPLAY_TOAST, 5, payloadB); // type=TOAST, seq=5
+    expect(() => decoder.push(chunksB[1]!)).toThrow(ProtocolError); // 续帧 type 不匹配
+  });
+
+  it("encodeSingleFrame 单帧负载 > 250 抛 ProtocolError", () => {
+    const oversize = new Uint8Array(251);
+    expect(() => encodeSingleFrame(MSG_DISPLAY_PAGE, 1, 0, oversize)).toThrow(ProtocolError);
+    expect(() => encodeSingleFrame(MSG_DISPLAY_PAGE, 1, 0, oversize)).toThrow("单帧负载超过 250 字节");
+  });
+
+  it("encodeToast 编码往返（编码后用 FrameDecoder 解码，验证 type=0x03 且 payload 正确）", () => {
+    const text = "操作成功";
+    const payload = encodeToast(text);
+    const [frameBytes] = encodeMessage(MSG_DISPLAY_TOAST, 3, payload);
+    const decoder = new FrameDecoder();
+    const frames = decoder.push(frameBytes!);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.type).toBe(MSG_DISPLAY_TOAST);
+    expect(new TextDecoder().decode(frames[0]!.payload)).toBe(text);
   });
 });

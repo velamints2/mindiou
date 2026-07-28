@@ -403,3 +403,113 @@ describe("Mentra 清偿状态机 · 异常与边界", () => {
     expect(calls.filter(c => c === "fetchEntry").length).toBe(2);
   });
 });
+
+describe("Mentra 清偿状态机 · P0/P1 缺口补充", () => {
+  // 局部辅助：从单个 ScreenSpec 拼出可断言文本（与外层 lastText 同语义，但不依赖 Harness）。
+  const textOf = (s: ScreenSpec | undefined) =>
+    `${s?.title || ""}\n${s?.text || ""}${s?.top || ""}${s?.bottom || ""}`;
+
+  it("P0 缺口 1：AI 反馈多页翻页交互（pageDown/pageUp/边界提示/repeat）", async () => {
+    const screens: ScreenSpec[] = [];
+    // 构造超过 FEEDBACK_PAGE_MAX=92 的反馈，使 paginate 产生 2+ 页
+    const longFeedback =
+      "CORS 是浏览器同源策略的延伸，控制 JavaScript 能否读取跨域响应。服务器可达仅证明传输层通，CORS 决定浏览器是否把响应交给脚本。预检请求单独验证方法与自定义头部。这是传输层与浏览器策略的边界。";
+    const runtime = new ClearanceRuntime({
+      show: s => screens.push(s),
+      fetchEntry: async () => entry,
+      startSession: async () => makeSession(),
+      submitAnswer: async () => ({
+        attempt: {
+          id: "a1",
+          createdAt: "",
+          answer: "x",
+          analysis: analysis({ feedback: longFeedback, teaching: "" })
+        },
+        session: makeSession({ state: "answered" })
+      }),
+      endSession: async () => { throw new Error("unreachable"); }
+    });
+    await runtime.dispatch({ type: "start" });
+    await runtime.handleUtterance("任意回答");
+    expect(runtime.getState().phase).toBe("feedback");
+    expect(runtime.getState().pages.length).toBeGreaterThanOrEqual(2);
+    // 初始显示第 1 页
+    expect(textOf(screens.at(-1))).toContain("反馈 1/");
+    // SWIPE_DOWN（pageDown）→ 第 2 页
+    await runtime.handleGesture("SWIPE_DOWN");
+    expect(textOf(screens.at(-1))).toContain("反馈 2/");
+    // SWIPE_UP（pageUp）→ 回到第 1 页
+    await runtime.handleGesture("SWIPE_UP");
+    expect(textOf(screens.at(-1))).toContain("反馈 1/");
+    // 在第 1 页 SWIPE_UP → "已是第一页" 提示
+    await runtime.handleGesture("SWIPE_UP");
+    expect(textOf(screens.at(-1))).toContain("已是第一页");
+    // SWIPE_DOWN → 第 2 页
+    await runtime.handleGesture("SWIPE_DOWN");
+    expect(textOf(screens.at(-1))).toContain("反馈 2/");
+    // 在最后一页 SWIPE_DOWN → "已是最后一页" 提示（不进入追问）
+    await runtime.handleGesture("SWIPE_DOWN");
+    expect(textOf(screens.at(-1))).toContain("已是最后一页");
+    // repeat（DOUBLE_TAP）→ 重新显示当前页（第 2 页）
+    await runtime.handleGesture("DOUBLE_TAP");
+    expect(textOf(screens.at(-1))).toContain("反馈 2/");
+  });
+
+  it("P0 缺口 2：startSession 失败后重试恢复到 question", async () => {
+    const h = makeHarness();
+    h.failNext.set("startSession", new Error("503 service unavailable"));
+    await h.runtime.dispatch({ type: "start" });
+    expect(h.runtime.getState().phase).toBe("error");
+    expect(lastText(h)).toContain("出错了");
+    // 重试 → 重新调用 startSession（pending 保留）→ 恢复到 question
+    await h.runtime.handleUtterance("重试");
+    expect(h.calls.filter(c => c === "startSession:c1").length).toBe(2);
+    expect(h.runtime.getState().phase).toBe("question");
+    expect(lastText(h)).toContain("欠条 1/2");
+  });
+
+  it("P0 缺口 3：后端 data 类异常进入 error 态且可重试", async () => {
+    // 模拟 BackendClient 在 session.id 缺失时抛出的 data 类异常：
+    // createBackendClient.startSession 校验 !session.id 时抛 BackendError("data", "后端未返回清偿会话")。
+    // 状态机经由 guard 捕获后进入 error 态；friendlyError 对非网络错误给出"暂时无法继续：..."友好文案。
+    // 这里用普通 Error 模拟（failNext 接受任意 Error），friendlyError 输出与 BackendError("data",...) 一致。
+    const h = makeHarness();
+    h.failNext.set("startSession", new Error("后端未返回清偿会话"));
+    await h.runtime.dispatch({ type: "start" });
+    expect(h.runtime.getState().phase).toBe("error");
+    expect(lastText(h)).toContain("出错了");
+    expect(lastText(h)).toContain("暂时无法继续");
+    expect(lastText(h)).toContain("后端未返回清偿会话");
+    // 可重试 → 恢复到 question
+    await h.runtime.handleUtterance("重试");
+    expect(h.runtime.getState().phase).toBe("question");
+  });
+
+  it("P1 缺口 4：question 阶段 next 直接跳过当前卡片打开下一张", async () => {
+    const h = makeHarness();
+    await h.runtime.dispatch({ type: "start" });
+    expect(h.runtime.getState().phase).toBe("question");
+    // TRIPLE_TAP → next → beginNextCard（entry.nextCardId=c2）
+    await h.runtime.handleGesture("TRIPLE_TAP");
+    expect(h.calls).toContain("startSession:c2");
+    expect(h.runtime.getState().phase).toBe("question");
+  });
+
+  it("P1 缺口 5：followup 与 error 阶段不泄露 scaffold", async () => {
+    // followup 阶段：屏幕只显示追问问题，不含 scaffold
+    const h = makeHarness();
+    await h.runtime.dispatch({ type: "start" });
+    await h.runtime.handleUtterance("随便说说"); // → feedback（needs_practice，有 nextQuestion）
+    await h.runtime.handleGesture("TAP"); // continue → followup
+    expect(h.runtime.getState().phase).toBe("followup");
+    expect(lastText(h)).not.toContain(SCAFFOLD_POINT);
+
+    // error 阶段：屏幕只显示错误文案与提示，不含 scaffold
+    const h2 = makeHarness();
+    h2.failNext.set("submitAnswer", new Error("提交失败"));
+    await h2.runtime.dispatch({ type: "start" });
+    await h2.runtime.handleUtterance("回答");
+    expect(h2.runtime.getState().phase).toBe("error");
+    expect(lastText(h2)).not.toContain(SCAFFOLD_POINT);
+  });
+});
