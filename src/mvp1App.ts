@@ -723,6 +723,26 @@ function renderFinal(session: ClearanceSession): HTMLElement {
     section.appendChild(block)
   }
 
+  // ── 训练系统信息 ──
+  const trainingInfo = el('div', 'training-info-block')
+  trainingInfo.appendChild(el('p', 'training-info-title', '已完成首次补偿训练'))
+
+  const passed = result.status === 'provisionally_cleared'
+  const masteryText = passed
+    ? '你已经在当前材料帮助下完成了核心解释。当前状态：初步理解。'
+    : '当前状态：需要继续练习。'
+  trainingInfo.appendChild(el('p', 'training-info-mastery', masteryText))
+
+  trainingInfo.appendChild(el('p', 'training-info-hints', '本次会话无提示记录。'))
+
+  trainingInfo.appendChild(el('p', 'training-info-next', '系统将在未来通过无提示回忆和场景题继续验证你是否真正掌握。'))
+
+  const trainingLink = el('a', 'btn btn-secondary training-link', '查看训练系统')
+  trainingLink.href = '/training.html'
+  trainingInfo.appendChild(trainingLink)
+
+  section.appendChild(trainingInfo)
+
   return section
 }
 

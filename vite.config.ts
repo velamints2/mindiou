@@ -9,7 +9,8 @@ export default defineConfig({
         main: "index.html",
         desktop: "desktop.html",
         report: "report.html",
-        mvp1: "mvp1.html"
+        mvp1: "mvp1.html",
+        training: "training.html"
       }
     }
   },
