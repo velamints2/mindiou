@@ -1,0 +1,24 @@
+[Unit]
+Description=MindIOU Mentra TPA
+After=network.target
+# 可选：等主后端先启动
+# After=mindiou.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mindiou/evenhub-g2-learning/platforms/mentra
+EnvironmentFile=/etc/mindiou.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/mindiou/evenhub-g2-learning/platforms/mentra/tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

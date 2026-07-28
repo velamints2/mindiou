@@ -51,7 +51,7 @@ webhook 回调地址需指向本服务的公网 URL。
 
 ```bash
 npm run check   # tsc --noEmit
-npm test        # vitest，47 例（含黄金路径端到端显示序列、异常恢复、协议健壮性）
+npm test        # vitest，52 例（含黄金路径端到端显示序列、异常恢复、协议健壮性）
 npm run build   # tsc 产出 dist/
 ```
 
@@ -148,6 +148,6 @@ sudo systemctl restart mindiou-mentra    # 重启
 
 ## 验证边界
 
-- 单测证明状态机、显示序列、错误态、重试与重入逻辑（47 例 VERIFIED）。
+- 单测证明状态机、显示序列、错误态、重试与重入逻辑（52 例 VERIFIED）。
 - TPA 本地启动 + 健康检查 + webhook POST 返回 200 已在本地验证（VERIFIED）。
 - G2 真机配对、麦克风、触控、延迟、伴随手机网络路由与退出行为必须在真机上验证后才能宣称可用（BLOCKED_EXTERNAL）。
