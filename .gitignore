@@ -15,3 +15,6 @@ evals/payload-*-input.json
 
 # Local proxy helper (developer-specific, not needed in repo)
 force-proxy.cjs
+
+# Design review / audit screenshots (transient, not product assets)
+audits/

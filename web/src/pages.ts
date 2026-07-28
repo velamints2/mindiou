@@ -3,21 +3,29 @@
 // 核心闭环：登录 → 输入材料 → 报告 → 选卡 → 清偿会话 → 结果
 
 import {
+  ApiError,
+  checkAuthSession,
   checkHealth,
+  createDeviceToken,
   createSession,
   endSession,
+  fetchCurrentUser,
   fetchDraft,
   fetchReport,
   fetchSession,
   generateReport,
   generateTimeline,
   getAccessToken,
-  logoutAccess,
+  listDeviceTokens,
+  login,
+  logoutAuth,
+  register,
+  revokeDeviceToken,
   saveDraftConfusions,
   setAccessToken,
-  submitAnswer,
-  validateAccessToken
+  submitAnswer
 } from './api'
+import type { DeviceTokenInfo } from './api'
 import type {
   ClearanceReport,
   ClearanceSession,
@@ -113,58 +121,163 @@ function stepIndicator(active: 1 | 2 | 3): HTMLElement {
 // ── 登录页 ──
 
 export function renderLoginPage(root: HTMLElement): void {
-  const existing = getAccessToken()
   const page = el('div', 'page page-login')
-  page.appendChild(el('h1', 'brand-title', 'MindIOU'))
+  page.appendChild(el('h1', 'brand-title', '登录 MindIOU'))
   page.appendChild(el('p', 'brand-subtitle', '把 AI 代劳转化为真实能力成长'))
 
   const card = el('div', 'login-card')
-  card.appendChild(el('h2', 'login-heading', '邀请码入口'))
-  card.appendChild(el('p', 'login-desc', '请输入你收到的邀请码以继续。'))
-  card.appendChild(connectionStatusBadge())
+  card.appendChild(el('h2', 'login-heading', '账户登录'))
+  card.appendChild(el('p', 'login-desc', '用邮箱和密码登录你的账户'))
 
   const form = el('form', 'login-form') as HTMLFormElement
-  const input = el('input', 'login-input') as HTMLInputElement
-  input.type = 'password'
-  input.placeholder = '输入邀请码'
-  input.value = existing || ''
-  input.required = true
-  input.autocomplete = 'current-password'
-  form.appendChild(input)
+
+  const emailInput = el('input', 'login-input') as HTMLInputElement
+  emailInput.type = 'email'
+  emailInput.placeholder = '邮箱'
+  emailInput.required = true
+  emailInput.autocomplete = 'email'
+  form.appendChild(emailInput)
+
+  const passwordInput = el('input', 'login-input') as HTMLInputElement
+  passwordInput.type = 'password'
+  passwordInput.placeholder = '密码'
+  passwordInput.required = true
+  passwordInput.autocomplete = 'current-password'
+  form.appendChild(passwordInput)
 
   const status = el('p', 'login-status')
   form.appendChild(status)
 
-  const submit = el('button', 'btn btn-primary', '进入') as HTMLButtonElement
+  const submit = el('button', 'btn btn-primary', '登录') as HTMLButtonElement
   submit.type = 'submit'
   form.appendChild(submit)
 
   form.onsubmit = async (e) => {
     e.preventDefault()
-    const token = input.value.trim()
-    if (!token) {
-      status.textContent = '请输入邀请码'
+    const email = emailInput.value.trim()
+    const password = passwordInput.value
+    if (!email || !password) {
+      status.textContent = '请输入邮箱和密码'
       return
     }
     submit.disabled = true
-    status.textContent = '验证中…'
+    status.textContent = '登录中…'
     try {
-      const ok = await validateAccessToken(token)
-      if (ok) {
-        setAccessToken(token)
-        status.textContent = ''
-        navigate({ name: 'app' })
+      await login(email, password)
+      // setAccessToken 已在 login 内完成
+      status.textContent = ''
+      navigate({ name: 'app' })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        status.textContent = '邮箱或密码不正确'
       } else {
-        status.textContent = '邀请码无效，请检查后重试'
+        status.textContent = err instanceof Error ? err.message : '登录失败，请稍后重试'
       }
-    } catch {
-      // 网络错误时也接受 token：后端可能未开启鉴权，仅网络不通
-      status.textContent = '无法连接服务，请稍后重试'
     } finally {
       submit.disabled = false
     }
   }
   card.appendChild(form)
+
+  const footer = el('p', 'login-footer')
+  const registerLink = el('a', 'login-link', '还没有账户？注册') as HTMLAnchorElement
+  registerLink.href = '#/register'
+  footer.appendChild(registerLink)
+  card.appendChild(footer)
+
+  page.appendChild(card)
+  root.appendChild(page)
+}
+
+// ── 注册页 ──
+
+export function renderRegisterPage(root: HTMLElement): void {
+  const page = el('div', 'page page-register')
+  page.appendChild(el('h1', 'brand-title', '创建 MindIOU 账户'))
+  page.appendChild(el('p', 'brand-subtitle', '把 AI 代劳转化为真实能力成长'))
+
+  const card = el('div', 'login-card')
+  card.appendChild(el('h2', 'login-heading', '创建账户'))
+  card.appendChild(el('p', 'login-desc', '填写邮箱和密码创建你的 MindIOU 账户'))
+
+  const form = el('form', 'login-form') as HTMLFormElement
+
+  const emailInput = el('input', 'login-input') as HTMLInputElement
+  emailInput.type = 'email'
+  emailInput.placeholder = '邮箱'
+  emailInput.required = true
+  emailInput.autocomplete = 'email'
+  form.appendChild(emailInput)
+
+  const passwordInput = el('input', 'login-input') as HTMLInputElement
+  passwordInput.type = 'password'
+  passwordInput.placeholder = '密码（至少 8 位）'
+  passwordInput.required = true
+  passwordInput.autocomplete = 'new-password'
+  form.appendChild(passwordInput)
+
+  const confirmInput = el('input', 'login-input') as HTMLInputElement
+  confirmInput.type = 'password'
+  confirmInput.placeholder = '确认密码'
+  confirmInput.required = true
+  confirmInput.autocomplete = 'new-password'
+  form.appendChild(confirmInput)
+
+  const nameInput = el('input', 'login-input') as HTMLInputElement
+  nameInput.type = 'text'
+  nameInput.placeholder = '昵称（可选）'
+  nameInput.autocomplete = 'name'
+  form.appendChild(nameInput)
+
+  const status = el('p', 'login-status')
+  form.appendChild(status)
+
+  const submit = el('button', 'btn btn-primary', '创建账户') as HTMLButtonElement
+  submit.type = 'submit'
+  form.appendChild(submit)
+
+  form.onsubmit = async (e) => {
+    e.preventDefault()
+    const email = emailInput.value.trim()
+    const password = passwordInput.value
+    const confirm = confirmInput.value
+    const name = nameInput.value.trim()
+    if (!email) {
+      status.textContent = '请输入邮箱'
+      return
+    }
+    if (password.length < 8) {
+      status.textContent = '密码至少需要 8 位'
+      return
+    }
+    if (password !== confirm) {
+      status.textContent = '两次输入的密码不一致'
+      return
+    }
+    submit.disabled = true
+    status.textContent = '创建中…'
+    try {
+      await register(email, password, name || undefined)
+      status.textContent = ''
+      navigate({ name: 'app' })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        status.textContent = '该邮箱已注册'
+      } else {
+        status.textContent = err instanceof Error ? err.message : '注册失败，请稍后重试'
+      }
+    } finally {
+      submit.disabled = false
+    }
+  }
+  card.appendChild(form)
+
+  const footer = el('p', 'login-footer')
+  const loginLink = el('a', 'login-link', '已有账户？登录') as HTMLAnchorElement
+  loginLink.href = '#/login'
+  footer.appendChild(loginLink)
+  card.appendChild(footer)
+
   page.appendChild(card)
   root.appendChild(page)
 }
@@ -177,9 +290,17 @@ export function renderAppPage(root: HTMLElement): void {
   header.appendChild(el('h1', 'page-title', 'MindIOU'))
   const headerActions = el('div', 'header-actions')
   headerActions.appendChild(connectionStatusBadge())
+  const accountSpan = el('span', 'header-account', '我的账户')
+  void fetchCurrentUser().then(user => {
+    if (user) accountSpan.textContent = user.email
+  })
+  headerActions.appendChild(accountSpan)
+  const devicesBtn = el('button', 'btn btn-ghost btn-sm', '设备Token')
+  devicesBtn.onclick = () => navigate({ name: 'devices' })
+  headerActions.appendChild(devicesBtn)
   const logout = el('button', 'btn btn-ghost btn-sm', '退出登录')
   logout.onclick = async () => {
-    await logoutAccess()
+    await logoutAuth()
     navigate({ name: 'landing' })
   }
   headerActions.appendChild(logout)
@@ -279,7 +400,7 @@ export async function renderTimelinePage(root: HTMLElement, draftId: string): Pr
   const headerActions = el('div', 'header-actions')
   headerActions.appendChild(connectionStatusBadge())
   const logout = el('button', 'btn btn-ghost btn-sm', '退出登录')
-  logout.onclick = async () => { await logoutAccess(); navigate({ name: 'landing' }) }
+  logout.onclick = async () => { await logoutAuth(); navigate({ name: 'landing' }) }
   headerActions.appendChild(logout)
   header.appendChild(headerActions)
   page.appendChild(header)
@@ -795,4 +916,136 @@ function renderFinalResult(result: ClearanceSession['finalResult']): HTMLElement
   node.appendChild(actions)
 
   return node
+}
+
+// ── 设备 Token 管理页 ──
+
+export async function renderDevicesPage(root: HTMLElement): Promise<void> {
+  const page = el('div', 'page page-devices')
+  const header = el('header', 'page-header')
+  header.appendChild(el('h1', 'page-title', 'MindIOU'))
+  const headerActions = el('div', 'header-actions')
+  const backBtn = el('button', 'btn btn-ghost btn-sm', '返回')
+  backBtn.onclick = () => navigate({ name: 'app' })
+  headerActions.appendChild(backBtn)
+  const logout = el('button', 'btn btn-ghost btn-sm', '退出登录')
+  logout.onclick = async () => {
+    await logoutAuth()
+    navigate({ name: 'landing' })
+  }
+  headerActions.appendChild(logout)
+  header.appendChild(headerActions)
+  page.appendChild(header)
+
+  const intro = el('section', 'app-intro')
+  intro.appendChild(el('h2', 'app-heading', '设备 Token 管理'))
+  intro.appendChild(el('p', 'app-desc', '为智能眼镜（G2/Rokid）生成专用访问 Token。每个 Token 只显示一次明文，请妥善保存。'))
+  page.appendChild(intro)
+
+  // 创建 Token 表单
+  const form = el('form', 'device-form') as HTMLFormElement
+  const nameInput = el('input', 'login-input') as HTMLInputElement
+  nameInput.type = 'text'
+  nameInput.placeholder = '设备名称（如：我的 Rokid）'
+  nameInput.required = true
+  form.appendChild(nameInput)
+
+  const status = el('p', 'form-status')
+  form.appendChild(status)
+
+  const submit = el('button', 'btn btn-primary', '生成 Token') as HTMLButtonElement
+  submit.type = 'submit'
+  form.appendChild(submit)
+
+  // 新创建的 Token 明文展示区（一次性）
+  const tokenDisplay = el('div', 'token-display')
+  tokenDisplay.style.display = 'none'
+  form.appendChild(tokenDisplay)
+
+  form.onsubmit = async (e) => {
+    e.preventDefault()
+    const name = nameInput.value.trim()
+    if (!name) {
+      status.textContent = '请输入设备名称'
+      return
+    }
+    submit.disabled = true
+    status.textContent = '生成中…'
+    tokenDisplay.style.display = 'none'
+    try {
+      const info = await createDeviceToken(name)
+      status.textContent = 'Token 已生成，请立即复制保存（关闭后不可再查看）'
+      tokenDisplay.style.display = 'block'
+      tokenDisplay.replaceChildren()
+      tokenDisplay.appendChild(el('p', 'token-label', `设备：${info.name}`))
+      const tokenBox = el('input', 'token-plaintext') as HTMLInputElement
+      tokenBox.type = 'text'
+      tokenBox.value = info.token || ''
+      tokenBox.readOnly = true
+      tokenBox.onclick = () => tokenBox.select()
+      tokenDisplay.appendChild(tokenBox)
+      const copyBtn = el('button', 'btn btn-ghost btn-sm', '复制')
+      copyBtn.onclick = () => {
+        tokenBox.select()
+        try { void navigator.clipboard.writeText(tokenBox.value) } catch { /* */ }
+      }
+      tokenDisplay.appendChild(copyBtn)
+      // 刷新列表
+      void loadTokens()
+    } catch (err) {
+      status.textContent = err instanceof Error ? err.message : '生成失败'
+    } finally {
+      submit.disabled = false
+    }
+  }
+  page.appendChild(form)
+
+  // 已有 Token 列表
+  const listSection = el('section', 'device-list-section')
+  listSection.appendChild(el('h3', 'device-list-title', '已有设备 Token'))
+  const tokenList = el('div', 'device-list')
+  tokenList.appendChild(loading('加载中…'))
+  listSection.appendChild(tokenList)
+  page.appendChild(listSection)
+
+  root.appendChild(page)
+
+  async function loadTokens(): Promise<void> {
+    try {
+      const tokens = await listDeviceTokens()
+      tokenList.replaceChildren()
+      if (tokens.length === 0) {
+        tokenList.appendChild(el('p', 'admin-empty', '暂无设备 Token'))
+        return
+      }
+      for (const t of tokens) {
+        const row = el('div', 'device-row')
+        row.appendChild(el('span', 'device-name', t.name))
+        row.appendChild(el('span', 'device-date', `创建于 ${new Date(t.createdAt).toLocaleDateString('zh-CN')}`))
+        if (t.lastUsedAt) {
+          row.appendChild(el('span', 'device-used', `最近使用 ${new Date(t.lastUsedAt).toLocaleDateString('zh-CN')}`))
+        } else {
+          row.appendChild(el('span', 'device-used', '未使用'))
+        }
+        const revokeBtn = el('button', 'btn btn-ghost btn-sm', '撤销')
+        revokeBtn.onclick = async () => {
+          revokeBtn.disabled = true
+          try {
+            await revokeDeviceToken(t.id)
+            void loadTokens()
+          } catch (err) {
+            revokeBtn.disabled = false
+            status.textContent = err instanceof Error ? err.message : '撤销失败'
+          }
+        }
+        row.appendChild(revokeBtn)
+        tokenList.appendChild(row)
+      }
+    } catch {
+      tokenList.replaceChildren()
+      tokenList.appendChild(el('p', 'admin-empty', '无法加载设备 Token 列表'))
+    }
+  }
+
+  void loadTokens()
 }

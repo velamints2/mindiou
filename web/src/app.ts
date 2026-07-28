@@ -3,9 +3,9 @@
 // 公开区（landing/how-it-works）无需登录；产品区（app/report/session/login）需邀请码。
 // 视觉样式见 styles.css（占位），由设计师 agent 重构。
 
-import { checkAccessSession, getAccessToken, setAccessToken } from './api'
+import { checkAuthSession, getAccessToken, setAccessToken } from './api'
 import { renderHowItWorksPage, renderLandingPage } from './marketing'
-import { renderAppPage, renderLoginPage, renderReportPage, renderSessionPage, renderTimelinePage } from './pages'
+import { renderAppPage, renderDevicesPage, renderLoginPage, renderRegisterPage, renderReportPage, renderSessionPage, renderTimelinePage } from './pages'
 import { clear, el, navigate, parseRoute, type Route } from './router'
 import { initTracker, trackRoute } from './tracker'
 
@@ -37,9 +37,16 @@ async function render(route: Route): Promise<void> {
     return
   }
 
+  // 注册页：公开路由，未登录可访问
+  if (route.name === 'register') {
+    renderRegisterPage(app)
+    trackRoute('register')
+    return
+  }
+
   // 非公开路由需要服务端会话。刷新后本地标记丢失时，以 HttpOnly Cookie 为准恢复。
   if (!getAccessToken()) {
-    const hasServerSession = await checkAccessSession()
+    const hasServerSession = await checkAuthSession()
     if (hasServerSession) {
       setAccessToken('server-session')
     }
@@ -70,6 +77,10 @@ async function render(route: Route): Promise<void> {
     case 'timeline':
       await renderTimelinePage(app, route.draftId)
       trackRoute('timeline')
+      return
+    case 'devices':
+      await renderDevicesPage(app)
+      trackRoute('devices')
       return
     case 'report':
       await renderReportPage(app, route.reportId)

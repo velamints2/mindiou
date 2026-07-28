@@ -1,7 +1,6 @@
 // MindIOU 面向用户 Web 端 — API 客户端封装
 // 直接调用现有后端 server.js，不引入新依赖、不改后端。
-// 鉴权：用户输入邀请码后，由后端签发 HttpOnly Cookie。
-// 浏览器只保存“已建立会话”的本地标记，不保存邀请码或服务端会话内容。
+// 鉴权：账户体系通过 HttpOnly Cookie 维持会话；前端仅保存"已登录"标记。
 
 import type {
   ApiResult,
@@ -19,14 +18,14 @@ import type {
 } from './types'
 
 // ── API 基址 ──
-// 与现有 reportApp.ts / mvp1App.ts 一致：
 //   公网部署（路径以 /mindiou/ 开头）→ /mindiou-api 由 Nginx 反代
 //   本地开发 → 可用 ?api=http://host:8793 覆盖，默认同源
 const runtimeParams = new URLSearchParams(location.search)
 const isPublicDeployment = location.pathname.startsWith('/mindiou/')
 export const API_BASE = isPublicDeployment ? '/mindiou-api' : runtimeParams.get('api') || ''
 
-// ── 访问会话标记 ──
+// ── 登录标记 ──
+// 仅作为"已登录"的本地标记，不存储任何敏感凭据。
 const SESSION_MARKER_KEY = 'mindiou_access_session'
 const LEGACY_TOKEN_KEY = 'mindiou_access_token'
 
@@ -41,7 +40,6 @@ export function getAccessToken(): string | null {
 export function setAccessToken(_token: string): void {
   try {
     localStorage.setItem(SESSION_MARKER_KEY, 'active')
-    // 清除旧版曾保存的邀请码，避免敏感信息继续留在浏览器。
     localStorage.removeItem(LEGACY_TOKEN_KEY)
   } catch {
     /* localStorage 不可用时静默降级 */
@@ -120,53 +118,99 @@ export async function checkHealth(): Promise<boolean> {
   }
 }
 
-// ── 邀请码校验 ──
-// 当前 Web 鉴权使用服务端签名的 HttpOnly Cookie；设备端 Bearer Token 不进入 Web。
-export async function checkAccessSession(): Promise<boolean> {
+// ── 账户体系：注册/登录/登出/当前用户 ──
+// 后端通过 HttpOnly Cookie (session=) 维持会话，前端不保存密码或 session ID。
+
+export type AuthUser = {
+  id: string
+  email: string
+  name?: string
+}
+
+export type DeviceTokenInfo = {
+  id: string
+  name: string
+  createdAt: string
+  lastUsedAt: string | null
+  // 列表接口不返回明文 token，只有创建时返回一次
+  token?: string
+}
+
+/** 注册新账户 */
+export async function register(email: string, password: string, name?: string): Promise<AuthUser> {
+  const res = await apiFetch<{ ok: boolean; user: AuthUser }>('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, name })
+  })
+  setAccessToken('auth-session')
+  return res.user
+}
+
+/** 登录 */
+export async function login(email: string, password: string): Promise<AuthUser> {
+  const res = await apiFetch<{ ok: boolean; user: AuthUser }>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  })
+  setAccessToken('auth-session')
+  return res.user
+}
+
+/** 登出 */
+export async function logoutAuth(): Promise<void> {
   try {
-    const res = await fetch(`${API_BASE}/api/access/session`, {
+    await fetch(`${API_BASE}/api/auth/logout`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       credentials: 'same-origin'
-    })
-    return res.ok
-  } catch {
-    return false
-  }
-}
-
-export async function validateAccessToken(token: string): Promise<boolean> {
-  let res: Response
-  try {
-    res = await fetch(`${API_BASE}/api/access/login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ code: token })
-    })
-  } catch {
-    throw new ApiError(0, '网络连接失败，请检查网络或后端服务是否可用')
-  }
-
-  if (res.ok) return true
-  if (res.status === 401) return false
-
-  // 后端未启用邀请码时，受保护接口会直接开放；用会话接口确认，而不是伪造登录。
-  if ([404, 405, 503].includes(res.status) && await checkAccessSession()) return true
-
-  const data = await res.json().catch(() => null) as { error?: string } | null
-  throw new ApiError(res.status, data?.error || `登录失败（${res.status}）`)
-}
-
-export async function logoutAccess(): Promise<void> {
-  try {
-    await fetch(`${API_BASE}/api/access/logout`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({})
     })
   } finally {
     clearAccessToken()
   }
+}
+
+/** 获取当前登录用户（通过 HttpOnly Cookie 自动鉴权） */
+export async function fetchCurrentUser(): Promise<AuthUser | null> {
+  try {
+    const res = await apiFetch<{ ok: boolean; user: AuthUser }>('/api/auth/me')
+    return res.user
+  } catch {
+    return null
+  }
+}
+
+/** 检查是否已登录（先看本地标记，再用 /api/auth/me 验证） */
+export async function checkAuthSession(): Promise<AuthUser | null> {
+  if (!getAccessToken()) return null
+  const user = await fetchCurrentUser()
+  if (!user) {
+    clearAccessToken()
+  }
+  return user
+}
+
+// ── 设备 Token 管理 ──
+
+/** 创建设备 Token（明文仅返回一次） */
+export async function createDeviceToken(name: string): Promise<DeviceTokenInfo> {
+  const res = await apiFetch<{ ok: boolean; deviceToken: DeviceTokenInfo }>('/api/auth/device-token', {
+    method: 'POST',
+    body: JSON.stringify({ name })
+  })
+  return res.deviceToken
+}
+
+/** 列出当前用户所有设备 Token */
+export async function listDeviceTokens(): Promise<DeviceTokenInfo[]> {
+  const res = await apiFetch<{ ok: boolean; deviceTokens: DeviceTokenInfo[] }>('/api/auth/device-tokens')
+  return res.deviceTokens
+}
+
+/** 撤销设备 Token */
+export async function revokeDeviceToken(tokenId: string): Promise<void> {
+  await apiFetch<{ ok: boolean }>(`/api/auth/device-token/${encodeURIComponent(tokenId)}`, {
+    method: 'DELETE'
+  })
 }
 
 // ── 核心闭环接口 ──
@@ -200,7 +244,7 @@ export async function fetchDraft(draftId: string): Promise<ApiResult<{ draft: Dr
   )
 }
 
-/** 三段式·第三段：生成六部分认知债务报告（支持 draftId 三段式路径与直连路径） */
+/** 三段式·第三段：生成认知债务报告（支持 draftId 三段式路径与直连路径） */
 export async function generateReport(
   req: GenerateReportRequest
 ): Promise<GenerateReportResponse> {

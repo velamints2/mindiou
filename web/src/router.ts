@@ -1,22 +1,23 @@
 // 极简 hash 路由器。
 // 路由格式：#/path，支持参数段。
-// 分公开区（landing/how-it-works）与产品区（app/report/session）。
-// 设计为占位结构，设计师 agent 可在此基础上重构视觉层。
+// 分公开区（landing/how-it-works/register）与产品区（app/report/session/devices）。
 
 export type Route =
   | { name: 'landing' }              // 公开：落地首页
   | { name: 'how-it-works' }         // 公开：产品原理页
-  | { name: 'login' }                // 产品区：邀请码登录
+  | { name: 'login' }                // 产品区：登录
+  | { name: 'register' }             // 公开：注册
   | { name: 'app' }                  // 产品区：输入材料（三段式·第一段）
   | { name: 'timeline'; draftId: string }  // 产品区：时间线与困惑标注（三段式·第二段）
   | { name: 'report'; reportId: string }
   | { name: 'session'; sessionId: string }
+  | { name: 'devices' }             // 产品区：设备 Token 管理
   | { name: 'admin' }               // 运营后台
   | { name: 'not-found' }
 
 // 判断是否为公开路由（无需登录）
 export function isPublicRoute(route: Route): boolean {
-  return route.name === 'landing' || route.name === 'how-it-works'
+  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register'
 }
 
 export function parseRoute(): Route {
@@ -30,11 +31,15 @@ export function parseRoute(): Route {
       return { name: 'how-it-works' }
     case 'login':
       return { name: 'login' }
+    case 'register':
+      return { name: 'register' }
     case 'app':
     case 'home':   // 兼容旧路径
       return { name: 'app' }
     case 'timeline':
       return rest[0] ? { name: 'timeline', draftId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
+    case 'devices':
+      return { name: 'devices' }
     case 'admin':
       return { name: 'admin' }
     case 'report':
@@ -52,8 +57,10 @@ export function navigate(route: Route): void {
     case 'landing': path = ''; break
     case 'how-it-works': path = '/how-it-works'; break
     case 'login': path = '/login'; break
+    case 'register': path = '/register'; break
     case 'app': path = '/app'; break
     case 'timeline': path = `/timeline/${encodeURIComponent(route.draftId)}`; break
+    case 'devices': path = '/devices'; break
     case 'admin': path = '/admin'; break
     case 'report': path = `/report/${encodeURIComponent(route.reportId)}`; break
     case 'session': path = `/session/${encodeURIComponent(route.sessionId)}`; break
