@@ -299,7 +299,7 @@ export function createMvp0Store(filePath) {
     if (!draft) {
       throw new Error(`Draft not found: ${id}`);
     }
-    if (userId && draft.userId && draft.userId !== userId) {
+    if (userId && draft.userId !== userId) {
       throw new Error(`Draft not found: ${id}`);
     }
     return draft;
@@ -307,7 +307,7 @@ export function createMvp0Store(filePath) {
 
   function listDrafts(userId) {
     return [...state.drafts]
-      .filter(item => !userId || !item.userId || item.userId === userId)
+      .filter(item => !userId || item.userId === userId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
