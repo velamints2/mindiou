@@ -1,0 +1,226 @@
+/* 训练系统样式 */
+:root {
+  --color-primary: #4f46e5;
+  --color-primary-light: #e0e7ff;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-bg: #f9fafb;
+  --color-border: #e5e7eb;
+  --color-text: #1f2937;
+  --color-text-light: #6b7280;
+  --radius: 8px;
+  --spacing: 16px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.6;
+  padding: 0;
+}
+
+.training-nav {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  background: white;
+  border-bottom: 1px solid var(--color-border);
+}
+.nav-link {
+  padding: 6px 16px;
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--color-text-light);
+  font-size: 14px;
+  transition: all 0.15s;
+}
+.nav-link:hover { background: var(--color-primary-light); color: var(--color-primary); }
+.nav-link.active { background: var(--color-primary); color: white; }
+
+#app {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* Header */
+.training-header h1 { font-size: 24px; margin-bottom: 4px; }
+.training-subtitle { color: var(--color-text-light); font-size: 14px; margin-bottom: var(--spacing); }
+.training-loading { padding: 40px; text-align: center; color: var(--color-text-light); }
+.training-empty { padding: 40px 20px; text-align: center; color: var(--color-text-light); }
+.training-hint { font-size: 13px; margin-top: 8px; }
+.training-error { padding: 20px; text-align: center; color: var(--color-danger); }
+
+/* Summary */
+.training-summary {
+  background: white;
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: var(--spacing);
+  border: 1px solid var(--color-border);
+}
+.summary-count { font-size: 18px; font-weight: 600; display: block; }
+.summary-time { color: var(--color-text-light); font-size: 14px; margin-left: 8px; }
+.training-groups { margin-top: 8px; }
+.group-label { font-size: 13px; color: var(--color-text-light); }
+
+/* Actions */
+.training-actions { display: flex; gap: 8px; margin-bottom: var(--spacing); }
+.btn {
+  padding: 8px 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: white;
+  color: var(--color-text);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn:hover { border-color: var(--color-primary); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--color-primary); color: white; border-color: var(--color-primary); }
+.btn-primary:hover { opacity: 0.9; }
+.btn-secondary { background: white; color: var(--color-text); }
+.btn-small { padding: 4px 12px; font-size: 13px; }
+
+/* Task list */
+.task-list { display: flex; flex-direction: column; gap: 12px; }
+.task-item {
+  background: white;
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid var(--color-border);
+}
+.task-stage, .task-type, .task-time {
+  display: inline-block;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-right: 6px;
+}
+.task-type { background: var(--color-primary-light); color: var(--color-primary); }
+.task-time { color: var(--color-text-light); }
+.task-prompt { margin-top: 8px; font-size: 14px; }
+.task-actions { margin-top: 12px; }
+
+/* Badges */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+.badge-new { background: #dbeafe; color: #1e40af; }
+.badge-training { background: #fef3c7; color: #92400e; }
+.badge-initial { background: #e0e7ff; color: #4338ca; }
+.badge-scheduled { background: #f3f4f6; color: #374151; }
+.badge-due { background: #fee2e2; color: #991b1b; }
+.badge-independent { background: #d1fae5; color: #065f46; }
+.badge-transfer { background: #ede9fe; color: #5b21b6; }
+.badge-mastered { background: #d1fae5; color: #065f46; }
+.badge-relapsed { background: #fecaca; color: #991b1b; }
+.badge-ignored { background: #f3f4f6; color: #6b7280; }
+.badge-default { background: #f3f4f6; color: #374151; }
+
+/* Review */
+.review-header { margin-bottom: var(--spacing); }
+.review-prompt-box {
+  background: white;
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: var(--spacing);
+  border: 1px solid var(--color-border);
+}
+.review-prompt-label { font-size: 13px; color: var(--color-text-light); margin-bottom: 8px; }
+.review-prompt-text { font-size: 16px; font-weight: 500; }
+.review-hint-notice { margin-top: 12px; color: var(--color-warning); font-size: 13px; }
+.review-answer {
+  width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  padding: 12px;
+  font-size: 14px;
+  resize: vertical;
+  margin-bottom: var(--spacing);
+  font-family: inherit;
+}
+.review-actions { display: flex; gap: 8px; }
+
+/* Review result */
+.review-result {
+  background: white;
+  border-radius: var(--radius);
+  padding: 24px;
+  border: 1px solid var(--color-border);
+}
+.result-status { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
+.result-passed { color: var(--color-success); }
+.result-needs-practice { color: var(--color-warning); }
+.result-score, .result-understanding { color: var(--color-text-light); margin-bottom: 4px; }
+.result-feedback {
+  background: var(--color-bg);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin: 12px 0;
+}
+.feedback-label { font-size: 13px; color: var(--color-text-light); margin-bottom: 4px; }
+.feedback-text { font-size: 14px; }
+.result-next-goal, .result-next-review { font-size: 13px; color: var(--color-text-light); margin-top: 8px; }
+
+/* Debt detail */
+.debt-header { margin-bottom: var(--spacing); }
+.debt-header h1 { font-size: 20px; margin: 8px 0; }
+.debt-recurrence { color: var(--color-danger); font-size: 13px; }
+
+.mastery-panel, .evidence-panel, .timeline-panel {
+  background: white;
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: var(--spacing);
+  border: 1px solid var(--color-border);
+}
+.mastery-panel h2, .evidence-panel h2, .timeline-panel h2 { font-size: 16px; margin-bottom: 12px; }
+.mastery-label { font-size: 16px; font-weight: 500; color: var(--color-primary); }
+.mastery-score { font-size: 14px; color: var(--color-text-light); margin-top: 4px; }
+
+.mastery-dims { margin-top: 16px; }
+.dim-item { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.dim-label { width: 80px; font-size: 13px; color: var(--color-text-light); flex-shrink: 0; }
+.dim-bar { flex: 1; height: 8px; background: var(--color-border); border-radius: 4px; overflow: hidden; }
+.dim-fill { height: 100%; background: var(--color-primary); border-radius: 4px; transition: width 0.3s; }
+.dim-value { width: 30px; font-size: 13px; text-align: right; flex-shrink: 0; }
+
+.next-review { margin-top: 12px; font-size: 13px; color: var(--color-text-light); }
+.evidence-text { font-size: 14px; color: var(--color-text); }
+
+/* Timeline */
+.timeline-entry {
+  position: relative;
+  padding-left: 20px;
+  padding-bottom: 16px;
+  border-left: 2px solid var(--color-border);
+}
+.timeline-entry:last-child { border-left-color: transparent; }
+.timeline-date { font-size: 12px; color: var(--color-text-light); margin-bottom: 4px; }
+.timeline-item-content p { font-size: 14px; }
+.timeline-title { font-weight: 500; }
+.timeline-detail { font-size: 13px; color: var(--color-text-light); }
+
+/* Debt list */
+.debt-list { display: flex; flex-direction: column; gap: 12px; }
+.debt-item {
+  background: white;
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  transition: border-color 0.15s;
+}
+.debt-item:hover { border-color: var(--color-primary); }
+.debt-title { font-size: 15px; font-weight: 500; margin: 8px 0 4px; }
+.debt-mastery { font-size: 13px; color: var(--color-primary); }
+.debt-recurrence { font-size: 12px; color: var(--color-danger); }
+
+@media (max-width: 640px) {
+  #app { padding: 12px; }
+  .training-nav { padding: 8px 12px; overflow-x: auto; }
+  .training-header h1 { font-size: 20px; }
+}

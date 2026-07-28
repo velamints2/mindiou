@@ -22,8 +22,34 @@ import {
   createDemoResearchFallback,
   ensureLearnerFacingLanguage
 } from "./mvp1-demo-fallback.js";
-
-import { handleAdminRoute } from "./admin-backend-patch.js";
+import { createTrainingStore } from "./training-store.js";
+import {
+  createCognitiveDebt,
+  updateMasteryProfile,
+  deriveStatusFromStage,
+  deriveUnderstandingLevel,
+  masteryLabel,
+  handleRelapse,
+  migrateLegacySession,
+  calculateOverallMastery
+} from "./mastery.js";
+import {
+  deriveEvaluationFromAnalysis,
+  createHintEvent,
+  getTrainingEvaluationPrompt,
+  buildEvaluationRequest,
+  normalizeEvaluation
+} from "./training-evaluation.js";
+import {
+  calculateNextReview,
+  sortReviewTasks,
+  selectTasksByTimeBudget,
+  recommendNextStage
+} from "./review-scheduler.js";
+import {
+  generateRuleBasedReviewTask,
+  createAttemptFromClearanceSession
+} from "./review-generator.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -71,8 +97,9 @@ const mvp0Store = createMvp0Store(mvp0StorePath);
 await mvp0Store.load();
 const mvp1Store = createMvp1Store(mvp1StorePath);
 await mvp1Store.load();
-// 兼容 admin 补丁的只读视图：账户体系分支以 mvp1Store 持久化替代原内存 Map
-const mvp1Sessions = { values: () => mvp1Store.listSessions() };
+const trainingStorePath = process.env.TRAINING_STORE_PATH || "tmp/training-store.json";
+const trainingStore = createTrainingStore(trainingStorePath);
+await trainingStore.load();
 const authStore = createAuthStore(authStorePath);
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: researchApiKey,
@@ -370,6 +397,21 @@ function requireAuth(req, res) {
     return { id: `early-access:${earlySession.label}`, email: null };
   }
   jsonResponse(res, 401, { ok: false, error: "Authentication required" });
+  return null;
+}
+
+// Non-failing variant of requireAuth for routes that accept an optional user
+// (e.g. training endpoints that fall back to "demo-user").
+function getOptionalUser(req) {
+  const sessionId = parseCookies(req)[sessionCookieName] || "";
+  if (sessionId) {
+    const user = authStore.getUserBySession(sessionId);
+    if (user) return user;
+  }
+  const earlySession = readSession(req);
+  if (earlySession) {
+    return { id: `early-access:${earlySession.label}`, email: null };
+  }
   return null;
 }
 
@@ -1496,19 +1538,6 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // ── 运营后台路由（独立鉴权，不走邀请码）──
-    if (handleAdminRoute(req, res, url.pathname, req.method, {
-      mvp0Store, spiralStore, eventLog, mvp1Sessions: mvp1Store.listSessions()
-    })) return;
-
-    // ── 公开埋点端点：未登录访客也可发送，不鉴权 ──
-    // 前端 tracker.ts 用 sendBeacon 发送 page_enter/page_leave，无法带 Authorization 头
-    if (req.method === "POST" && url.pathname === "/api/learn/events") {
-      const trackingPayload = parseJson(await readBody(req));
-      jsonResponse(res, 200, { ok: true, event: recordEvent(trackingPayload) });
-      return;
-    }
-
     // ── Web MVP-0/MVP-1 routes: cookie session auth, per-user data isolation ──
 
     const mvp1SessionMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)$/);
@@ -1517,6 +1546,9 @@ const server = createServer(async (req, res) => {
     const mvp1EndMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)\/end$/);
     const mvp0CardAnswerMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)\/cards\/([^/]+)\/answer$/);
     const mvp0CorrectionMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)\/corrections$/);
+    const trainingDebtMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)$/);
+    const trainingReviewStartMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/start$/);
+    const trainingReviewSubmitMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/submit$/);
     const isWebMvpRoute =
       (req.method === "GET" && (url.pathname === "/api/mvp0/reports" || mvp1SessionMatch || mvp0ReportMatch)) ||
       (req.method === "POST" && (
@@ -1556,9 +1588,7 @@ const server = createServer(async (req, res) => {
 
       if (url.pathname === "/api/mvp1/sessions") {
         try {
-          // MVP-1 需要 AI 进行研究和分析；但当 MVP1_DEMO_FALLBACK=1 时，
-          // 研究和分析均使用策展备用材料，无需 AI 配置即可走通清偿链路。
-          if ((!aiApiKey || disableAi) && !mvp1DemoFallback) {
+          if (!aiApiKey || disableAi) {
             jsonResponse(res, 503, { ok: false, error: "MVP-1 external research requires an active OpenAI API configuration" });
             return;
           }
@@ -1623,6 +1653,73 @@ const server = createServer(async (req, res) => {
         } catch (error) {
           console.warn(`MVP-1 clearance write-back failed for session ${session.id}: ${error.message}`);
         }
+        // ── 训练系统接入：将会话转换为 TrainingAttempt ──
+        try {
+          const report = mvp0Store.getReport(session.reportId, user.id);
+          const card = report?.sections?.feynmanCards?.find(c => c.id === session.cardId);
+          const gap = report?.sections?.dangerousGaps?.[0];
+          const gapText = gap?.gap || card?.target || session.originalCard?.target || "";
+
+          let debt = trainingStore.findCognitiveDebtByGap(user.id, gapText);
+          if (!debt) {
+            debt = createCognitiveDebt({
+              userId: user.id,
+              reportId: session.reportId,
+              cardId: session.cardId,
+              gapText,
+              gapEvidence: gap?.evidence || ""
+            });
+          }
+          debt.status = "initial_training";
+          debt.updatedAt = new Date().toISOString();
+          if (!debt.sourceReports.includes(session.reportId)) {
+            debt.sourceReports.push(session.reportId);
+          }
+          await trainingStore.saveCognitiveDebt(debt);
+
+          const lastAnalysis = session.attempts?.[session.attempts.length - 1]?.analysis;
+          const evaluation = deriveEvaluationFromAnalysis(lastAnalysis, [], "initial_compensation");
+
+          const attempt = createAttemptFromClearanceSession(session, {
+            userId: user.id,
+            cognitiveDebtId: debt.id,
+            hintEvents: [],
+            evaluation
+          });
+          await trainingStore.saveAttempt(attempt);
+
+          let profile = trainingStore.getMasteryProfile(debt.id);
+          profile = updateMasteryProfile(profile, attempt);
+          await trainingStore.saveMasteryProfile(profile);
+
+          const newStatus = deriveStatusFromStage("initial_compensation", evaluation);
+          debt.status = newStatus;
+          debt.updatedAt = new Date().toISOString();
+          await trainingStore.saveCognitiveDebt(debt);
+
+          const { nextReviewAt } = calculateNextReview({
+            trainingStage: "initial_compensation",
+            evaluation,
+            hintEvents: [],
+            previousAttempts: [attempt],
+            currentMastery: profile
+          });
+          profile.nextReviewAt = nextReviewAt;
+          await trainingStore.saveMasteryProfile(profile);
+
+          const reviewTask = generateRuleBasedReviewTask({
+            debt,
+            card: card || session.originalCard,
+            firstAttempt: attempt,
+            mastery: profile,
+            trainingStage: "delayed_recall",
+            dueAt: nextReviewAt,
+            userId: user.id
+          });
+          await trainingStore.saveReviewTask(reviewTask);
+        } catch (trainingError) {
+          console.warn(`Training system integration failed for session ${session.id}: ${trainingError.message}`);
+        }
         await mvp1Store.saveSession(session);
         jsonResponse(res, 200, {
           ok: true,
@@ -1670,6 +1767,46 @@ const server = createServer(async (req, res) => {
         const saved = await mvp0Store.saveReport(report);
         if (draft) {
           await mvp0Store.attachReportToDraft(draft.id, saved.id, user.id);
+        }
+        // ── 重复缺口检测与复发识别 ──
+        try {
+          const gaps = saved.sections?.dangerousGaps || [];
+          for (const gap of gaps) {
+            const gapText = String(gap.gap || "").trim();
+            if (!gapText) continue;
+            const existingDebt = trainingStore.findCognitiveDebtByGap(user.id, gapText);
+            if (existingDebt) {
+              // 同一缺口再次出现
+              existingDebt.recurrenceCount = (existingDebt.recurrenceCount || 0) + 1;
+              if (!existingDebt.sourceReports.includes(saved.id)) {
+                existingDebt.sourceReports.push(saved.id);
+              }
+              existingDebt.updatedAt = new Date().toISOString();
+
+              // 如果之前已 mastered，标记为 relapsed
+              if (existingDebt.status === "mastered") {
+                existingDebt.status = "relapsed";
+                const profile = trainingStore.getMasteryProfile(existingDebt.id);
+                if (profile) {
+                  const relapsedProfile = handleRelapse(profile);
+                  await trainingStore.saveMasteryProfile(relapsedProfile);
+                }
+              }
+              await trainingStore.saveCognitiveDebt(existingDebt);
+            } else {
+              // 新缺口，创建认知欠条
+              const newDebt = createCognitiveDebt({
+                userId: user.id,
+                reportId: saved.id,
+                cardId: undefined,
+                gapText,
+                gapEvidence: String(gap.evidence || "").slice(0, 1000)
+              });
+              await trainingStore.saveCognitiveDebt(newDebt);
+            }
+          }
+        } catch (debtError) {
+          console.warn(`Cognitive debt detection failed for report ${saved.id}: ${debtError.message}`);
         }
         const isFallback = Boolean(saved.generation?.fallback);
         jsonResponse(res, 200, {
@@ -1848,8 +1985,74 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // ── MVP-0 drafts & timelines: cookie session auth, per-user isolation ──
-    // 与 reports/sessions 权限边界一致：写操作会真实调用 AI，必须登录以防匿名滥用。
+    // ── Training system: today's review tasks and cognitive debts ──
+    if (req.method === "GET" && url.pathname === "/api/training/today") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const dueTasks = trainingStore.listDueReviews(userId);
+      const profiles = trainingStore.listMasteryProfiles(userId);
+      const profileMap = {};
+      for (const p of profiles) {
+        profileMap[p.cognitiveDebtId] = p;
+      }
+      const sorted = sortReviewTasks(dueTasks, profileMap);
+      jsonResponse(res, 200, {
+        ok: true,
+        totalDue: sorted.length,
+        tasks: sorted.slice(0, 20),
+        profiles
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/training/debts") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debts = trainingStore.listCognitiveDebts(userId);
+      const profiles = trainingStore.listMasteryProfiles(userId);
+      const profileMap = {};
+      for (const p of profiles) {
+        profileMap[p.cognitiveDebtId] = p;
+      }
+      const enriched = debts.map(debt => ({
+        ...debt,
+        mastery: profileMap[debt.id] || null,
+        understandingLevel: profileMap[debt.id]
+          ? deriveUnderstandingLevel(profileMap[debt.id])
+          : "not_understood",
+        masteryLabel: profileMap[debt.id]
+          ? masteryLabel(deriveUnderstandingLevel(profileMap[debt.id]))
+          : "正在补偿"
+      }));
+      jsonResponse(res, 200, { ok: true, debts: enriched });
+      return;
+    }
+
+    if (req.method === "GET" && trainingDebtMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtMatch[1]);
+      try {
+        const debt = trainingStore.getCognitiveDebt(debtId, userId);
+        const profile = trainingStore.getMasteryProfile(debtId);
+        const attempts = trainingStore.listAttempts(userId, { cognitiveDebtId: debtId });
+        const reviews = trainingStore.listReviewTasks(userId, { cognitiveDebtId: debtId });
+        const understandingLevel = profile ? deriveUnderstandingLevel(profile) : "not_understood";
+        jsonResponse(res, 200, {
+          ok: true,
+          debt,
+          profile,
+          attempts,
+          reviews,
+          understandingLevel,
+          masteryLabel: masteryLabel(understandingLevel)
+        });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
     const mvp0DraftMatch = url.pathname.match(/^\/api\/mvp0\/drafts\/([^/]+)$/);
     const isDraftOrTimelineRoute =
       url.pathname === "/api/mvp0/drafts" ||
@@ -1872,83 +2075,7 @@ const server = createServer(async (req, res) => {
         }
         return;
       }
-
-      if (req.method !== "POST" && req.method !== "PATCH") {
-        jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
-        return;
-      }
-
-      const payload = parseJson(await readBody(req));
-
-      // ── MVP-0: collaboration timeline (step 1 of the report pipeline) ──
-
-      if (req.method === "POST" && url.pathname === "/api/mvp0/timelines") {
-        const artifactText = String(payload.artifactText || "").trim();
-        let artifactType = clean(payload.artifactType || "");
-        if (!artifactText) {
-          jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
-          return;
-        }
-        if (!artifactType) {
-          artifactType = detectArtifactType(artifactText);
-        }
-        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-        const timeline = await generateCollaborationTimeline(artifactText, artifactType, chatFn);
-        const draft = await mvp0Store.saveDraft({
-          userId: user.id,
-          input: {
-            artifactText: artifactText.slice(0, 30000),
-            artifactType,
-            charCount: clean(artifactText).length
-          },
-          timeline: { steps: timeline.steps },
-          generation: timeline.generation,
-          status: "timeline"
-        });
-        const isFallback = Boolean(timeline.generation?.fallback);
-        jsonResponse(res, 200, {
-          ok: true,
-          draft,
-          timeline: { steps: draft.timeline.steps, ...(timeline.note ? { note: timeline.note } : {}) },
-          fallback: isFallback,
-          ...(isFallback && timeline.generation?.error ? { error: timeline.generation.error } : {}),
-          detectedType: artifactType
-        });
-        return;
-      }
-
-      if (req.method === "PATCH" && mvp0DraftMatch) {
-        try {
-          const draftId = decodeURIComponent(mvp0DraftMatch[1]);
-          const confusions = payload.confusions;
-          const confusionsValid =
-            confusions === undefined ||
-            (Array.isArray(confusions) &&
-              confusions.every(
-                entry =>
-                  entry !== null &&
-                  typeof entry === "object" &&
-                  typeof entry.stepId === "string" &&
-                  typeof entry.text === "string"
-              ));
-          if (!confusionsValid) {
-            jsonResponse(res, 400, {
-              ok: false,
-              error: "confusions must be an array of { stepId, text }"
-            });
-            return;
-          }
-          const draft = await mvp0Store.updateDraftConfusions(draftId, confusions, user.id);
-          jsonResponse(res, 200, { ok: true, draft });
-        } catch (error) {
-          jsonResponse(res, /not found/i.test(String(error.message)) ? 404 : 400, {
-            ok: false,
-            error: error.message
-          });
-        }
-        return;
-      }
-    }
+    } // close isDraftOrTimelineRoute
 
     if (req.method !== "POST" && req.method !== "PATCH") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
@@ -1956,6 +2083,212 @@ const server = createServer(async (req, res) => {
     }
 
     const payload = parseJson(await readBody(req));
+
+    // ── Training system: review start and submit ──
+    if (trainingReviewStartMatch && req.method === "POST") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const taskId = decodeURIComponent(trainingReviewStartMatch[1]);
+      try {
+        const task = trainingStore.getReviewTask(taskId, userId);
+        task.status = "in_progress";
+        await trainingStore.saveReviewTask(task);
+        jsonResponse(res, 200, { ok: true, task });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (trainingReviewSubmitMatch && req.method === "POST") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const taskId = decodeURIComponent(trainingReviewSubmitMatch[1]);
+      try {
+        const task = trainingStore.getReviewTask(taskId, userId);
+        const debt = trainingStore.getCognitiveDebt(task.cognitiveDebtId, userId);
+        const answer = String(payload.answer || "").trim().slice(0, 6000);
+        if (!answer) {
+          jsonResponse(res, 400, { ok: false, error: "Answer is required" });
+          return;
+        }
+
+        // 优先使用 AI 评估，失败时 fallback 到规则评估
+        let evaluation;
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        if (chatFn) {
+          try {
+            const evalRequest = buildEvaluationRequest({
+              card: { prompt: task.prompt, target: debt.gapText },
+              attempt: { originalPrompt: task.prompt, initialAnswer: answer, finalAnswer: answer },
+              hintEvents: [],
+              capabilityLevel: "unknown"
+            });
+            const rawEval = await chatFn(
+              [
+                { role: "system", content: getTrainingEvaluationPrompt() },
+                { role: "user", content: JSON.stringify(evalRequest) }
+              ],
+              () => ({ overallScore: 50, passed: true, conceptualAccuracy: 50, completeness: 50, independentRecall: 50, hintDependency: 0, transferAbility: 0, understandingLevel: "initially_understood", strengths: [], missingPoints: [], misconceptions: [], nextTrainingGoal: "继续练习", recommendedNextStage: task.trainingStage, userFeedback: "AI 评估暂时不可用，使用规则评估。" })
+            );
+            evaluation = normalizeEvaluation(rawEval);
+          } catch (evalError) {
+            console.warn(`AI evaluation failed for task ${taskId}: ${evalError.message}`);
+            evaluation = deriveEvaluationFromAnalysis(
+              { coverage: 0.5, demonstrated: [], missing: [], misconceptions: [], feedback: "" },
+              [],
+              task.trainingStage
+            );
+          }
+        } else {
+          evaluation = deriveEvaluationFromAnalysis(
+            { coverage: 0.5, demonstrated: [], missing: [], misconceptions: [], feedback: "" },
+            [],
+            task.trainingStage
+          );
+        }
+
+        const attempt = {
+          id: crypto.randomUUID(),
+          userId,
+          cardId: task.cardId,
+          cognitiveDebtId: task.cognitiveDebtId,
+          trainingStage: task.trainingStage,
+          taskType: task.taskType,
+          originalPrompt: task.prompt,
+          initialAnswer: answer,
+          finalAnswer: answer,
+          hintEvents: [],
+          evaluation,
+          startedAt: task.createdAt,
+          completedAt: new Date().toISOString(),
+          durationSeconds: undefined
+        };
+        await trainingStore.saveAttempt(attempt);
+
+        let profile = trainingStore.getMasteryProfile(task.cognitiveDebtId);
+        profile = updateMasteryProfile(profile, attempt);
+        await trainingStore.saveMasteryProfile(profile);
+
+        const newStatus = deriveStatusFromStage(task.trainingStage, evaluation);
+        debt.status = newStatus;
+        debt.updatedAt = new Date().toISOString();
+        await trainingStore.saveCognitiveDebt(debt);
+
+        const { nextReviewAt } = calculateNextReview({
+          trainingStage: task.trainingStage,
+          evaluation,
+          hintEvents: [],
+          previousAttempts: trainingStore.listAttempts(userId, { cognitiveDebtId: task.cognitiveDebtId }),
+          currentMastery: profile
+        });
+        profile.nextReviewAt = nextReviewAt;
+        await trainingStore.saveMasteryProfile(profile);
+
+        task.status = "completed";
+        task.attemptId = attempt.id;
+        await trainingStore.saveReviewTask(task);
+
+        if (evaluation.passed) {
+          const nextStage = recommendNextStage(profile.currentStage, evaluation, profile);
+          const nextTask = generateRuleBasedReviewTask({
+            debt,
+            card: { id: task.cardId, target: debt.gapText, prompt: task.prompt },
+            firstAttempt: attempt,
+            mastery: profile,
+            trainingStage: nextStage,
+            dueAt: nextReviewAt,
+            userId
+          });
+          await trainingStore.saveReviewTask(nextTask);
+        }
+
+        jsonResponse(res, 200, {
+          ok: true,
+          attempt,
+          evaluation,
+          profile,
+          debtStatus: debt.status,
+          nextReviewAt
+        });
+      } catch (error) {
+        jsonResponse(res, 400, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    // ── MVP-0: collaboration timeline (step 1 of the report pipeline) ──
+
+    if (req.method === "POST" && url.pathname === "/api/mvp0/timelines") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const artifactText = String(payload.artifactText || "").trim();
+      let artifactType = clean(payload.artifactType || "");
+      if (!artifactText) {
+        jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
+        return;
+      }
+      if (!artifactType) {
+        artifactType = detectArtifactType(artifactText);
+      }
+      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+      const timeline = await generateCollaborationTimeline(artifactText, artifactType, chatFn);
+      const draft = await mvp0Store.saveDraft({
+        userId: user.id,
+        input: {
+          artifactText: artifactText.slice(0, 30000),
+          artifactType,
+          charCount: clean(artifactText).length
+        },
+        timeline: { steps: timeline.steps },
+        generation: timeline.generation,
+        status: "timeline"
+      });
+      const isFallback = Boolean(timeline.generation?.fallback);
+      jsonResponse(res, 200, {
+        ok: true,
+        draft,
+        timeline: { steps: draft.timeline.steps, ...(timeline.note ? { note: timeline.note } : {}) },
+        fallback: isFallback,
+        ...(isFallback && timeline.generation?.error ? { error: timeline.generation.error } : {}),
+        detectedType: artifactType
+      });
+      return;
+    }
+
+    if (req.method === "PATCH" && mvp0DraftMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      try {
+        const draftId = decodeURIComponent(mvp0DraftMatch[1]);
+        const confusions = payload.confusions;
+        const confusionsValid =
+          confusions === undefined ||
+          (Array.isArray(confusions) &&
+            confusions.every(
+              entry =>
+                entry !== null &&
+                typeof entry === "object" &&
+                typeof entry.stepId === "string" &&
+                typeof entry.text === "string"
+            ));
+        if (!confusionsValid) {
+          jsonResponse(res, 400, {
+            ok: false,
+            error: "confusions must be an array of { stepId, text }"
+          });
+          return;
+        }
+        const draft = await mvp0Store.updateDraftConfusions(draftId, confusions, user.id);
+        jsonResponse(res, 200, { ok: true, draft });
+      } catch (error) {
+        jsonResponse(res, /not found/i.test(String(error.message)) ? 404 : 400, {
+          ok: false,
+          error: error.message
+        });
+      }
+      return;
+    }
 
     if (url.pathname === "/api/learn/events") {
       jsonResponse(res, 200, { ok: true, event: recordEvent(payload) });
