@@ -25,10 +25,20 @@ export function ensureLearnerFacingLanguage(result, input) {
 
 export function createDemoResearchFallback(request, error) {
   const topic = clean(request?.targetDebt || request?.originalQuestion);
-  const serverIncident = /i\/o wait|d-state|nginx|systemd/i.test(topic);
-  const pageCache = /page cache|页缓存/i.test(topic);
-  const verification = /验证|验收|工具链|完整性/i.test(topic);
-  const rootCause = /根因|症状|缓解/i.test(topic);
+  // 也检查原始材料内容，因为 fallback 报告的卡片 target 可能过于泛化
+  const evidence = request?.practiceEvidence || {};
+  const evidenceText = [
+    ...(evidence.aiCompleted || []),
+    ...(evidence.userContributed || []),
+    ...(evidence.facts || []),
+    ...(evidence.decisions || []),
+    ...(evidence.tradeoffs || [])
+  ].map(item => typeof item === "string" ? item : (item?.item || item?.gap || "")).join(" ");
+  const searchText = `${topic} ${evidenceText}`;
+  const serverIncident = /i\/o wait|d-state|nginx|systemd|服务器|负载|磁盘/i.test(searchText);
+  const pageCache = /page cache|页缓存/i.test(searchText);
+  const verification = /验证|验收|工具链|完整性/i.test(searchText);
+  const rootCause = /根因|症状|缓解|restart|重启/i.test(searchText);
 
   if (!serverIncident && !pageCache && !verification && !rootCause) {
     throw error instanceof Error ? error : new Error("External research is unavailable");

@@ -1556,7 +1556,9 @@ const server = createServer(async (req, res) => {
 
       if (url.pathname === "/api/mvp1/sessions") {
         try {
-          if (!aiApiKey || disableAi) {
+          // MVP-1 需要 AI 进行研究和分析；但当 MVP1_DEMO_FALLBACK=1 时，
+          // 研究和分析均使用策展备用材料，无需 AI 配置即可走通清偿链路。
+          if ((!aiApiKey || disableAi) && !mvp1DemoFallback) {
             jsonResponse(res, 503, { ok: false, error: "MVP-1 external research requires an active OpenAI API configuration" });
             return;
           }
