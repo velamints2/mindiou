@@ -84,6 +84,7 @@ const researchBaseUrl = configuredEnv("RESEARCH_BASE_URL", aiProvider === "opena
 const researchModel = configuredEnv("RESEARCH_MODEL", process.env.OPENAI_RESEARCH_MODEL || chatModel);
 const openAiChatTimeoutMs = Number(process.env.OPENAI_CHAT_TIMEOUT_MS || 30000);
 const openAiResearchTimeoutMs = Number(process.env.OPENAI_RESEARCH_TIMEOUT_MS || 45000);
+const sttTimeoutMs = Number(process.env.STT_TIMEOUT_MS || 30000);
 const sttApiKey = configuredEnv("STT_API_KEY", aiProvider === "openai" ? aiApiKey : "");
 const sttBaseUrl = configuredEnv("STT_BASE_URL", aiProvider === "openai" ? aiBaseUrl : "").replace(/\/+$/, "");
 const sttModel = configuredEnv("STT_MODEL", process.env.OPENAI_STT_MODEL || "gpt-4o-mini-transcribe");
@@ -164,6 +165,40 @@ const rokidDemoCards = [
     repetitions: 0
   }
 ];
+
+// ── 可观察性基础设施 ──
+// 单行 JSON 结构化日志。禁止在 fields 中放入：用户对话原文、AI 输入/输出全文、
+// API 密钥、Cookie、Authorization 头、服务器密码。
+function logEvent(level, message, fields = {}) {
+  const line = JSON.stringify({
+    ts: new Date().toISOString(),
+    level,
+    msg: message,
+    ...fields
+  });
+  if (level === "error") console.error(line);
+  else if (level === "warn") console.warn(line);
+  else console.log(line);
+}
+
+function readRequestId(req) {
+  const incoming = String(req.headers["x-request-id"] || "").trim();
+  return /^[A-Za-z0-9._-]{1,128}$/.test(incoming) ? incoming : crypto.randomUUID();
+}
+
+function logRequestCompletion(req, res, requestId, startedAt) {
+  let pathname = "/";
+  try {
+    pathname = new URL(req.url || "/", "http://localhost").pathname;
+  } catch { /* 保留默认值 */ }
+  logEvent(res.statusCode >= 500 ? "error" : "info", "http_request", {
+    requestId,
+    method: String(req.method || "GET"),
+    path: pathname,
+    status: res.statusCode,
+    durationMs: Date.now() - startedAt
+  });
+}
 
 function jsonResponse(res, statusCode, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
@@ -298,14 +333,20 @@ function authorizeRequest(req) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
+    let tooLarge = false;
     req.on("data", chunk => {
+      if (tooLarge) return;
       body += chunk;
       if (body.length > 1024 * 1024 * 8) {
-        req.destroy();
-        reject(new Error("Request body too large"));
+        tooLarge = true;
+        const error = new Error("Request body too large");
+        error.statusCode = 413;
+        reject(error);
       }
     });
-    req.on("end", () => resolve(body));
+    req.on("end", () => {
+      if (!tooLarge) resolve(body);
+    });
     req.on("error", reject);
   });
 }
@@ -1387,11 +1428,25 @@ async function transcribe(payload) {
   form.append("prompt", clean(sttPrompt).slice(0, 500));
   form.append("file", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "g2-audio.wav");
 
-  const response = await fetch(`${sttBaseUrl}/audio/transcriptions`, {
-    method: "POST",
-    headers: { "authorization": `Bearer ${sttApiKey}` },
-    body: form
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), sttTimeoutMs);
+  let response;
+  try {
+    response = await fetch(`${sttBaseUrl}/audio/transcriptions`, {
+      method: "POST",
+      headers: { "authorization": `Bearer ${sttApiKey}` },
+      body: form,
+      signal: controller.signal
+    });
+  } catch (error) {
+    const latencyMs = Date.now() - startedAt;
+    if (error?.name === "AbortError") {
+      return { ok: false, error: `STT request timed out after ${sttTimeoutMs}ms`, latencyMs };
+    }
+    return { ok: false, error: error instanceof Error ? error.message : String(error), latencyMs };
+  } finally {
+    clearTimeout(timeout);
+  }
   const result = await response.json();
   const latencyMs = Date.now() - startedAt;
   if (!response.ok) {
@@ -1412,6 +1467,10 @@ function recordEvent(payload) {
 }
 
 const server = createServer(async (req, res) => {
+  const requestId = readRequestId(req);
+  const startedAt = Date.now();
+  res.setHeader("x-request-id", requestId);
+  res.on("finish", () => logRequestCompletion(req, res, requestId, startedAt));
   try {
     if (req.method === "OPTIONS") {
       optionsResponse(res);
@@ -2119,7 +2178,7 @@ const server = createServer(async (req, res) => {
     } // close isDraftOrTimelineRoute
 
     if (req.method !== "POST" && req.method !== "PATCH") {
-      jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
+      jsonResponse(res, 405, { ok: false, error: "Method not allowed", requestId });
       return;
     }
 
@@ -2402,9 +2461,21 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    jsonResponse(res, 404, { ok: false, error: "Not found" });
+    jsonResponse(res, 404, { ok: false, error: "Not found", requestId });
   } catch (error) {
-    jsonResponse(res, 500, { ok: false, error: error.message });
+    const statusCode = Number(error?.statusCode) || (error instanceof SyntaxError ? 400 : 500);
+    if (statusCode >= 500) {
+      logEvent("error", "unhandled_request_error", {
+        requestId,
+        error: String(error?.message || error).slice(0, 300)
+      });
+      jsonResponse(res, statusCode, { ok: false, error: "Internal server error", requestId });
+      return;
+    }
+    const clientMessage = error instanceof SyntaxError
+      ? "Request body must be valid JSON"
+      : String(error?.message || error);
+    jsonResponse(res, statusCode, { ok: false, error: clientMessage, requestId });
   }
 });
 

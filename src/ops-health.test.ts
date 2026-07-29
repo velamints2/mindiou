@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { rm, mkdir } from "node:fs/promises";
 import path from "node:path";
 
-const TEST_PORT = 8805;
+const TEST_PORT = 8814;
 const BASE = `http://127.0.0.1:${TEST_PORT}`;
 const TEST_DIR = path.resolve("tmp/ops-health-test");
 let serverProcess: ReturnType<typeof spawn> | null = null;
