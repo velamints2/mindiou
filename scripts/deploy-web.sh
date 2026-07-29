@@ -17,7 +17,7 @@
 #
 # 前置条件:
 #   - 本地 web/ 已安装依赖（npm ci）
-#   - SSH 已配置免密登录（ssh-agent 或 ~/.ssh/id_rsa），本脚本不含密码
+#   - SSH 已配置免密登录（ssh-agent 或 ~/.ssh/id_rsa）
 #   - 服务器上 MINDIOU_DIST_DIR 存在且包含 mvp1.html、training.html 及其 JS/CSS
 set -euo pipefail
 
@@ -56,6 +56,7 @@ echo "==> [2/6] 上传构建包到 ${SSH_TARGET}"
 scp -o StrictHostKeyChecking=no "${TMP_TAR}" "${SSH_TARGET}:${REMOTE_TAR}"
 
 # ─── 3. 远程部署 ───
+# mvp1/training 的 JS/CSS 文件名带构建 hash，用通配符动态匹配，避免硬编码。
 echo "==> [3/6] 远程部署（备份 → 清空 → 解压 → 同步 mvp1/training → 修链接）"
 ssh -o StrictHostKeyChecking=no "${SSH_TARGET}" "set -euo pipefail
 
@@ -68,19 +69,17 @@ echo '    解压新 SPA...'
 tar -xzf '${REMOTE_TAR}' -C '${WEB_DIR}/'
 find '${WEB_DIR}/' -name '._*' -delete
 
-echo '    复制 mvp1.html 及其构建产物...'
-cp '${DIST_DIR}/mvp1.html' \
-   '${DIST_DIR}/mvp1-DuY7wQ6C.js' \
-   '${DIST_DIR}/mvp1-CPsT23ny.css' \
-   '${DIST_DIR}/report-styles-CzDRU8C3.css' \
-   '${DIST_DIR}/modulepreload-polyfill-B5Qt9EMX.js' \
-   '${WEB_DIR}/' 2>/dev/null || echo '    警告: 部分构建产物缺失，mvp1 入口可能不可用'
+echo '    复制 mvp1.html 及其构建产物（通配符匹配 hash 文件名）...'
+cp '${DIST_DIR}/mvp1.html' '${WEB_DIR}/' 2>/dev/null || echo '    警告: mvp1.html 缺失'
+for f in mvp1-*.js mvp1-*.css report-styles-*.css modulepreload-polyfill-*.js; do
+  cp '${DIST_DIR}/'\$f '${WEB_DIR}/' 2>/dev/null || true
+done
 
-echo '    复制 training.html 及其构建产物...'
-cp '${DIST_DIR}/training.html' \
-   '${DIST_DIR}/training-DecwwNaz.js' \
-   '${DIST_DIR}/training-oB4cSQx-.css' \
-   '${WEB_DIR}/' 2>/dev/null || echo '    警告: 部分构建产物缺失，training 入口可能不可用'
+echo '    复制 training.html 及其构建产物（通配符匹配 hash 文件名）...'
+cp '${DIST_DIR}/training.html' '${WEB_DIR}/' 2>/dev/null || echo '    警告: training.html 缺失'
+for f in training-*.js training-*.css; do
+  cp '${DIST_DIR}/'\$f '${WEB_DIR}/' 2>/dev/null || true
+done
 
 echo '    修复 training.html 链接为相对路径...'
 sed -i 's|href=\"/mvp1.html\"|href=\"./mvp1.html\"|g; s|href=\"/training.html|href=\"./training.html|g; s|src=\"/src/|src=\"./src/|g; s|href=\"/src/|href=\"./src/|g' '${WEB_DIR}/training.html'
