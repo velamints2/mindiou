@@ -50,6 +50,12 @@ import {
   generateRuleBasedReviewTask,
   createAttemptFromClearanceSession
 } from "./review-generator.js";
+import { reportEnvValidation } from "./env-validation.js";
+
+// 启动期环境验证：值非法时打印变量级错误并退出（绝不打印值）。
+if (!reportEnvValidation(process.env)) {
+  process.exit(1);
+}
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
