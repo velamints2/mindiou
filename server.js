@@ -1588,7 +1588,7 @@ const server = createServer(async (req, res) => {
 
       if (url.pathname === "/api/mvp1/sessions") {
         try {
-          if (!aiApiKey || disableAi) {
+          if ((!aiApiKey || disableAi) && !mvp1DemoFallback) {
             jsonResponse(res, 503, { ok: false, error: "MVP-1 external research requires an active OpenAI API configuration" });
             return;
           }
