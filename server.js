@@ -1433,6 +1433,41 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // Liveness：进程存活即可，不检查任何依赖，不调用模型。
+    if (url.pathname === "/healthz") {
+      jsonResponse(res, 200, {
+        ok: true,
+        status: "alive",
+        uptimeSeconds: Math.round(process.uptime())
+      });
+      return;
+    }
+
+    // Readiness：关键本地依赖可读 + 配置状态分解。不调用昂贵模型探活。
+    if (url.pathname === "/readyz") {
+      const checks = {
+        authStore: { ok: true, error: "" },
+        config: {
+          ai: Boolean(aiApiKey) && !disableAi,
+          research: Boolean(researchApiKey && researchBaseUrl),
+          stt: Boolean(sttApiKey && sttBaseUrl)
+        }
+      };
+      try {
+        // 轻量只读探测：SQLite 可接受查询即视为可读。
+        authStore.getUserById("__readiness_probe__");
+      } catch (error) {
+        checks.authStore = { ok: false, error: fit(String(error?.message || error), 120) };
+      }
+      const ready = checks.authStore.ok;
+      jsonResponse(res, ready ? 200 : 503, {
+        ok: ready,
+        status: ready ? "ready" : "not_ready",
+        checks
+      });
+      return;
+    }
+
     // ── Auth: web user accounts (no LEARNING_API_TOKEN required) ──
 
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
