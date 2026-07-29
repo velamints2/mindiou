@@ -694,7 +694,7 @@ function renderCard(reportId: string, card: FeynmanCard): HTMLElement {
       const msg = err instanceof Error ? err.message : '创建会话失败'
       const errNode = el('p', 'error-inline', msg)
       node.appendChild(errNode)
-      setTimeout(() => errNode.remove(), 4000)
+      setTimeout(() => errNode.remove(), 10000)
     }
   }
   node.appendChild(btn)
