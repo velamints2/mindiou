@@ -292,3 +292,210 @@ export function applyAttemptOutcome(gap, attempt, { now = new Date().toISOString
   };
   return transitionGapStatus(gap, outcome, { reason: reasons[outcome], now });
 }
+
+// ── Multidimensional repayment evaluation ──
+
+const PLACEHOLDER_PATTERN = /TODO|FIXME|PLACEHOLDER|lorem ipsum|\{\{|\}\}|__\w+__|N\/A/i;
+
+function placeholderError(text) {
+  const error = new Error(`Evaluation contains placeholder content: ${String(text || "").slice(0, 60)}`);
+  error.errorCategory = "placeholder";
+  return error;
+}
+
+function schemaError(message) {
+  const error = new Error(message);
+  error.errorCategory = "schema";
+  return error;
+}
+
+function assertNoPlaceholder(text) {
+  if (PLACEHOLDER_PATTERN.test(String(text || ""))) {
+    throw placeholderError(text);
+  }
+}
+
+export function normalizeDimensionEvaluation(raw) {
+  const entry = raw && typeof raw === "object" ? raw : {};
+  const evidence = clean(entry.evidence || "").slice(0, 400);
+  const feedback = clean(entry.feedback || "").slice(0, 400);
+  assertNoPlaceholder(evidence);
+  assertNoPlaceholder(feedback);
+  const numeric = Number(entry.score);
+  const score = Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : 0;
+  const uncertainty = ["low", "medium", "high"].includes(clean(entry.uncertainty || "").toLowerCase())
+    ? clean(entry.uncertainty || "").toLowerCase()
+    : "medium";
+  return { score, evidence, feedback, uncertainty };
+}
+
+/**
+ * Validates and normalizes the model's five-dimension evaluation. Missing
+ * dimensions or non-numeric scores throw a schema error; placeholder text in
+ * any learner-facing string throws a placeholder error. Callers convert both
+ * into the deterministic fallback.
+ */
+export function normalizeRepaymentEvaluation(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const container = source.dimensions && typeof source.dimensions === "object" ? source.dimensions : source;
+  const dimensions = {};
+  for (const dimension of DIMENSIONS) {
+    const entry = container[dimension];
+    if (!entry || typeof entry !== "object" || typeof entry.score !== "number" || !Number.isFinite(entry.score)) {
+      throw schemaError(`Repayment evaluation is missing a valid score for dimension: ${dimension}`);
+    }
+    dimensions[dimension] = normalizeDimensionEvaluation(entry);
+  }
+  const overallFeedback = clean(source.overallFeedback || "").slice(0, 400);
+  const nextQuestion = clean(source.nextQuestion || "").slice(0, 400);
+  assertNoPlaceholder(overallFeedback);
+  assertNoPlaceholder(nextQuestion);
+  const overallScore = Math.round(
+    DIMENSIONS.reduce((sum, dimension) => sum + dimensions[dimension].score * DIM_WEIGHTS[dimension], 0)
+  );
+  const minScore = Math.min(...DIMENSIONS.map(dimension => dimensions[dimension].score));
+  return {
+    dimensions,
+    overallScore,
+    passed: overallScore >= 70 && minScore >= 40,
+    overallFeedback,
+    nextQuestion
+  };
+}
+
+const CAUSAL_WORDS = ["因为", "所以", "导致", "因此", "because", "therefore", "so that"];
+const VERIFY_WORDS = ["验证", "测试", "指标", "日志", "监控", "复现", "verify", "test", "measure", "log", "reproduce"];
+const BOUNDARY_WORDS = ["但是", "然而", "除非", "风险", "边界", "however", "unless", "risk", "boundary"];
+const TRANSFER_WORDS = ["例如", "另一个", "场景", "迁移", "for example", "another", "scenario", "transfer"];
+
+const DIMENSION_LABELS = {
+  conceptualUnderstanding: "概念理解",
+  causalExplanation: "因果解释",
+  practicalReproduction: "实践复现",
+  boundariesAndRisks: "边界与风险",
+  transferAbility: "迁移能力"
+};
+
+function countHits(text, words) {
+  const lower = String(text || "").toLowerCase();
+  return words.reduce((count, word) => count + (lower.includes(word.toLowerCase()) ? 1 : 0), 0);
+}
+
+function fragmentAround(answer, words) {
+  const text = String(answer || "");
+  if (!text.trim()) return "";
+  const lower = text.toLowerCase();
+  let best = -1;
+  for (const word of words) {
+    const at = lower.indexOf(word.toLowerCase());
+    if (at >= 0 && (best < 0 || at < best)) best = at;
+  }
+  const start = best >= 0 ? Math.max(0, best - 10) : 0;
+  return text.slice(start, start + 80).trim();
+}
+
+function titleTokens(title) {
+  return String(title || "")
+    .toLowerCase()
+    .split(/[^a-z0-9一-鿿]+/)
+    .filter(token => token.length >= 2);
+}
+
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+/**
+ * Deterministic rule-based evaluation used whenever the model path fails.
+ * Same input always produces the same output; every dimension quotes a real
+ * fragment of the learner's answer; uncertainty is always high.
+ */
+export function createFallbackEvaluation({ gap, answer } = {}) {
+  const text = String(answer || "");
+  const trimmed = text.trim();
+  const lengthScore = Math.min(20, Math.floor(trimmed.length / 25));
+  const lower = trimmed.toLowerCase();
+  const tokens = titleTokens(gap?.title || "");
+  const matchedTokens = tokens.filter(token => lower.includes(token));
+  const overlap = tokens.length > 0 ? matchedTokens.length / tokens.length : 0;
+  const causalHits = countHits(trimmed, CAUSAL_WORDS);
+  const verifyHits = countHits(trimmed, VERIFY_WORDS);
+  const boundaryHits = countHits(trimmed, BOUNDARY_WORDS);
+  const transferHits = countHits(trimmed, TRANSFER_WORDS);
+  const title = clean(gap?.title || "").slice(0, 30) || "该欠条";
+
+  const dimensions = {
+    conceptualUnderstanding: {
+      score: clampScore(lengthScore + overlap * 40),
+      evidence: fragmentAround(trimmed, matchedTokens.length > 0 ? matchedTokens : tokens),
+      feedback: matchedTokens.length > 0
+        ? "回答覆盖了欠条主题的关键概念，请继续补充机制层面的细节。"
+        : `回答与欠条主题的关键词重合度低。请围绕「${title}」直接解释核心机制。`,
+      uncertainty: "high"
+    },
+    causalExplanation: {
+      score: clampScore(lengthScore + Math.min(45, causalHits * 15)),
+      evidence: fragmentAround(trimmed, CAUSAL_WORDS),
+      feedback: causalHits > 0
+        ? "已包含因果说明，请检查因果链是否完整闭合。"
+        : "回答缺少因果连接（因为/所以/导致/因此）。请说明哪个原因导致哪个结果。",
+      uncertainty: "high"
+    },
+    practicalReproduction: {
+      score: clampScore(lengthScore + Math.min(45, verifyHits * 15)),
+      evidence: fragmentAround(trimmed, VERIFY_WORDS),
+      feedback: verifyHits > 0
+        ? "已提到验证手段，请补充具体指标、日志或复现步骤。"
+        : "缺少可验证的复现信号（测试/指标/日志/复现步骤）。请给出如何验证修复有效。",
+      uncertainty: "high"
+    },
+    boundariesAndRisks: {
+      score: clampScore(lengthScore + Math.min(45, boundaryHits * 15 + verifyHits * 10)),
+      evidence: fragmentAround(trimmed, [...BOUNDARY_WORDS, ...VERIFY_WORDS]),
+      feedback: boundaryHits > 0
+        ? "已提及边界或风险，请说明具体的触发条件。"
+        : "未说明边界条件或风险（但是/除非/风险）。请指出方案在什么情况下会失效。",
+      uncertainty: "high"
+    },
+    transferAbility: {
+      score: clampScore(lengthScore + Math.min(45, transferHits * 15)),
+      evidence: fragmentAround(trimmed, TRANSFER_WORDS),
+      feedback: transferHits > 0
+        ? "已给出迁移例子，请确认不同场景背后的机制一致。"
+        : "缺少迁移场景（例如/另一个场景）。请举一个不同场景说明同一机制。",
+      uncertainty: "high"
+    }
+  };
+
+  const overallScore = Math.round(
+    DIMENSIONS.reduce((sum, dimension) => sum + dimensions[dimension].score * DIM_WEIGHTS[dimension], 0)
+  );
+  const minScore = Math.min(...DIMENSIONS.map(dimension => dimensions[dimension].score));
+  const weakest = [...DIMENSIONS]
+    .sort((a, b) => dimensions[a].score - dimensions[b].score || a.localeCompare(b))
+    .slice(0, 2)
+    .map(dimension => DIMENSION_LABELS[dimension]);
+  const verification = clean(gap?.verificationMethod || "") || "关键机制";
+  return {
+    dimensions,
+    overallScore,
+    passed: overallScore >= 70 && minScore >= 40,
+    overallFeedback: `本次使用离线规则评估（模型不可用），结果偏保守，仅供参考。相对薄弱的维度：${weakest.join("、")}。`,
+    nextQuestion: `请针对「${verification.slice(0, 60)}」重新解释，并补充缺失的信号。`
+  };
+}
+
+export function getRepaymentEvaluationPrompt() {
+  return [
+    "你是 MindIOU 认知清偿评估器。你只评估学习者在本次回答中实际展示出的理解，不评估其潜力或过往表现。",
+    "必须使用学习者回答所使用的语言撰写全部 feedback 与追问。",
+    "严格返回一个 JSON 对象，结构如下：",
+    '{ "dimensions": { "conceptualUnderstanding": { "score": 0-100 整数, "evidence": "引用学习者回答的真实片段", "feedback": "具体反馈", "uncertainty": "low|medium|high" }, "causalExplanation": {同上}, "practicalReproduction": {同上}, "boundariesAndRisks": {同上}, "transferAbility": {同上} }, "overallFeedback": "先指出回答中正确的内容，再指出一个具体的遗漏或误解，最后给出一个有用的下一步", "nextQuestion": "一个简短的追问" }',
+    "五个维度一个都不能少；score 必须是数字。",
+    "评分锚点：0-39 未展示该能力；40-69 部分展示但有明显遗漏；70-89 基本展示且有证据；90-100 完整展示且可迁移。",
+    "evidence 必须引用学习者回答中的真实片段，不得编造或改写。",
+    "禁止空泛反馈（如“不错”“继续努力”）；每条反馈必须指出具体的内容或缺失。",
+    "禁止宣称学习者已经长期掌握、已认证或已熟练；一次回答只能作为本次会话的证据。",
+    "不得输出占位符、模板残留或英文标记词。"
+  ].join("\n");
+}

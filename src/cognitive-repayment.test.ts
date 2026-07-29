@@ -13,7 +13,12 @@ import {
   createGapFromReport,
   buildAttemptRecord,
   applyAttemptOutcome,
-  resolveAttemptOutcome
+  resolveAttemptOutcome,
+  normalizeDimensionEvaluation,
+  normalizeRepaymentEvaluation,
+  createFallbackEvaluation,
+  getRepaymentEvaluationPrompt,
+  DIMENSIONS
 } from "../cognitive-repayment.js";
 import { createCognitiveRepaymentStore } from "../cognitive-repayment-store.js";
 
@@ -318,5 +323,140 @@ describe("attempt records and outcome", () => {
     const gap = makeGap("identified");
     const attempt = buildAttemptRecord({ gap, answer: "a", evaluation: { passed: true } });
     expect(() => applyAttemptOutcome(gap, attempt, { previousAttempts: [] })).toThrow(/attempting/);
+  });
+});
+
+describe("multidimensional evaluation normalization", () => {
+  function validModelOutput() {
+    return {
+      dimensions: {
+        conceptualUnderstanding: { score: 85, evidence: "端口配置错误", feedback: "概念准确", uncertainty: "low" },
+        causalExplanation: { score: 80, evidence: "因为端口错所以重启无效", feedback: "因果链完整", uncertainty: "medium" },
+        practicalReproduction: { score: 75, evidence: "用日志验证", feedback: "补充指标", uncertainty: "medium" },
+        boundariesAndRisks: { score: 60, evidence: "但是负载高时", feedback: "边界不完整", uncertainty: "high" },
+        transferAbility: { score: 50, evidence: "例如数据库场景", feedback: "迁移偏少", uncertainty: "medium" }
+      },
+      overallFeedback: "因果解释正确，但边界分析不足，下次补充失效条件。",
+      nextQuestion: "什么情况下修复会再次失效？"
+    };
+  }
+
+  it("normalizes a valid model evaluation with weighted overall and pass rule", () => {
+    const result = normalizeRepaymentEvaluation(validModelOutput());
+    expect(result.overallScore).toBe(Math.round(85 * 0.25 + 80 * 0.25 + 75 * 0.2 + 60 * 0.15 + 50 * 0.15));
+    expect(result.passed).toBe(true);
+    expect(result.dimensions.causalExplanation.uncertainty).toBe("medium");
+    expect(result.overallFeedback).toContain("边界分析不足");
+    expect(result.nextQuestion).toContain("失效");
+  });
+
+  it("fails the pass rule when any dimension is below 40 even with high overall", () => {
+    const output = validModelOutput();
+    output.dimensions.transferAbility.score = 30;
+    output.dimensions.boundariesAndRisks.score = 95;
+    output.dimensions.conceptualUnderstanding.score = 95;
+    output.dimensions.causalExplanation.score = 95;
+    output.dimensions.practicalReproduction.score = 95;
+    const result = normalizeRepaymentEvaluation(output);
+    expect(result.overallScore).toBeGreaterThanOrEqual(70);
+    expect(result.passed).toBe(false);
+  });
+
+  it("throws a schema error when a dimension or its score is missing", () => {
+    const output = validModelOutput();
+    delete output.dimensions.transferAbility;
+    expect(() => normalizeRepaymentEvaluation(output)).toThrowError(/transferAbility/);
+    try {
+      normalizeRepaymentEvaluation(output);
+      expect.unreachable();
+    } catch (error: any) {
+      expect(error.errorCategory).toBe("schema");
+    }
+    const badScore = validModelOutput();
+    badScore.dimensions.causalExplanation.score = "high";
+    expect(() => normalizeRepaymentEvaluation(badScore)).toThrowError(/causalExplanation/);
+  });
+
+  it("rejects placeholder content in any learner-facing string", () => {
+    for (const bad of ["TODO", "{{dimension}}", "N/A", "lorem ipsum", "__blank__"]) {
+      const output = validModelOutput();
+      output.dimensions.causalExplanation.feedback = `这里 ${bad} 有问题`;
+      try {
+        normalizeRepaymentEvaluation(output);
+        expect.unreachable();
+      } catch (error: any) {
+        expect(error.errorCategory).toBe("placeholder");
+      }
+    }
+    const inOverall = validModelOutput();
+    inOverall.overallFeedback = "FIXME later";
+    expect(() => normalizeRepaymentEvaluation(inOverall)).toThrowError(/placeholder/i);
+  });
+
+  it("clamps scores, truncates text and defaults uncertainty per dimension", () => {
+    const dim = normalizeDimensionEvaluation({ score: 140, evidence: "e".repeat(500), feedback: "f".repeat(500) });
+    expect(dim.score).toBe(100);
+    expect(dim.evidence).toHaveLength(400);
+    expect(dim.feedback).toHaveLength(400);
+    expect(dim.uncertainty).toBe("medium");
+    expect(normalizeDimensionEvaluation({ score: -5 }).score).toBe(0);
+    expect(normalizeDimensionEvaluation({ score: 55, uncertainty: "LOW" }).uncertainty).toBe("low");
+  });
+});
+
+describe("deterministic fallback evaluation", () => {
+  const gap = { title: "Root-cause verification gap", verificationMethod: "How do you verify the fix?" };
+  const answer = "因为 upstream 端口配置错误，所以 nginx 重启没有解决根因。我通过查看日志验证了这个假设，但是高并发场景下仍可能失败。例如数据库连接池也是同样的机制。";
+
+  it("produces identical output for identical input", () => {
+    const first = createFallbackEvaluation({ gap, answer });
+    const second = createFallbackEvaluation({ gap, answer });
+    expect(first).toEqual(second);
+  });
+
+  it("covers all five dimensions with quoted evidence and high uncertainty", () => {
+    const result = createFallbackEvaluation({ gap, answer });
+    for (const dimension of DIMENSIONS) {
+      const entry = result.dimensions[dimension];
+      expect(entry).toBeDefined();
+      expect(typeof entry.score).toBe("number");
+      expect(entry.score).toBeGreaterThan(0);
+      expect(entry.evidence.length).toBeGreaterThan(0);
+      expect(entry.evidence.length).toBeLessThanOrEqual(80);
+      expect(answer).toContain(entry.evidence.slice(0, 20));
+      expect(entry.feedback.length).toBeGreaterThan(0);
+      expect(entry.uncertainty).toBe("high");
+    }
+    expect(result.overallScore).toBeGreaterThan(0);
+    expect(typeof result.passed).toBe("boolean");
+    expect(result.overallFeedback).toContain("离线规则评估");
+  });
+
+  it("never lets a fallback evaluation pass the repayment threshold", () => {
+    const rich = "因为所以导致因此 verify test measure log reproduce 验证测试指标日志监控复现 但是然而除非风险边界 however unless risk boundary 例如另一个场景迁移 for example another scenario transfer ".repeat(6);
+    const result = createFallbackEvaluation({ gap, answer: rich });
+    expect(result.passed).toBe(false);
+  });
+
+  it("degrades to zero scores with concrete guidance on an empty answer", () => {
+    const result = createFallbackEvaluation({ gap, answer: "" });
+    for (const dimension of DIMENSIONS) {
+      expect(result.dimensions[dimension].score).toBe(0);
+      expect(result.dimensions[dimension].feedback.length).toBeGreaterThan(0);
+    }
+    expect(result.passed).toBe(false);
+  });
+});
+
+describe("repayment evaluation prompt", () => {
+  it("requires five dimensions, learner language and forbids mastery claims", () => {
+    const prompt = getRepaymentEvaluationPrompt();
+    for (const dimension of DIMENSIONS) {
+      expect(prompt).toContain(dimension);
+    }
+    expect(prompt).toContain("overallFeedback");
+    expect(prompt).toContain("nextQuestion");
+    expect(prompt).toContain("禁止宣称学习者已经长期掌握");
+    expect(prompt).toContain("真实片段");
   });
 });
