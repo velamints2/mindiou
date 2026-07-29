@@ -8,13 +8,18 @@ import type {
   ClearanceSession,
   Confusion,
   CreateSessionResponse,
+  DebtDetailResponse,
+  DebtsListResponse,
   Draft,
   EndSessionResponse,
   GenerateReportRequest,
   GenerateReportResponse,
   GenerateTimelineResponse,
+  StartReviewResponse,
   SubmitAnswerResponse,
-  SubmitCardAnswerResponse
+  SubmitCardAnswerResponse,
+  SubmitReviewResponse,
+  TodayTrainingResponse
 } from './types'
 
 // ── API 基址 ──
@@ -304,4 +309,45 @@ export async function endSession(sessionId: string): Promise<EndSessionResponse>
     `/api/mvp1/sessions/${encodeURIComponent(sessionId)}/end`,
     { method: 'POST', body: JSON.stringify({}) }
   )
+}
+
+// ── 训练系统 API ──
+
+export async function fetchTodayTraining(): Promise<ApiResult<TodayTrainingResponse>> {
+  const res = await fetch(`${API_BASE}/api/training/today`, {
+    credentials: 'include'
+  })
+  return res.json()
+}
+
+export async function fetchTrainingDebts(): Promise<ApiResult<DebtsListResponse>> {
+  const res = await fetch(`${API_BASE}/api/training/debts`, {
+    credentials: 'include'
+  })
+  return res.json()
+}
+
+export async function fetchTrainingDebtDetail(debtId: string): Promise<ApiResult<DebtDetailResponse>> {
+  const res = await fetch(`${API_BASE}/api/training/debts/${encodeURIComponent(debtId)}`, {
+    credentials: 'include'
+  })
+  return res.json()
+}
+
+export async function startReviewTask(taskId: string): Promise<ApiResult<StartReviewResponse>> {
+  const res = await fetch(`${API_BASE}/api/training/reviews/${encodeURIComponent(taskId)}/start`, {
+    method: 'POST',
+    credentials: 'include'
+  })
+  return res.json()
+}
+
+export async function submitReviewAnswer(taskId: string, answer: string): Promise<ApiResult<SubmitReviewResponse>> {
+  const res = await fetch(`${API_BASE}/api/training/reviews/${encodeURIComponent(taskId)}/submit`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answer })
+  })
+  return res.json()
 }

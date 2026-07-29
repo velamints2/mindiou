@@ -5,7 +5,18 @@
 
 import { checkAuthSession, getAccessToken, setAccessToken } from './api'
 import { renderHowItWorksPage, renderLandingPage } from './marketing'
-import { renderAppPage, renderDevicesPage, renderLoginPage, renderRegisterPage, renderReportPage, renderSessionPage, renderTimelinePage } from './pages'
+import {
+  renderAppPage,
+  renderDevicesPage,
+  renderLoginPage,
+  renderRegisterPage,
+  renderReportPage,
+  renderSessionPage,
+  renderTimelinePage,
+  renderTrainingDebtDetailPage,
+  renderTrainingDebtListPage,
+  renderTrainingPage
+} from './pages'
 import { clear, el, navigate, parseRoute, type Route } from './router'
 import { initTracker, trackRoute } from './tracker'
 
@@ -89,6 +100,18 @@ async function render(route: Route): Promise<void> {
     case 'session':
       await renderSessionPage(app, route.sessionId)
       trackRoute('session')
+      return
+    case 'training':
+      await renderTrainingPage(app)
+      trackRoute('training')
+      return
+    case 'training-debt':
+      if (route.debtId === 'list') {
+        await renderTrainingDebtListPage(app)
+      } else {
+        await renderTrainingDebtDetailPage(app, route.debtId)
+      }
+      trackRoute('training')
       return
     case 'not-found':
     default:

@@ -13,6 +13,8 @@ export type Route =
   | { name: 'session'; sessionId: string }
   | { name: 'devices' }             // 产品区：设备 Token 管理
   | { name: 'admin' }               // 运营后台
+  | { name: 'training' }            // 产品区：今日复训
+  | { name: 'training-debt'; debtId: string }  // 产品区：认知欠条详情
   | { name: 'not-found' }
 
 // 判断是否为公开路由（无需登录）
@@ -46,6 +48,10 @@ export function parseRoute(): Route {
       return rest[0] ? { name: 'report', reportId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     case 'session':
       return rest[0] ? { name: 'session', sessionId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
+    case 'training':
+      return { name: 'training' }
+    case 'training-debt':
+      return rest[0] ? { name: 'training-debt', debtId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     default:
       return { name: 'not-found' }
   }
@@ -64,6 +70,8 @@ export function navigate(route: Route): void {
     case 'admin': path = '/admin'; break
     case 'report': path = `/report/${encodeURIComponent(route.reportId)}`; break
     case 'session': path = `/session/${encodeURIComponent(route.sessionId)}`; break
+    case 'training': path = '/training'; break
+    case 'training-debt': path = `/training-debt/${encodeURIComponent(route.debtId)}`; break
     case 'not-found': path = '/not-found'; break
   }
   location.hash = path

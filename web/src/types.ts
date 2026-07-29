@@ -251,3 +251,132 @@ export type SubmitCardAnswerResponse = {
   shouldFollowUp: boolean
   fallback?: boolean
 }
+
+// ── 训练系统相关 ──
+
+export type UnderstandingLevel =
+  | 'not_understood'
+  | 'prompt_supported'
+  | 'initially_understood'
+  | 'independently_explainable'
+  | 'transferable'
+  | 'stable_mastery'
+
+export type TrainingStage =
+  | 'initial_compensation'
+  | 'delayed_recall'
+  | 'misconception_check'
+  | 'scenario_transfer'
+  | 'error_detection'
+  | 'real_work_validation'
+
+export type CognitiveDebt = {
+  id: string
+  userId: string
+  reportId?: string
+  cardId?: string
+  gapText: string
+  gapEvidence?: string
+  status: string
+  sourceReports?: string[]
+  createdAt?: string
+  updatedAt?: string
+  // enriched 字段（来自 /api/training/debts）
+  mastery?: MasteryProfile | null
+  understandingLevel?: UnderstandingLevel
+  masteryLabel?: string
+}
+
+export type MasteryProfile = {
+  cognitiveDebtId: string
+  userId: string
+  currentStage: TrainingStage
+  overallMastery: number
+  dimensionScores?: Record<string, number>
+  attemptCount: number
+  lastAttemptAt?: string
+  nextReviewAt?: string
+  relapseCount?: number
+}
+
+export type ReviewTask = {
+  id: string
+  userId: string
+  cognitiveDebtId: string
+  cardId?: string
+  trainingStage: TrainingStage
+  taskType?: string
+  prompt: string
+  hintsAllowed?: boolean
+  maxHints?: number
+  status: 'pending' | 'in_progress' | 'completed'
+  dueAt: string
+  createdAt: string
+  attemptId?: string
+}
+
+export type TrainingEvaluation = {
+  overallScore: number
+  passed: boolean
+  conceptualAccuracy: number
+  completeness: number
+  independentRecall: number
+  hintDependency: number
+  transferAbility: number
+  retentionStrength?: number
+  understandingLevel: UnderstandingLevel
+  strengths: string[]
+  missingPoints: string[]
+  misconceptions: string[]
+  nextTrainingGoal: string
+  recommendedNextStage: TrainingStage
+  userFeedback: string
+}
+
+export type TrainingAttempt = {
+  id: string
+  userId: string
+  cardId?: string
+  cognitiveDebtId: string
+  trainingStage: TrainingStage
+  taskType?: string
+  originalPrompt: string
+  initialAnswer: string
+  finalAnswer: string
+  hintEvents?: unknown[]
+  evaluation: TrainingEvaluation
+  startedAt?: string
+  completedAt: string
+  durationSeconds?: number
+}
+
+export type TodayTrainingResponse = {
+  totalDue: number
+  tasks: ReviewTask[]
+  profiles: MasteryProfile[]
+}
+
+export type DebtsListResponse = {
+  debts: CognitiveDebt[]
+}
+
+export type DebtDetailResponse = {
+  debt: CognitiveDebt
+  profile: MasteryProfile | null
+  attempts: TrainingAttempt[]
+  reviews: ReviewTask[]
+  understandingLevel: UnderstandingLevel
+  masteryLabel: string
+}
+
+export type StartReviewResponse = {
+  task: ReviewTask
+}
+
+export type SubmitReviewResponse = {
+  attempt: TrainingAttempt
+  evaluation: TrainingEvaluation
+  profile: MasteryProfile
+  debtStatus: string
+  nextReviewAt: string
+}

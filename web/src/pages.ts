@@ -13,6 +13,9 @@ import {
   fetchDraft,
   fetchReport,
   fetchSession,
+  fetchTodayTraining,
+  fetchTrainingDebtDetail,
+  fetchTrainingDebts,
   generateReport,
   generateTimeline,
   getAccessToken,
@@ -23,7 +26,9 @@ import {
   revokeDeviceToken,
   saveDraftConfusions,
   setAccessToken,
-  submitAnswer
+  startReviewTask,
+  submitAnswer,
+  submitReviewAnswer
 } from './api'
 import type { DeviceTokenInfo } from './api'
 import type {
@@ -33,6 +38,8 @@ import type {
   ConfusionResolution,
   Draft,
   FeynmanCard,
+  ReviewTask,
+  SubmitReviewResponse,
   TimelineStep
 } from './types'
 import {
@@ -295,6 +302,9 @@ export function renderAppPage(root: HTMLElement): void {
     if (user) accountSpan.textContent = user.email
   })
   headerActions.appendChild(accountSpan)
+  const trainingBtn = el('button', 'btn btn-ghost btn-sm', '今日复训')
+  trainingBtn.onclick = () => navigate({ name: 'training' })
+  headerActions.appendChild(trainingBtn)
   const devicesBtn = el('button', 'btn btn-ghost btn-sm', '设备Token')
   devicesBtn.onclick = () => navigate({ name: 'devices' })
   headerActions.appendChild(devicesBtn)
@@ -1048,4 +1058,336 @@ export async function renderDevicesPage(root: HTMLElement): Promise<void> {
   }
 
   void loadTokens()
+}
+
+// ── 训练系统页面 ──
+
+export async function renderTrainingPage(root: HTMLElement): Promise<void> {
+  const page = el('div', 'page page-training')
+  const header = el('header', 'page-header')
+  header.appendChild(el('h1', 'page-title', '今日复训'))
+  const headerActions = el('div', 'header-actions')
+  const debtsLink = el('button', 'btn btn-ghost btn-sm', '认知欠条')
+  debtsLink.onclick = () => navigate({ name: 'training-debt', debtId: 'list' })
+  headerActions.appendChild(debtsLink)
+  const backBtn = el('button', 'btn btn-ghost btn-sm', '返回')
+  backBtn.onclick = () => navigate({ name: 'app' })
+  headerActions.appendChild(backBtn)
+  header.appendChild(headerActions)
+  page.appendChild(header)
+
+  const intro = el('p', 'page-intro', '基于艾宾浩斯遗忘曲线与费曼掌握度模型，今天需要复习以下认知欠条。')
+  page.appendChild(intro)
+
+  const loadingEl = el('p', 'loading', '正在加载今日复训任务…')
+  page.appendChild(loadingEl)
+  root.appendChild(page)
+
+  try {
+    const data = await fetchTodayTraining()
+    clear(page)
+    page.appendChild(header)
+    page.appendChild(intro)
+
+    if (!data.ok) {
+      const err = el('p', 'error', data.error || '加载失败')
+      page.appendChild(err)
+      return
+    }
+
+    if (data.totalDue === 0) {
+      const empty = el('div', 'empty-state')
+      empty.appendChild(el('p', 'empty-title', '今天没有复训任务'))
+      empty.appendChild(el('p', 'empty-desc', '完成新的 MVP-1 清偿后，系统会自动生成复训任务。'))
+      page.appendChild(empty)
+      return
+    }
+
+    const list = el('div', 'task-list')
+    for (const task of data.tasks) {
+      const card = el('div', 'task-card')
+      card.appendChild(el('div', 'task-stage', stageLabel(task.trainingStage)))
+      card.appendChild(el('p', 'task-prompt', task.prompt))
+      const meta = el('div', 'task-meta')
+      meta.appendChild(el('span', 'task-due', `到期：${formatDate(task.dueAt)}`))
+      card.appendChild(meta)
+      const btn = el('button', 'btn btn-primary', '开始复训')
+      btn.onclick = async () => {
+        btn.disabled = true
+        btn.textContent = '正在启动…'
+        try {
+          const result = await startReviewTask(task.id)
+          if (result.ok) {
+            await renderReviewSubmitForm(page, task)
+          } else {
+            btn.disabled = false
+            btn.textContent = '开始复训'
+            alert(result.error || '启动失败')
+          }
+        } catch (e) {
+          btn.disabled = false
+          btn.textContent = '开始复训'
+          alert('网络错误')
+        }
+      }
+      card.appendChild(btn)
+      list.appendChild(card)
+    }
+    page.appendChild(list)
+  } catch (e) {
+    clear(page)
+    page.appendChild(header)
+    page.appendChild(el('p', 'error', '加载失败，请稍后重试。'))
+  }
+}
+
+async function renderReviewSubmitForm(page: HTMLElement, task: ReviewTask): Promise<void> {
+  clear(page)
+  const header = el('header', 'page-header')
+  header.appendChild(el('h1', 'page-title', '复训中'))
+  page.appendChild(header)
+
+  page.appendChild(el('div', 'task-stage', stageLabel(task.trainingStage)))
+  page.appendChild(el('p', 'task-prompt-large', task.prompt))
+
+  const textarea = document.createElement('textarea')
+  textarea.className = 'answer-textarea'
+  textarea.placeholder = '用你自己的话解释这个概念…'
+  textarea.rows = 8
+  page.appendChild(textarea)
+
+  const btn = el('button', 'btn btn-primary', '提交答案')
+  page.appendChild(btn)
+
+  btn.onclick = async () => {
+    const answer = textarea.value.trim()
+    if (!answer) {
+      alert('请输入你的回答')
+      return
+    }
+    btn.disabled = true
+    btn.textContent = '正在评估…'
+    try {
+      const result = await submitReviewAnswer(task.id, answer)
+      if (result.ok) {
+        renderReviewResult(page, result)
+      } else {
+        btn.disabled = false
+        btn.textContent = '提交答案'
+        alert(result.error || '提交失败')
+      }
+    } catch (e) {
+      btn.disabled = false
+      btn.textContent = '提交答案'
+      alert('网络错误')
+    }
+  }
+}
+
+function renderReviewResult(page: HTMLElement, result: SubmitReviewResponse): void {
+  clear(page)
+  const header = el('header', 'page-header')
+  header.appendChild(el('h1', 'page-title', '复训结果'))
+  page.appendChild(header)
+
+  const score = result.evaluation.overallScore
+  const passed = result.evaluation.passed
+  const scoreEl = el('div', 'result-score', `${score} 分`)
+  scoreEl.className = passed ? 'result-score passed' : 'result-score failed'
+  page.appendChild(scoreEl)
+
+  page.appendChild(el('p', 'result-status', passed ? '✓ 通过' : '✗ 未通过'))
+
+  if (result.evaluation.userFeedback) {
+    const feedback = el('div', 'result-feedback')
+    feedback.appendChild(el('h3', 'result-section-title', 'AI 反馈'))
+    feedback.appendChild(el('p', 'result-feedback-text', result.evaluation.userFeedback))
+    page.appendChild(feedback)
+  }
+
+  if (result.evaluation.strengths.length > 0) {
+    const sec = el('div', 'result-section')
+    sec.appendChild(el('h3', 'result-section-title', '做得好的地方'))
+    for (const s of result.evaluation.strengths) {
+      sec.appendChild(el('li', 'result-item', s))
+    }
+    page.appendChild(sec)
+  }
+
+  if (result.evaluation.missingPoints.length > 0) {
+    const sec = el('div', 'result-section')
+    sec.appendChild(el('h3', 'result-section-title', '需要补充的点'))
+    for (const m of result.evaluation.missingPoints) {
+      sec.appendChild(el('li', 'result-item', m))
+    }
+    page.appendChild(sec)
+  }
+
+  const meta = el('div', 'result-meta')
+  meta.appendChild(el('span', 'result-meta-item', `掌握度：${result.profile.overallMastery}`))
+  meta.appendChild(el('span', 'result-meta-item', `下次复习：${formatDate(result.nextReviewAt)}`))
+  page.appendChild(meta)
+
+  const backBtn = el('button', 'btn btn-primary', '返回今日复训')
+  backBtn.onclick = () => navigate({ name: 'training' })
+  page.appendChild(backBtn)
+}
+
+export async function renderTrainingDebtListPage(root: HTMLElement): Promise<void> {
+  const page = el('div', 'page page-training-debts')
+  const header = el('header', 'page-header')
+  header.appendChild(el('h1', 'page-title', '认知欠条'))
+  const headerActions = el('div', 'header-actions')
+  const todayBtn = el('button', 'btn btn-ghost btn-sm', '今日复训')
+  todayBtn.onclick = () => navigate({ name: 'training' })
+  headerActions.appendChild(todayBtn)
+  const backBtn = el('button', 'btn btn-ghost btn-sm', '返回')
+  backBtn.onclick = () => navigate({ name: 'app' })
+  headerActions.appendChild(backBtn)
+  header.appendChild(headerActions)
+  page.appendChild(header)
+
+  page.appendChild(el('p', 'page-intro', '所有被识别但尚未稳定掌握的认知欠条。完成 MVP-1 清偿后会自动加入。'))
+
+  const loadingEl = el('p', 'loading', '正在加载认知欠条…')
+  page.appendChild(loadingEl)
+  root.appendChild(page)
+
+  try {
+    const data = await fetchTrainingDebts()
+    clear(page)
+    page.appendChild(header)
+    page.appendChild(el('p', 'page-intro', '所有被识别但尚未稳定掌握的认知欠条。完成 MVP-1 清偿后会自动加入。'))
+
+    if (!data.ok) {
+      page.appendChild(el('p', 'error', data.error || '加载失败'))
+      return
+    }
+
+    if (data.debts.length === 0) {
+      const empty = el('div', 'empty-state')
+      empty.appendChild(el('p', 'empty-title', '暂无认知欠条'))
+      empty.appendChild(el('p', 'empty-desc', '完成 MVP-1 清偿会话后，系统会自动创建认知欠条。'))
+      page.appendChild(empty)
+      return
+    }
+
+    const list = el('div', 'debt-list')
+    for (const debt of data.debts) {
+      const card = el('div', 'debt-card')
+      card.appendChild(el('div', 'debt-status', debt.masteryLabel || '正在补偿'))
+      card.appendChild(el('p', 'debt-gap', debt.gapText))
+      const meta = el('div', 'debt-meta')
+      if (debt.mastery) {
+        meta.appendChild(el('span', 'debt-mastery', `掌握度 ${debt.mastery.overallMastery}`))
+      }
+      meta.appendChild(el('span', 'debt-stage', stageLabel(debt.mastery?.currentStage || 'initial_compensation')))
+      card.appendChild(meta)
+      card.onclick = () => navigate({ name: 'training-debt', debtId: debt.id })
+      list.appendChild(card)
+    }
+    page.appendChild(list)
+  } catch (e) {
+    clear(page)
+    page.appendChild(header)
+    page.appendChild(el('p', 'error', '加载失败，请稍后重试。'))
+  }
+}
+
+export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: string): Promise<void> {
+  const page = el('div', 'page page-training-debt-detail')
+  const header = el('header', 'page-header')
+  header.appendChild(el('h1', 'page-title', '认知欠条详情'))
+  const headerActions = el('div', 'header-actions')
+  const listBtn = el('button', 'btn btn-ghost btn-sm', '返回列表')
+  listBtn.onclick = () => navigate({ name: 'training-debt', debtId: 'list' })
+  headerActions.appendChild(listBtn)
+  header.appendChild(headerActions)
+  page.appendChild(header)
+
+  const loadingEl = el('p', 'loading', '正在加载…')
+  page.appendChild(loadingEl)
+  root.appendChild(page)
+
+  try {
+    const data = await fetchTrainingDebtDetail(debtId)
+    clear(page)
+    page.appendChild(header)
+
+    if (!data.ok) {
+      page.appendChild(el('p', 'error', data.error || '加载失败'))
+      return
+    }
+
+    page.appendChild(el('div', `debt-status level-${data.understandingLevel}`, data.masteryLabel))
+    page.appendChild(el('p', 'debt-gap-large', data.debt.gapText))
+
+    if (data.profile) {
+      const mastery = el('div', 'mastery-info')
+      mastery.appendChild(el('h3', 'result-section-title', '掌握度信息'))
+      mastery.appendChild(el('p', 'mastery-score', `总体掌握度：${data.profile.overallMastery}`))
+      mastery.appendChild(el('p', 'mastery-stage', `当前阶段：${stageLabel(data.profile.currentStage)}`))
+      mastery.appendChild(el('p', 'mastery-attempts', `练习次数：${data.profile.attemptCount}`))
+      if (data.profile.nextReviewAt) {
+        mastery.appendChild(el('p', 'mastery-next', `下次复习：${formatDate(data.profile.nextReviewAt)}`))
+      }
+      page.appendChild(mastery)
+    }
+
+    if (data.attempts.length > 0) {
+      const history = el('div', 'attempt-history')
+      history.appendChild(el('h3', 'result-section-title', '练习历史'))
+      for (const attempt of data.attempts.slice(0, 10)) {
+        const item = el('div', 'attempt-item')
+        item.appendChild(el('div', 'attempt-score', `${attempt.evaluation.overallScore} 分`))
+        item.appendChild(el('div', 'attempt-stage', stageLabel(attempt.trainingStage)))
+        item.appendChild(el('div', 'attempt-date', formatDate(attempt.completedAt)))
+        if (attempt.evaluation.userFeedback) {
+          item.appendChild(el('p', 'attempt-feedback', attempt.evaluation.userFeedback.slice(0, 200)))
+        }
+        history.appendChild(item)
+      }
+      page.appendChild(history)
+    }
+
+    if (data.reviews.length > 0) {
+      const reviews = el('div', 'review-history')
+      reviews.appendChild(el('h3', 'result-section-title', '复训任务'))
+      for (const review of data.reviews) {
+        const item = el('div', 'review-item')
+        item.appendChild(el('span', 'review-stage', stageLabel(review.trainingStage)))
+        item.appendChild(el('span', `review-status status-${review.status}`, review.status))
+        item.appendChild(el('span', 'review-due', formatDate(review.dueAt)))
+        reviews.appendChild(item)
+      }
+      page.appendChild(reviews)
+    }
+  } catch (e) {
+    clear(page)
+    page.appendChild(header)
+    page.appendChild(el('p', 'error', '加载失败，请稍后重试。'))
+  }
+}
+
+// 训练阶段中文标签
+function stageLabel(stage: string): string {
+  const labels: Record<string, string> = {
+    initial_compensation: '初始补偿',
+    delayed_recall: '延迟回忆',
+    misconception_check: '误区检查',
+    scenario_transfer: '场景迁移',
+    error_detection: '错误检测',
+    real_work_validation: '真实工作验证'
+  }
+  return labels[stage] || stage
+}
+
+// 日期格式化
+function formatDate(iso: string): string {
+  try {
+    const d = new Date(iso)
+    return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  } catch {
+    return iso
+  }
 }
