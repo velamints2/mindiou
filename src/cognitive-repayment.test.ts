@@ -4,8 +4,16 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 import {
   DATA_SCHEMA_VERSION,
+  EVALUATOR_VERSION,
+  PROMPT_SCHEMA_VERSION,
   GAP_STATUSES,
-  createGapFromReport
+  VALID_TRANSITIONS,
+  canTransition,
+  transitionGapStatus,
+  createGapFromReport,
+  buildAttemptRecord,
+  applyAttemptOutcome,
+  resolveAttemptOutcome
 } from "../cognitive-repayment.js";
 import { createCognitiveRepaymentStore } from "../cognitive-repayment-store.js";
 
@@ -202,5 +210,113 @@ describe("cognitive repayment store", () => {
     const store = createCognitiveRepaymentStore(storePath);
     await store.load();
     expect(store.getState()).toMatchObject({ version: 1, gaps: [], attempts: [], reviewQueue: [], capabilityProfiles: [] });
+  });
+});
+
+describe("gap status state machine", () => {
+  it("accepts every documented legal transition", () => {
+    for (const from of GAP_STATUSES) {
+      for (const to of VALID_TRANSITIONS[from]) {
+        expect(canTransition(from, to)).toBe(true);
+        const gap = { status: from, statusHistory: [], updatedAt: "2026-07-30T00:00:00.000Z" };
+        transitionGapStatus(gap, to, { reason: "test", now: "2026-07-30T01:00:00.000Z" });
+        expect(gap.status).toBe(to);
+        expect(gap.statusHistory).toEqual([{ from, to, at: "2026-07-30T01:00:00.000Z", reason: "test" }]);
+        expect(gap.updatedAt).toBe("2026-07-30T01:00:00.000Z");
+      }
+    }
+  });
+
+  it("rejects illegal transitions", () => {
+    const illegal: Array<[string, string]> = [
+      ["identified", "repaid"],
+      ["identified", "partiallyRepaid"],
+      ["repaid", "partiallyRepaid"],
+      ["reviewDue", "repaid"],
+      ["archived", "attempting"],
+      ["queued", "repaid"]
+    ];
+    for (const [from, to] of illegal) {
+      expect(canTransition(from, to)).toBe(false);
+      const gap = { status: from, statusHistory: [] };
+      expect(() => transitionGapStatus(gap, to, { reason: "test" })).toThrow(/Invalid gap status transition/);
+      expect(gap.status).toBe(from);
+    }
+  });
+});
+
+describe("attempt records and outcome", () => {
+  function makeGap(status = "attempting") {
+    return {
+      gapId: "gap-1",
+      userId: "user-1",
+      reportId: "report-1",
+      title: "Root-cause verification",
+      status,
+      statusHistory: [],
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z"
+    };
+  }
+
+  it("builds an attempt record with versions and sanitized fields", () => {
+    const attempt = buildAttemptRecord({
+      gap: makeGap(),
+      answer: "x".repeat(7000),
+      selfConfidence: 9,
+      evaluation: { passed: false },
+      feedback: "keep going",
+      nextQuestion: "why?",
+      repaymentStatus: "attempting",
+      fallbackUsed: false,
+      modelProvider: "deepseek",
+      modelName: "deepseek-v4-flash",
+      now: "2026-07-30T01:00:00.000Z"
+    });
+    expect(attempt.answer).toHaveLength(6000);
+    expect(attempt.selfConfidence).toBeNull();
+    expect(attempt.evaluatorVersion).toBe(EVALUATOR_VERSION);
+    expect(attempt.promptSchemaVersion).toBe(PROMPT_SCHEMA_VERSION);
+    expect(attempt.dataSchemaVersion).toBe(DATA_SCHEMA_VERSION);
+    expect(attempt.errorCategory).toBeNull();
+    expect(attempt.clientAttemptId).toBeNull();
+    expect(attempt.fallbackUsed).toBe(false);
+    expect(attempt.submittedAt).toBe("2026-07-30T01:00:00.000Z");
+    const withConfidence = buildAttemptRecord({ gap: makeGap(), answer: "a", selfConfidence: 4, evaluation: { passed: false } });
+    expect(withConfidence.selfConfidence).toBe(4);
+  });
+
+  it("never marks a gap repaid after a single passed attempt", () => {
+    const gap = makeGap();
+    const first = buildAttemptRecord({ gap, answer: "solid", evaluation: { passed: true }, repaymentStatus: "partiallyRepaid" });
+    applyAttemptOutcome(gap, first, { now: "2026-07-30T01:00:00.000Z", previousAttempts: [] });
+    expect(gap.status).toBe("partiallyRepaid");
+
+    // Back to attempting for the second independent explanation.
+    transitionGapStatus(gap, "attempting", { reason: "再次作答", now: "2026-07-30T02:00:00.000Z" });
+    const second = buildAttemptRecord({ gap, answer: "solid again", evaluation: { passed: true }, repaymentStatus: "repaid" });
+    applyAttemptOutcome(gap, second, { now: "2026-07-30T02:30:00.000Z", previousAttempts: [first] });
+    expect(gap.status).toBe("repaid");
+    expect(gap.statusHistory.map((entry: any) => entry.to)).toEqual(["partiallyRepaid", "attempting", "partiallyRepaid", "repaid"]);
+  });
+
+  it("keeps the gap attempting when the answer fails", () => {
+    const gap = makeGap();
+    const failed = buildAttemptRecord({ gap, answer: "unclear", evaluation: { passed: false }, repaymentStatus: "attempting" });
+    applyAttemptOutcome(gap, failed, { previousAttempts: [] });
+    expect(gap.status).toBe("attempting");
+    expect(gap.statusHistory).toHaveLength(1);
+  });
+
+  it("ignores the current attempt when checking for a prior pass", () => {
+    const attempt = buildAttemptRecord({ gap: makeGap(), answer: "a", evaluation: { passed: true } });
+    expect(resolveAttemptOutcome(attempt, [attempt])).toBe("partiallyRepaid");
+    expect(resolveAttemptOutcome(attempt, [{ attemptId: "other", evaluation: { passed: true } }])).toBe("repaid");
+  });
+
+  it("refuses to apply an outcome outside the attempting state", () => {
+    const gap = makeGap("identified");
+    const attempt = buildAttemptRecord({ gap, answer: "a", evaluation: { passed: true } });
+    expect(() => applyAttemptOutcome(gap, attempt, { previousAttempts: [] })).toThrow(/attempting/);
   });
 });

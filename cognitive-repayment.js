@@ -216,3 +216,79 @@ export function createGapFromReport({ report, gapRef, userId, now = new Date().t
     dataSchemaVersion: DATA_SCHEMA_VERSION
   };
 }
+
+// ── Attempts and repayment outcome ──
+
+/**
+ * Resolves the resulting gap status for one evaluated attempt. A single
+ * passed attempt can never reach "repaid" directly; a second independent
+ * pass is required.
+ */
+export function resolveAttemptOutcome(attempt, previousAttempts = []) {
+  const passed = Boolean(attempt?.evaluation?.passed);
+  if (!passed) return "attempting";
+  const priorPass = (Array.isArray(previousAttempts) ? previousAttempts : []).some(
+    item => item && item.attemptId !== attempt.attemptId && Boolean(item?.evaluation?.passed)
+  );
+  return priorPass ? "repaid" : "partiallyRepaid";
+}
+
+export function buildAttemptRecord({
+  gap,
+  answer,
+  selfConfidence,
+  evaluation,
+  feedback,
+  nextQuestion,
+  repaymentStatus,
+  fallbackUsed,
+  errorCategory,
+  modelProvider,
+  modelName,
+  clientAttemptId,
+  now = new Date().toISOString()
+} = {}) {
+  const confidence = Number(selfConfidence);
+  return {
+    attemptId: crypto.randomUUID(),
+    gapId: gap.gapId,
+    userId: gap.userId,
+    answer: String(answer || "").slice(0, 6000),
+    submittedAt: now,
+    selfConfidence: Number.isInteger(confidence) && confidence >= 1 && confidence <= 5 ? confidence : null,
+    evaluation,
+    feedback: String(feedback || ""),
+    nextQuestion: String(nextQuestion || ""),
+    repaymentStatus: String(repaymentStatus || "attempting"),
+    evaluatorVersion: EVALUATOR_VERSION,
+    promptSchemaVersion: PROMPT_SCHEMA_VERSION,
+    dataSchemaVersion: DATA_SCHEMA_VERSION,
+    modelProvider: String(modelProvider || ""),
+    modelName: String(modelName || ""),
+    fallbackUsed: Boolean(fallbackUsed),
+    errorCategory: errorCategory || null,
+    clientAttemptId: clientAttemptId ? String(clientAttemptId).slice(0, 100) : null
+  };
+}
+
+/**
+ * Advances the gap status after an attempt. The gap must already be in
+ * "attempting" (self-transition is legal and used to record the outcome).
+ */
+export function applyAttemptOutcome(gap, attempt, { now = new Date().toISOString(), previousAttempts = [] } = {}) {
+  if (gap?.status !== "attempting") {
+    throw new Error(`Cannot apply attempt outcome unless the gap is attempting (current: ${gap?.status})`);
+  }
+  const outcome = resolveAttemptOutcome(attempt, previousAttempts);
+  if (outcome === "repaid") {
+    // attempting -> repaid is not a legal direct transition; the pass is
+    // recorded first, then the second independent pass promotes the gap.
+    transitionGapStatus(gap, "partiallyRepaid", { reason: "本次回答通过", now });
+    return transitionGapStatus(gap, "repaid", { reason: "再次独立通过，标记为已清偿", now });
+  }
+  const reasons = {
+    attempting: "回答未通过，保持清偿中",
+    partiallyRepaid: "首次通过，需要间隔后再次独立验证"
+  };
+  return transitionGapStatus(gap, outcome, { reason: reasons[outcome], now });
+}
