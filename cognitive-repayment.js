@@ -499,3 +499,160 @@ export function getRepaymentEvaluationPrompt() {
     "不得输出占位符、模板残留或英文标记词。"
   ].join("\n");
 }
+
+// ── Review queue ──
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Keeps at most one pending review item per gap: an existing pending item is
+ * updated in place, otherwise a new one is appended.
+ */
+export function upsertReviewItemForGap({ reviewQueue, gap, attempt, now = new Date().toISOString() } = {}) {
+  if (!Array.isArray(reviewQueue)) {
+    throw new Error("A reviewQueue array is required");
+  }
+  const passed = Boolean(attempt?.evaluation?.passed);
+  const base = new Date(now).getTime();
+  let dueAt;
+  let priority;
+  let nextQuestionType;
+  let reason;
+  if (!passed) {
+    dueAt = new Date(base + 12 * HOUR_MS).toISOString();
+    priority = "high";
+    nextQuestionType = "boundary_probe";
+    reason = "回答未通过，需要针对遗漏点重新解释";
+  } else if (gap?.status === "repaid") {
+    dueAt = new Date(base + 72 * HOUR_MS).toISOString();
+    priority = "low";
+    nextQuestionType = "transfer_scenario";
+    reason = "已清偿，到期迁移场景验证";
+  } else {
+    dueAt = new Date(base + 24 * HOUR_MS).toISOString();
+    priority = "medium";
+    nextQuestionType = "feynman_reexplain";
+    reason = "首次通过，需要间隔后再次独立解释";
+  }
+  const existing = reviewQueue.find(item => item.gapId === gap.gapId && item.status === "pending");
+  if (existing) {
+    existing.dueAt = dueAt;
+    existing.priority = priority;
+    existing.reason = reason;
+    existing.nextQuestionType = nextQuestionType;
+    existing.lastResult = passed ? "passed" : "failed";
+    existing.attemptCount = (existing.attemptCount || 0) + 1;
+    existing.updatedAt = now;
+    return existing;
+  }
+  const item = {
+    reviewItemId: crypto.randomUUID(),
+    gapId: gap.gapId,
+    userId: gap.userId,
+    dueAt,
+    priority,
+    reason,
+    attemptCount: 1,
+    lastResult: passed ? "passed" : "failed",
+    nextQuestionType,
+    status: "pending",
+    createdAt: now,
+    updatedAt: now
+  };
+  reviewQueue.push(item);
+  return item;
+}
+
+/**
+ * A repaid gap with an overdue pending review item moves to reviewDue.
+ */
+export function refreshReviewDue(gap, { now = new Date().toISOString(), reviewQueue = [] } = {}) {
+  if (gap?.status !== "repaid") return gap;
+  const nowMs = new Date(now).getTime();
+  const due = (Array.isArray(reviewQueue) ? reviewQueue : []).some(
+    item => item.gapId === gap.gapId && item.status === "pending" && new Date(item.dueAt).getTime() <= nowMs
+  );
+  if (!due) return gap;
+  return transitionGapStatus(gap, "reviewDue", { reason: "复习到期，需要再次验证", now });
+}
+
+/**
+ * When a new attempt starts, pending review items for the gap are completed.
+ */
+export function completePendingReviewItems({ reviewQueue, gapId, now = new Date().toISOString() } = {}) {
+  if (!Array.isArray(reviewQueue)) return [];
+  const completed = [];
+  for (const item of reviewQueue) {
+    if (item.gapId === gapId && item.status === "pending") {
+      item.status = "done";
+      item.updatedAt = now;
+      completed.push(item);
+    }
+  }
+  return completed;
+}
+
+// ── Capability profile ──
+
+function levelForScore(score) {
+  if (score < 40) return "L1";
+  if (score < 70) return "L2";
+  if (score < 90) return "L3";
+  return "L4";
+}
+
+function emptyProfileDimension() {
+  return { score: 0, level: "L1", stability: "one_shot", evidence: [] };
+}
+
+/**
+ * EMA-updates the per-domain capability profile. The per-dimension delta is
+ * clamped to +/-20 so a single answer can never jump multiple levels, and
+ * only a non-fallback passed attempt that promoted its gap to repaid counts
+ * as user_verified evidence.
+ */
+export function updateCapabilityProfile({ profiles, userId, domain, attempt, now = new Date().toISOString() } = {}) {
+  if (!Array.isArray(profiles)) {
+    throw new Error("A profiles array is required");
+  }
+  const profileDomain = clean(domain || "") || "general";
+  let profile = profiles.find(item => item.userId === userId && item.domain === profileDomain);
+  if (!profile) {
+    profile = {
+      userId,
+      domain: profileDomain,
+      dimensions: {},
+      createdAt: now,
+      updatedAt: now,
+      dataSchemaVersion: DATA_SCHEMA_VERSION
+    };
+    profiles.push(profile);
+  }
+  const passed = Boolean(attempt?.evaluation?.passed);
+  const source = passed && !attempt?.fallbackUsed && attempt?.repaymentStatus === "repaid"
+    ? "user_verified"
+    : "model_inferred";
+  const evaluationDimensions = attempt?.evaluation?.dimensions || {};
+  for (const dimension of DIMENSIONS) {
+    const dimEval = evaluationDimensions[dimension];
+    if (!dimEval) continue;
+    const current = profile.dimensions[dimension] || emptyProfileDimension();
+    const oldScore = Number(current.score) || 0;
+    const rawNext = Math.round(oldScore * 0.7 + dimEval.score * 0.3);
+    const delta = Math.max(-20, Math.min(20, rawNext - oldScore));
+    const nextScore = Math.max(0, Math.min(100, oldScore + delta));
+    const evidence = [
+      ...(Array.isArray(current.evidence) ? current.evidence : []),
+      { attemptId: attempt.attemptId, source, at: now }
+    ].slice(-20);
+    const verifiedCount = evidence.filter(entry => entry.source === "user_verified").length;
+    profile.dimensions[dimension] = {
+      score: nextScore,
+      level: levelForScore(nextScore),
+      stability: verifiedCount >= 2 ? "stable" : "one_shot",
+      evidence
+    };
+  }
+  profile.updatedAt = now;
+  return profiles;
+}

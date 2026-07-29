@@ -18,6 +18,10 @@ import {
   normalizeRepaymentEvaluation,
   createFallbackEvaluation,
   getRepaymentEvaluationPrompt,
+  upsertReviewItemForGap,
+  refreshReviewDue,
+  completePendingReviewItems,
+  updateCapabilityProfile,
   DIMENSIONS
 } from "../cognitive-repayment.js";
 import { createCognitiveRepaymentStore } from "../cognitive-repayment-store.js";
@@ -458,5 +462,145 @@ describe("repayment evaluation prompt", () => {
     expect(prompt).toContain("nextQuestion");
     expect(prompt).toContain("禁止宣称学习者已经长期掌握");
     expect(prompt).toContain("真实片段");
+  });
+});
+
+describe("review queue", () => {
+  const NOW = "2026-07-30T00:00:00.000Z";
+  const NOW_MS = new Date(NOW).getTime();
+  function makeGap(status = "attempting") {
+    return { gapId: "gap-1", userId: "user-1", title: "t", status, statusHistory: [], updatedAt: NOW };
+  }
+  const attemptWith = (passed: boolean) => ({ attemptId: `a-${Math.random()}`, evaluation: { passed } });
+
+  it("schedules a high-priority boundary probe 12h after a failed answer", () => {
+    const queue: any[] = [];
+    const item = upsertReviewItemForGap({ reviewQueue: queue, gap: makeGap(), attempt: attemptWith(false), now: NOW });
+    expect(item.priority).toBe("high");
+    expect(item.nextQuestionType).toBe("boundary_probe");
+    expect(item.reason).toBe("回答未通过，需要针对遗漏点重新解释");
+    expect(item.lastResult).toBe("failed");
+    expect(new Date(item.dueAt).getTime() - NOW_MS).toBe(12 * 3600 * 1000);
+    expect(item.status).toBe("pending");
+  });
+
+  it("schedules a medium feynman re-explanation 24h after the first pass", () => {
+    const queue: any[] = [];
+    const item = upsertReviewItemForGap({ reviewQueue: queue, gap: makeGap("partiallyRepaid"), attempt: attemptWith(true), now: NOW });
+    expect(item.priority).toBe("medium");
+    expect(item.nextQuestionType).toBe("feynman_reexplain");
+    expect(item.reason).toBe("首次通过，需要间隔后再次独立解释");
+    expect(new Date(item.dueAt).getTime() - NOW_MS).toBe(24 * 3600 * 1000);
+  });
+
+  it("schedules a low-priority transfer scenario 72h after repayment", () => {
+    const queue: any[] = [];
+    const item = upsertReviewItemForGap({ reviewQueue: queue, gap: makeGap("repaid"), attempt: attemptWith(true), now: NOW });
+    expect(item.priority).toBe("low");
+    expect(item.nextQuestionType).toBe("transfer_scenario");
+    expect(item.reason).toBe("已清偿，到期迁移场景验证");
+    expect(new Date(item.dueAt).getTime() - NOW_MS).toBe(72 * 3600 * 1000);
+  });
+
+  it("keeps at most one pending item per gap across repeated upserts", () => {
+    const queue: any[] = [];
+    const gap = makeGap();
+    upsertReviewItemForGap({ reviewQueue: queue, gap, attempt: attemptWith(false), now: NOW });
+    const second = upsertReviewItemForGap({ reviewQueue: queue, gap, attempt: attemptWith(true), now: NOW });
+    expect(queue.filter((item: any) => item.gapId === "gap-1" && item.status === "pending")).toHaveLength(1);
+    expect(second.attemptCount).toBe(2);
+    expect(second.priority).toBe("medium");
+    expect(second.lastResult).toBe("passed");
+  });
+
+  it("completes pending items when a new attempt starts", () => {
+    const queue: any[] = [];
+    upsertReviewItemForGap({ reviewQueue: queue, gap: makeGap(), attempt: attemptWith(false), now: NOW });
+    const done = completePendingReviewItems({ reviewQueue: queue, gapId: "gap-1", now: NOW });
+    expect(done).toHaveLength(1);
+    expect(queue[0].status).toBe("done");
+  });
+
+  it("moves a repaid gap with an overdue review item to reviewDue", () => {
+    const queue: any[] = [];
+    const gap = makeGap("repaid");
+    const item = upsertReviewItemForGap({ reviewQueue: queue, gap, attempt: attemptWith(true), now: NOW });
+    const later = new Date(new Date(item.dueAt).getTime() + 1000).toISOString();
+    refreshReviewDue(gap, { now: later, reviewQueue: queue });
+    expect(gap.status).toBe("reviewDue");
+
+    const notDue = makeGap("repaid");
+    refreshReviewDue(notDue, { now: NOW, reviewQueue: queue });
+    expect(notDue.status).toBe("repaid");
+
+    const attempting = makeGap("attempting");
+    refreshReviewDue(attempting, { now: later, reviewQueue: queue });
+    expect(attempting.status).toBe("attempting");
+  });
+});
+
+describe("capability profile", () => {
+  const NOW = "2026-07-30T00:00:00.000Z";
+  function passedAttempt(overrides: any = {}) {
+    return {
+      attemptId: overrides.attemptId || `att-${Math.random()}`,
+      evaluation: {
+        passed: true,
+        dimensions: Object.fromEntries(DIMENSIONS.map((d: string) => [d, { score: 100 }]))
+      },
+      repaymentStatus: "repaid",
+      fallbackUsed: false,
+      ...overrides
+    };
+  }
+
+  it("never lets one perfect answer jump multiple levels (±20 clamp)", () => {
+    const profiles: any[] = [];
+    updateCapabilityProfile({ profiles, userId: "user-1", domain: "deploy", attempt: passedAttempt(), now: NOW });
+    const profile = profiles[0];
+    expect(profile.domain).toBe("deploy");
+    for (const dimension of DIMENSIONS) {
+      // 0 * 0.7 + 100 * 0.3 = 30, clamped to a +20 delta.
+      expect(profile.dimensions[dimension].score).toBe(20);
+      expect(profile.dimensions[dimension].level).toBe("L1");
+      expect(profile.dimensions[dimension].stability).toBe("one_shot");
+    }
+  });
+
+  it("marks stability stable after two user_verified evidence entries", () => {
+    const profiles: any[] = [];
+    updateCapabilityProfile({ profiles, userId: "user-1", domain: "deploy", attempt: passedAttempt(), now: NOW });
+    updateCapabilityProfile({ profiles, userId: "user-1", domain: "deploy", attempt: passedAttempt(), now: NOW });
+    const dim = profiles[0].dimensions.causalExplanation;
+    expect(dim.stability).toBe("stable");
+    expect(dim.evidence).toHaveLength(2);
+    expect(dim.evidence.every((entry: any) => entry.source === "user_verified")).toBe(true);
+    // Second update: 20 * 0.7 + 100 * 0.3 = 44, delta clamped to +20.
+    expect(dim.score).toBe(40);
+    expect(dim.level).toBe("L2");
+  });
+
+  it("records fallback or non-repaid attempts as model_inferred evidence", () => {
+    const profiles: any[] = [];
+    updateCapabilityProfile({ profiles, userId: "user-1", domain: "deploy", attempt: passedAttempt({ fallbackUsed: true }), now: NOW });
+    updateCapabilityProfile({ profiles, userId: "user-1", domain: "deploy", attempt: passedAttempt({ repaymentStatus: "partiallyRepaid" }), now: NOW });
+    const dim = profiles[0].dimensions.transferAbility;
+    expect(dim.evidence.map((entry: any) => entry.source)).toEqual(["model_inferred", "model_inferred"]);
+    expect(dim.stability).toBe("one_shot");
+  });
+
+  it("starts legacy users from an empty zero profile without throwing", () => {
+    const profiles: any[] = [];
+    const weakAttempt = {
+      attemptId: "att-weak",
+      evaluation: { passed: false, dimensions: Object.fromEntries(DIMENSIONS.map((d: string) => [d, { score: 10 }])) },
+      repaymentStatus: "attempting",
+      fallbackUsed: true
+    };
+    const result = updateCapabilityProfile({ profiles, userId: "legacy", domain: "", attempt: weakAttempt, now: NOW });
+    expect(result).toHaveLength(1);
+    expect(profiles[0].domain).toBe("general");
+    expect(profiles[0].dimensions.conceptualUnderstanding.score).toBe(3);
+    expect(profiles[0].dimensions.conceptualUnderstanding.level).toBe("L1");
   });
 });
