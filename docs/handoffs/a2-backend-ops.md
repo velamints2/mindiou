@@ -15,6 +15,10 @@
 6. **部署/故障文档**：`DEPLOYMENT_RUNBOOK.md`（本地/首部署/更新/日志/回滚/公网验证）、`INCIDENT_RUNBOOK.md`（requestId 定位法、4xx 语义表、模型/存储/证书/滥用排查）
 7. **债务清单**：`BACKEND_DEBT_BACKLOG.md` D1-D11（含 server.js 四阶段拆分方案）
 
+补充完成（追加提交 51b0924）：
+8. **D6 max_tokens**：chatJson 新增可选 maxTokens 参数（默认 4096），所有文本生成调用获得输出上界
+9. **D7 jti 128bit**：early-access jti 从 randomBytes(9) 提到 randomBytes(16)
+
 ## 2. 修改文件
 
 | 提交 | 文件 |

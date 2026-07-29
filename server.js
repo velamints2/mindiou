@@ -661,7 +661,7 @@ function fallbackPlan(subject, level, maxUnits = 8) {
   }));
 }
 
-async function chatJson(messages, fallback) {
+async function chatJson(messages, fallback, maxTokens = 4096) {
   if (!aiApiKey || disableAi) {
     return {
       ...fallback(),
@@ -685,6 +685,7 @@ async function chatJson(messages, fallback) {
         temperature: 0.2,
         response_format: { type: "json_object" },
         ...(aiProvider === "deepseek" ? { thinking: { type: "disabled" } } : {}),
+        max_tokens: maxTokens,
         messages
       }),
       signal: controller.signal
@@ -1617,7 +1618,7 @@ const server = createServer(async (req, res) => {
       const token = signSession({
         label: user.label,
         expiresAt,
-        jti: crypto.randomBytes(9).toString("base64url")
+        jti: crypto.randomBytes(16).toString("base64url")
       });
       res.setHeader("set-cookie", earlyAccessSessionCookie(req, token, sessionTtlSeconds));
       jsonResponse(res, 200, {
