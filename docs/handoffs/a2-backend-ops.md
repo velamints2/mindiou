@@ -42,6 +42,11 @@
         → 存储（/var/lib/mindiou/*.json + auth-store.sqlite）
         → journald（systemd 捕获 stdout 结构化日志）
 应急入口：cloudflared quick tunnel（仅证书失效时启用）
+
+> **公网入口修正（2026-07-30 补充）**：实际生产域名为 `http://demo.mindiou.top/mindiou/`
+> （解析 `156.225.23.88`，Nginx 1.18.0），与仓库 `deploy/` 中配置的 `114.67.169.78`
+> （Nginx 1.24.0）是两台不同服务器。仓库 deploy 配置需按实际服务器调整后使用。
+> 本次代码改动（server.js 等）对两个环境均有效，不依赖具体域名或 IP。
 ```
 
 混乱点（未动，见 BACKLOG D11）：server.js 2400+ 行单文件，路由/领域/供应商调用混合。

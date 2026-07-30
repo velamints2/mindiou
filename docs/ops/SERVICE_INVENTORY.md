@@ -36,7 +36,13 @@
 | 领域冒烟 | `test:mvp1` / `test:voice` / `test:spiral` / `test:rokid` / `test:simulator` |
 | Mentra TPA | `cd platforms/mentra && npm run check && npm test && npm run build` |
 
-## 3. 反向代理与公网入口（已验证 deploy/）
+## 3. 反向代理与公网入口
+
+> **实际生产域名（已验证 2026-07-30）**：`http://demo.mindiou.top/mindiou/`（解析 `156.225.23.88`，Nginx 1.18.0）。
+> 仓库 `deploy/` 配置以 `114.67.169.78`（Nginx 1.24.0）为示例——两者是不同服务器，
+> `deploy/` 配置需按实际生产服务器调整后使用【待确认：demo.mindiou.top 服务器的 Nginx/systemd 实际配置】。
+
+### 仓库 deploy/ 中的配置（以 114.67.169.78 为示例）
 
 - TLS 站点：`deploy/nginx-mindiou-ip-https.conf`，`server_name 114.67.169.78`，Let's Encrypt IP 短证书（约 6 天），TLS1.2/1.3。
 - 路径映射（`deploy/nginx-mindiou-locations.conf`）：
