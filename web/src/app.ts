@@ -17,6 +17,7 @@ import {
   renderTrainingDebtListPage,
   renderTrainingPage
 } from './pages'
+import { renderRepaymentDetailPage, renderRepaymentPage } from './repayment'
 import { clear, el, navigate, parseRoute, type Route } from './router'
 import { initTracker, trackRoute } from './tracker'
 
@@ -112,6 +113,14 @@ async function render(route: Route): Promise<void> {
         await renderTrainingDebtDetailPage(app, route.debtId)
       }
       trackRoute('training')
+      return
+    case 'repayment':
+      await renderRepaymentPage(app)
+      trackRoute('repayment')
+      return
+    case 'repayment-detail':
+      await renderRepaymentDetailPage(app, route.gapId)
+      trackRoute('repayment')
       return
     case 'not-found':
     default:

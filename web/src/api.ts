@@ -15,6 +15,11 @@ import type {
   GenerateReportRequest,
   GenerateReportResponse,
   GenerateTimelineResponse,
+  RepaymentAttempt,
+  RepaymentGap,
+  RepaymentProfile,
+  RepaymentReviewItem,
+  RepaymentStatusResponse,
   StartReviewResponse,
   SubmitAnswerResponse,
   SubmitCardAnswerResponse,
@@ -350,4 +355,78 @@ export async function submitReviewAnswer(taskId: string, answer: string): Promis
     body: JSON.stringify({ answer })
   })
   return res.json()
+}
+
+// ── 认知清偿 V1 API ──
+// 对应后端 /api/repayment/*（COGNITIVE_REPAYMENT_V1=1 时启用）。
+
+/** 功能开关与版本信息（公开接口，无需登录） */
+export async function repaymentStatus(): Promise<RepaymentStatusResponse> {
+  return apiFetch<RepaymentStatusResponse>('/api/repayment/status')
+}
+
+/** 从认知债务报告导入一笔欠条进入清偿流程 */
+export async function importRepaymentGap(
+  reportId: string,
+  gapRank: number
+): Promise<ApiResult<{ gap: RepaymentGap; deduplicated?: boolean }>> {
+  return apiFetch<ApiResult<{ gap: RepaymentGap; deduplicated?: boolean }>>(
+    '/api/repayment/gaps/import',
+    { method: 'POST', body: JSON.stringify({ reportId, gapRank }) }
+  )
+}
+
+/** 列出当前用户的认知欠条（可按状态过滤），每条附 latestAttempt 与 nextReviewAt */
+export async function listRepaymentGaps(status?: string): Promise<ApiResult<{ gaps: RepaymentGap[] }>> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+  return apiFetch<ApiResult<{ gaps: RepaymentGap[] }>>(`/api/repayment/gaps${qs}`)
+}
+
+/** 欠条详情：附完整作答历史与复习项 */
+export async function getRepaymentGap(
+  gapId: string
+): Promise<ApiResult<{ gap: RepaymentGap; attempts: RepaymentAttempt[]; reviewItems: RepaymentReviewItem[] }>> {
+  return apiFetch<ApiResult<{ gap: RepaymentGap; attempts: RepaymentAttempt[]; reviewItems: RepaymentReviewItem[] }>>(
+    `/api/repayment/gaps/${encodeURIComponent(gapId)}`
+  )
+}
+
+/** 提交一次清偿作答。clientAttemptId 用于双击/重试去重 */
+export async function submitRepaymentAttempt(
+  gapId: string,
+  payload: { answer: string; selfConfidence?: number; clientAttemptId?: string }
+): Promise<ApiResult<{ attempt: RepaymentAttempt; gap: RepaymentGap; deduplicated?: boolean }>> {
+  return apiFetch<ApiResult<{ attempt: RepaymentAttempt; gap: RepaymentGap; deduplicated?: boolean }>>(
+    `/api/repayment/gaps/${encodeURIComponent(gapId)}/attempts`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  )
+}
+
+/** 待处理复习队列（每项附 gapTitle/gapStatus） */
+export async function getRepaymentReviewQueue(): Promise<ApiResult<{ items: RepaymentReviewItem[] }>> {
+  return apiFetch<ApiResult<{ items: RepaymentReviewItem[] }>>('/api/repayment/review-queue')
+}
+
+/** 忽略一条复习项 */
+export async function dismissRepaymentReviewItem(
+  reviewItemId: string
+): Promise<ApiResult<{ item: RepaymentReviewItem }>> {
+  return apiFetch<ApiResult<{ item: RepaymentReviewItem }>>(
+    `/api/repayment/review-queue/${encodeURIComponent(reviewItemId)}/dismiss`,
+    { method: 'POST', body: JSON.stringify({}) }
+  )
+}
+
+/** 能力画像（无数据时返回 degraded 标记） */
+export async function getRepaymentProfile(): Promise<
+  ApiResult<{ profiles: RepaymentProfile[]; degraded?: boolean; note?: string }>
+> {
+  return apiFetch<ApiResult<{ profiles: RepaymentProfile[]; degraded?: boolean; note?: string }>>(
+    '/api/repayment/profile'
+  )
+}
+
+/** 当前用户的认知债务报告列表（导入欠条入口用） */
+export async function listMvp0Reports(): Promise<ApiResult<{ reports: ClearanceReport[] }>> {
+  return apiFetch<ApiResult<{ reports: ClearanceReport[] }>>('/api/mvp0/reports')
 }
