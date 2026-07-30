@@ -120,4 +120,78 @@ describe("auth store", () => {
       expect(store.getUserById("no-such-user")).toBeNull();
     });
   });
+
+  describe("listUsersWithStats", () => {
+    it("returns an empty array when no users exist", () => {
+      const users = store.listUsersWithStats();
+      expect(users).toEqual([]);
+    });
+
+    it("returns each user with base fields and never exposes password_hash", () => {
+      store.register("alice@example.com", "secret-1");
+      store.register("bob@example.com", "secret-2");
+      const users = store.listUsersWithStats();
+      expect(users).toHaveLength(2);
+      for (const u of users) {
+        expect(u.id).toBeTruthy();
+        expect(u.email).toBeTruthy();
+        expect(u.createdAt).toBeTruthy();
+        expect(typeof u.emailVerified).toBe("boolean");
+        expect(typeof u.activeSessionCount).toBe("number");
+        expect(typeof u.activeDeviceTokenCount).toBe("number");
+        // password_hash 绝不外泄
+        expect(Object.keys(u)).not.toContain("passwordHash");
+        expect(JSON.stringify(u)).not.toContain("password_hash");
+      }
+    });
+
+    it("counts active sessions per user and updates lastSessionAt after login", () => {
+      const { user, sessionId } = store.register("alice@example.com", "secret-1");
+      store.login("alice@example.com", "secret-1"); // 再开一个会话
+      const users = store.listUsersWithStats();
+      const alice = users.find(u => u.id === user.id);
+      expect(alice.activeSessionCount).toBe(2);
+      expect(alice.lastSessionAt).toBeTruthy();
+      // 注册时创建的会话 createdAt 应不晚于后续登录的会话
+      expect(alice.lastSessionAt >= alice.createdAt).toBe(true);
+      // 销毁一个会话后应剩 1
+      store.logout(sessionId);
+      const refreshed = store.listUsersWithStats().find(u => u.id === user.id);
+      expect(refreshed.activeSessionCount).toBe(1);
+    });
+
+    it("does not count expired sessions as active", () => {
+      const { sessionId } = store.register("alice@example.com", "secret-1");
+      const raw = new Database(dbPath);
+      raw.prepare("UPDATE sessions SET expires_at = ? WHERE id = ?")
+        .run(new Date(Date.now() - 1000).toISOString(), sessionId);
+      raw.close();
+      const users = store.listUsersWithStats();
+      expect(users[0].activeSessionCount).toBe(0);
+      expect(users[0].lastSessionAt).toBeTruthy(); // 仍记录历史会话时间
+    });
+
+    it("counts only non-revoked device tokens", () => {
+      const { user } = store.register("alice@example.com", "secret-1");
+      const t1 = store.generateDeviceToken(user.id, "phone");
+      store.generateDeviceToken(user.id, "glasses");
+      expect(store.listUsersWithStats()[0].activeDeviceTokenCount).toBe(2);
+      store.revokeDeviceToken(t1.id, user.id);
+      expect(store.listUsersWithStats()[0].activeDeviceTokenCount).toBe(1);
+    });
+
+    it("returns users ordered by created_at DESC", () => {
+      store.register("alice@example.com", "secret-1");
+      // 通过 SQLite 直接控制 created_at 以避免时钟精度问题
+      const raw = new Database(dbPath);
+      const aliceRow = raw.prepare("SELECT id FROM users WHERE email = ?").get("alice@example.com");
+      raw.prepare("UPDATE users SET created_at = ? WHERE id = ?")
+        .run("2026-01-01T00:00:00.000Z", aliceRow.id);
+      raw.close();
+      store.register("bob@example.com", "secret-2");
+      const users = store.listUsersWithStats();
+      expect(users[0].email).toBe("bob@example.com");
+      expect(users[1].email).toBe("alice@example.com");
+    });
+  });
 });

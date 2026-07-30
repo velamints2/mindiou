@@ -8,6 +8,7 @@ import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport } from "./mvp0-report.js";
 import { generateCollaborationTimeline } from "./mvp0-timeline.js";
 import { feynmanFollowUp } from "./mvp0-followup.js";
+import { handleAdminRoute } from "./admin-backend-patch.js";
 import {
   endClearanceSession,
   getClearanceAnalysisPrompt,
@@ -97,6 +98,8 @@ const mvp0Store = createMvp0Store(mvp0StorePath);
 await mvp0Store.load();
 const mvp1Store = createMvp1Store(mvp1StorePath);
 await mvp1Store.load();
+// 兼容 admin 补丁的只读视图：账户体系分支以 mvp1Store 持久化替代原内存 Map
+const mvp1Sessions = { values: () => mvp1Store.listSessions() };
 const trainingStorePath = process.env.TRAINING_STORE_PATH || "tmp/training-store.json";
 const trainingStore = createTrainingStore(trainingStorePath);
 await trainingStore.load();
@@ -1537,6 +1540,11 @@ const server = createServer(async (req, res) => {
       jsonResponse(res, 200, { ok: true });
       return;
     }
+
+    // ── 运营后台路由（独立鉴权，不走邀请码）──
+    if (handleAdminRoute(req, res, url.pathname, req.method, {
+      mvp0Store, spiralStore, eventLog, mvp1Sessions, authStore
+    })) return;
 
     // ── Web MVP-0/MVP-1 routes: cookie session auth, per-user data isolation ──
 

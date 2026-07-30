@@ -3364,3 +3364,127 @@ body {
     border-radius: 19px;
   }
 }
+
+/* ── 用户管理表格 ── */
+.admin-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-solid);
+  margin-top: 0.8rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.admin-table thead {
+  background: var(--surface-subtle);
+}
+
+.admin-table th {
+  padding: 0.7rem 0.9rem;
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted-strong);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.admin-table td {
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.admin-table tbody tr:hover {
+  background: var(--surface-subtle);
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* 用户邮箱单元格 */
+.user-email-cell {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.user-date-cell {
+  color: var(--muted);
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+/* 邮箱验证状态 */
+.user-verify-cell.is-verified {
+  color: var(--success);
+  font-weight: 500;
+}
+
+.user-verify-cell.is-unverified {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+/* 用户活跃度 */
+.user-activity-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+}
+
+.user-activity-cell .activity-time {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.user-activity-cell .activity-level {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  width: fit-content;
+}
+
+.user-activity-cell.is-high .activity-level {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.user-activity-cell.is-medium .activity-level {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.user-activity-cell.is-low .activity-level {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.user-activity-cell.is-dormant .activity-level {
+  background: var(--surface-subtle);
+  color: var(--muted);
+}
+
+/* 移动端表格优化 */
+@media (max-width: 640px) {
+  .admin-table-wrap {
+    font-size: 0.82rem;
+  }
+  .admin-table th,
+  .admin-table td {
+    padding: 0.5rem 0.6rem;
+  }
+  .user-email-cell {
+    font-size: 0.78rem;
+  }
+}
+

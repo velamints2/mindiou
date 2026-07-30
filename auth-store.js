@@ -166,6 +166,36 @@ export function createAuthStore(dbPath) {
     }));
   }
 
+  /**
+   * 列出所有用户及其基础活跃度统计（供运营后台使用）。
+   * 不返回 password_hash。活跃会话指未过期的 session。
+   * 设备 Token 数仅统计未撤销的。
+   */
+  function listUsersWithStats() {
+    const now = new Date().toISOString();
+    const rows = db.prepare(
+      `SELECT
+         u.id, u.email, u.created_at, u.email_verified,
+         (SELECT COUNT(*) FROM sessions s
+            WHERE s.user_id = u.id AND s.expires_at > ?) AS active_session_count,
+         (SELECT MAX(s.created_at) FROM sessions s
+            WHERE s.user_id = u.id) AS last_session_at,
+         (SELECT COUNT(*) FROM device_tokens dt
+            WHERE dt.user_id = u.id AND dt.revoked_at IS NULL) AS active_device_token_count
+       FROM users u
+       ORDER BY u.created_at DESC`
+    ).all(now);
+    return rows.map(row => ({
+      id: row.id,
+      email: row.email,
+      createdAt: row.created_at,
+      emailVerified: row.email_verified === 1,
+      activeSessionCount: row.active_session_count,
+      lastSessionAt: row.last_session_at,
+      activeDeviceTokenCount: row.active_device_token_count
+    }));
+  }
+
   return {
     register,
     login,
@@ -175,6 +205,7 @@ export function createAuthStore(dbPath) {
     generateDeviceToken,
     revokeDeviceToken,
     validateDeviceToken,
-    listDeviceTokens
+    listDeviceTokens,
+    listUsersWithStats
   };
 }

@@ -166,7 +166,7 @@ export function computeAdminStats(mvp0Store, spiralStore, eventLog, mvp1Sessions
  * @param {object} res - Node http ServerResponse
  * @param {string} pathname - url.pathname
  * @param {string} method - HTTP 方法
- * @param {object} deps - { mvp0Store, spiralStore, eventLog, mvp1Sessions }
+ * @param {object} deps - { mvp0Store, spiralStore, eventLog, mvp1Sessions, authStore, trainingStore }
  * @returns {boolean} true 表示已处理（应中断后续路由）
  */
 export function handleAdminRoute(req, res, pathname, method, deps) {
@@ -195,6 +195,57 @@ export function handleAdminRoute(req, res, pathname, method, deps) {
     const limit = parseInt(new URL(req.url, 'http://x').searchParams.get('limit') || '200', 10)
     const events = deps.eventLog.slice(-limit)
     jsonResponse(res, 200, { ok: true, events })
+    return true
+  }
+
+  // 用户注册情况 + 用户活跃度（结合 authStore + mvp0Store + trainingStore）
+  if (pathname === '/api/admin/users' && method === 'GET') {
+    if (!deps.authStore || !deps.authStore.listUsersWithStats) {
+      jsonResponse(res, 503, { ok: false, error: 'authStore not available' })
+      return true
+    }
+    const users = deps.authStore.listUsersWithStats()
+    // 关联 mvp0Store 业务活动：按 userId 聚合报告数、草稿数、最近活动时间
+    const allReports = deps.mvp0Store.listReports()
+    const allDrafts = deps.mvp0Store.listDrafts()
+    const byUser = new Map()
+    for (const r of allReports) {
+      const uid = r.userId || 'legacy'
+      if (!byUser.has(uid)) byUser.set(uid, { reportCount: 0, draftCount: 0, lastActivityAt: null })
+      const entry = byUser.get(uid)
+      entry.reportCount += 1
+      if (r.createdAt && r.createdAt > (entry.lastActivityAt || '')) entry.lastActivityAt = r.createdAt
+    }
+    for (const d of allDrafts) {
+      const uid = d.userId || 'legacy'
+      if (!byUser.has(uid)) byUser.set(uid, { reportCount: 0, draftCount: 0, lastActivityAt: null })
+      const entry = byUser.get(uid)
+      entry.draftCount += 1
+      if (d.createdAt && d.createdAt > (entry.lastActivityAt || '')) entry.lastActivityAt = d.createdAt
+    }
+    // 关联 mvp1Store 清偿会话
+    const mvp1Sessions = deps.mvp1Sessions && deps.mvp1Sessions.values ? Array.from(deps.mvp1Sessions.values()) : []
+    const sessionsByUser = new Map()
+    for (const s of mvp1Sessions) {
+      const uid = s.userId || 'legacy'
+      if (!sessionsByUser.has(uid)) sessionsByUser.set(uid, { sessionCount: 0, lastSessionAt: null })
+      const entry = sessionsByUser.get(uid)
+      entry.sessionCount += 1
+      if (s.createdAt && s.createdAt > (entry.lastSessionAt || '')) entry.lastSessionAt = s.createdAt
+      if (s.updatedAt && s.updatedAt > (entry.lastSessionAt || '')) entry.lastSessionAt = s.updatedAt
+    }
+    const usersWithActivity = users.map(u => {
+      const act = byUser.get(u.id) || { reportCount: 0, draftCount: 0, lastActivityAt: null }
+      const sess = sessionsByUser.get(u.id) || { sessionCount: 0, lastSessionAt: null }
+      return {
+        ...u,
+        reportCount: act.reportCount,
+        draftCount: act.draftCount,
+        clearanceSessionCount: sess.sessionCount,
+        lastActivityAt: act.lastActivityAt || sess.lastSessionAt || u.lastSessionAt
+      }
+    })
+    jsonResponse(res, 200, { ok: true, users: usersWithActivity, total: usersWithActivity.length })
     return true
   }
 

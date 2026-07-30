@@ -85,6 +85,21 @@ type AdminStats = {
 }
 type EventItem = { at?: string; type: string; data?: Record<string, unknown> }
 
+// 用户注册情况 + 活跃度
+type AdminUser = {
+  id: string
+  email: string
+  createdAt: string
+  emailVerified: boolean
+  activeSessionCount: number
+  lastSessionAt: string | null
+  activeDeviceTokenCount: number
+  reportCount: number
+  draftCount: number
+  clearanceSessionCount: number
+  lastActivityAt: string | null
+}
+
 // ── 登录页 ──
 export function renderAdminLogin(root: HTMLElement): void {
   disableTracker()
@@ -142,11 +157,12 @@ export async function renderAdminDashboard(root: HTMLElement): Promise<void> {
   page.appendChild(el('div', 'admin-loading', '正在加载数据…'))
   root.appendChild(page)
 
-  // 并行拉取：聚合 stats + 事件流 + 健康
-  const [statsRes, eventsRes, healthRes] = await Promise.all([
+  // 并行拉取：聚合 stats + 事件流 + 健康 + 用户列表
+  const [statsRes, eventsRes, healthRes, usersRes] = await Promise.all([
     adminFetch<{ ok?: boolean; stats?: AdminStats }>('/api/admin/stats'),
     adminFetch<{ ok?: boolean; events?: EventItem[] }>('/api/admin/events'),
-    adminFetch<{ ok?: boolean; ai?: string }>('/health')
+    adminFetch<{ ok?: boolean; ai?: string }>('/health'),
+    adminFetch<{ ok?: boolean; users?: AdminUser[]; total?: number }>('/api/admin/users')
   ])
 
   clear(page)
@@ -160,26 +176,33 @@ export async function renderAdminDashboard(root: HTMLElement): Promise<void> {
 
   const stats = statsRes.stats
   const events = eventsRes?.events || []
+  const users = usersRes?.users || []
 
   // ── 1. 概览卡片 ──
   page.appendChild(renderOverview(stats, events, healthRes))
 
-  // ── 2. 漏斗分析 ──
+  // ── 2. 用户注册情况 ── ★ 新增
+  page.appendChild(renderUserRegistrations(users))
+
+  // ── 3. 用户活跃度 ── ★ 新增
+  page.appendChild(renderUserActivity(users))
+
+  // ── 4. 漏斗分析 ──
   page.appendChild(renderFunnel(stats))
 
-  // ── 3. 节点停留时长 ──
+  // ── 5. 节点停留时长 ──
   page.appendChild(renderDwellTime(stats))
 
-  // ── 4. 报告质量 ──
+  // ── 6. 报告质量 ──
   page.appendChild(renderReportQuality(stats))
 
-  // ── 5. 能力画像分布 ──
+  // ── 7. 能力画像分布 ──
   page.appendChild(renderCapabilityDist(stats))
 
-  // ── 6. 时间线 & 会话 ──
+  // ── 8. 时间线 & 会话 ──
   page.appendChild(renderTimelineSession(stats))
 
-  // ── 7. 最近事件流 ──
+  // ── 9. 最近事件流 ──
   page.appendChild(renderEventStream(events))
 
   root.appendChild(page)
@@ -220,6 +243,143 @@ function renderOverview(
   }
   section.appendChild(grid)
   return section
+}
+
+// ── 用户注册情况 ──
+function renderUserRegistrations(users: AdminUser[]): HTMLElement {
+  const section = el('section', 'admin-section')
+  section.appendChild(el('h2', 'admin-section-title', '用户注册情况'))
+  section.appendChild(el('p', 'admin-section-desc', '所有已注册账户的基础信息'))
+
+  if (users.length === 0) {
+    section.appendChild(el('p', 'admin-empty', '暂无注册用户'))
+    return section
+  }
+
+  // 概览卡片：总用户数、今日新增、已验证邮箱数、活跃会话数
+  const today = new Date().toISOString().slice(0, 10)
+  const todayNew = users.filter(u => u.createdAt?.startsWith(today)).length
+  const verifiedCount = users.filter(u => u.emailVerified).length
+  const activeSessions = users.reduce((sum, u) => sum + (u.activeSessionCount || 0), 0)
+  const overviewGrid = el('div', 'metric-grid')
+  const overviewCards = [
+    { label: '总用户数', value: users.length, sub: `今日新增 ${todayNew}` },
+    { label: '已验证邮箱', value: verifiedCount, sub: `${((verifiedCount / users.length) * 100).toFixed(1)}%` },
+    { label: '活跃会话', value: activeSessions, sub: '当前在线' },
+    { label: '设备 Token', value: users.reduce((s, u) => s + u.activeDeviceTokenCount, 0), sub: '未撤销' }
+  ]
+  for (const c of overviewCards) {
+    const card = el('div', 'metric-card')
+    card.appendChild(el('span', 'metric-value', String(c.value)))
+    card.appendChild(el('span', 'metric-label', c.label))
+    card.appendChild(el('span', 'metric-sub', c.sub))
+    overviewGrid.appendChild(card)
+  }
+  section.appendChild(overviewGrid)
+
+  // 用户表
+  const tableWrap = el('div', 'admin-table-wrap')
+  const table = el('table', 'admin-table user-table')
+  // 表头
+  const thead = el('thead')
+  const headRow = el('tr')
+  for (const h of ['邮箱', '注册时间', '邮箱验证', '活跃会话', '设备Token', '最近登录']) {
+    headRow.appendChild(el('th', '', h))
+  }
+  thead.appendChild(headRow)
+  table.appendChild(thead)
+
+  // 表体
+  const tbody = el('tbody')
+  for (const u of users) {
+    const row = el('tr')
+    row.appendChild(el('td', 'user-email-cell', u.email))
+    row.appendChild(el('td', 'user-date-cell', formatDate(u.createdAt)))
+    row.appendChild(el('td', `user-verify-cell ${u.emailVerified ? 'is-verified' : 'is-unverified'}`, u.emailVerified ? '已验证' : '未验证'))
+    row.appendChild(el('td', '', String(u.activeSessionCount || 0)))
+    row.appendChild(el('td', '', String(u.activeDeviceTokenCount || 0)))
+    row.appendChild(el('td', 'user-date-cell', u.lastSessionAt ? formatDate(u.lastSessionAt) : '从未'))
+    tbody.appendChild(row)
+  }
+  table.appendChild(tbody)
+  tableWrap.appendChild(table)
+  section.appendChild(tableWrap)
+
+  return section
+}
+
+// ── 用户活跃度 ──
+function renderUserActivity(users: AdminUser[]): HTMLElement {
+  const section = el('section', 'admin-section')
+  section.appendChild(el('h2', 'admin-section-title', '用户活跃度'))
+  section.appendChild(el('p', 'admin-section-desc', '每个用户的业务活动（报告、草稿、清偿会话、最近活动时间）'))
+
+  if (users.length === 0) {
+    section.appendChild(el('p', 'admin-empty', '暂无用户活动数据'))
+    return section
+  }
+
+  // 活跃用户排序：有活动的优先，按最近活动时间倒序
+  const sorted = [...users].sort((a, b) => {
+    const ta = a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : 0
+    const tb = b.lastActivityAt ? new Date(b.lastActivityAt).getTime() : 0
+    return tb - ta
+  })
+
+  const tableWrap = el('div', 'admin-table-wrap')
+  const table = el('table', 'admin-table activity-table')
+  const thead = el('thead')
+  const headRow = el('tr')
+  for (const h of ['邮箱', '草稿数', '报告数', '清偿会话', '最近活动']) {
+    headRow.appendChild(el('th', '', h))
+  }
+  thead.appendChild(headRow)
+  table.appendChild(thead)
+
+  const tbody = el('tbody')
+  for (const u of sorted) {
+    const row = el('tr')
+    row.appendChild(el('td', 'user-email-cell', u.email))
+    row.appendChild(el('td', '', String(u.draftCount || 0)))
+    row.appendChild(el('td', '', String(u.reportCount || 0)))
+    row.appendChild(el('td', '', String(u.clearanceSessionCount || 0)))
+    // 活跃度标签
+    const activityLevel = classifyActivity(u)
+    const lastCell = el('td', `user-activity-cell is-${activityLevel.level}`)
+    lastCell.appendChild(el('span', 'activity-time', u.lastActivityAt ? formatDate(u.lastActivityAt) : '从未'))
+    lastCell.appendChild(el('span', 'activity-level', activityLevel.label))
+    row.appendChild(lastCell)
+    tbody.appendChild(row)
+  }
+  table.appendChild(tbody)
+  tableWrap.appendChild(table)
+  section.appendChild(tableWrap)
+
+  return section
+}
+
+function classifyActivity(u: AdminUser): { level: string; label: string } {
+  const totalActivity = (u.draftCount || 0) + (u.reportCount || 0) + (u.clearanceSessionCount || 0)
+  if (totalActivity === 0) return { level: 'dormant', label: '未活跃' }
+  if (totalActivity >= 5) return { level: 'high', label: '高活跃' }
+  if (totalActivity >= 2) return { level: 'medium', label: '中活跃' }
+  return { level: 'low', label: '低活跃' }
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return '—'
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  const diffHour = Math.floor(diffMin / 60)
+  const diffDay = Math.floor(diffHour / 24)
+  if (diffMin < 1) return '刚刚'
+  if (diffMin < 60) return `${diffMin} 分钟前`
+  if (diffHour < 24) return `${diffHour} 小时前`
+  if (diffDay < 30) return `${diffDay} 天前`
+  return d.toLocaleDateString('zh-CN')
 }
 
 // ── 漏斗分析 ──
