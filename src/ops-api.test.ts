@@ -141,3 +141,29 @@ describe("STT timeout", () => {
     expect(elapsed).toBeLessThan(5000);
   }, 10000);
 });
+
+describe("admin endpoints", () => {
+  it("returns aggregated stats from /api/admin/stats", async () => {
+    const res = await fetch(`${BASE}/api/admin/stats`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.stats).toBeTruthy();
+    expect(body.stats.funnel).toBeTruthy();
+    expect(body.stats.reportQuality).toBeTruthy();
+    expect(body.stats.generatedAt).toBeTruthy();
+  });
+
+  it("returns event list from /api/admin/events", async () => {
+    const res = await fetch(`${BASE}/api/admin/events?limit=5`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.events)).toBe(true);
+  });
+
+  it("returns 404 for unknown admin sub-paths", async () => {
+    const res = await fetch(`${BASE}/api/admin/no-such-thing`);
+    expect(res.status).toBe(404);
+  });
+});

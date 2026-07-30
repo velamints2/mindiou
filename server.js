@@ -51,6 +51,7 @@ import {
   createAttemptFromClearanceSession
 } from "./review-generator.js";
 import { reportEnvValidation } from "./env-validation.js";
+import { handleAdminRoute } from "./web/admin-backend-patch.js";
 
 // 启动期环境验证：值非法时打印变量级错误并退出（绝不打印值）。
 if (!reportEnvValidation(process.env)) {
@@ -1527,6 +1528,12 @@ const server = createServer(async (req, res) => {
       });
       return;
     }
+
+    // ── 运营后台路由（独立 Admin Token 鉴权，不走邀请码）──
+    if (handleAdminRoute(req, res, url.pathname, req.method, {
+      mvp0Store, spiralStore, eventLog,
+      mvp1Sessions: mvp1Store.listSessions()
+    })) return;
 
     // ── Auth: web user accounts (no LEARNING_API_TOKEN required) ──
 
