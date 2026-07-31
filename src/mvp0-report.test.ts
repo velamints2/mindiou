@@ -546,6 +546,18 @@ describe("generateClearanceReport (multi-step pipeline)", () => {
       expect(attribution).toContain("evidence 不得照抄原文");
     });
 
+    it("does not assume the user's profession or technical background", () => {
+      const prompts = getReportStepPrompts();
+      expect(prompts.attribution).toContain("只根据材料中的明确证据判断用户的职业");
+      expect(prompts.attribution).toContain("不得补全或默认任何身份");
+      expect(prompts.cards).toContain("不得预设写代码或不写代码");
+      for (const prompt of Object.values(prompts)) {
+        expect(prompt).not.toContain("产品经理");
+        expect(prompt).not.toContain("产品负责人");
+        expect(prompt).not.toContain("创业者");
+      }
+    });
+
     it("root-gaps prompt requires 2-4 root gaps with transfer, verification, and mastery criteria", () => {
       const { rootGaps } = getReportStepPrompts();
       expect(rootGaps).toContain("2-4");

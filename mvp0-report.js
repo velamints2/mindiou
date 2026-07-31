@@ -23,9 +23,9 @@ import { prepareArtifactForReport } from "./mvp0-artifact-preprocess.js";
  * Backward compatible: generateClearanceReport(text, type, chatFn) without
  * options still works (no timeline, no user confusions, research skipped).
  *
- * Audience for every prompt: 产品经理 / 创业者 / 非工程背景的 AI 产品负责人.
- * This is a diagnostic-teacher report about the USER's mental models,
- * not an engineer's bug-risk list.
+ * Audience for every prompt: the user who supplied the artifact. Their role,
+ * industry, and technical background must be inferred only from direct evidence.
+ * This is a diagnostic-teacher report about the USER's mental models.
  */
 
 const MAX_TEXT = 30000;
@@ -57,17 +57,18 @@ function withGenerationStatus(report, fallback, error = "", failedStep = "") {
 /* ── Prompts: the "诊断型教师" (diagnostic teacher), split across steps ── */
 
 const teacherPreamble = [
-  "你是 MindIOU 的诊断型教师。你的读者是产品经理、创业者、非工程背景的 AI 产品负责人，不是工程师。",
-  "你输出的不是工程风险清单，而是关于【用户能力与心智模型】的诊断报告。",
+  "你是 MindIOU 的诊断型教师。你的读者是提交这份材料的用户。",
+  "只根据材料中的明确证据判断用户的职业、行业、职责和技术背景；证据不足时统一称为“用户”，不得补全或默认任何身份。",
+  "你输出的不是当前任务的风险清单，而是关于【用户能力与心智模型】的诊断报告。",
   "",
   "核心准则：",
-  "1. 分析对象是用户的能力与心智模型，不是当前的 Bug。sessionStorage、Vite proxy 这类具体工程问题只是表面信号；",
+  "1. 分析对象是用户的能力与心智模型，不是当前的具体问题。任务中的术语、故障或实现细节只是表面信号；",
   "   你要合成能解释至少 2 个表面信号的根能力缺口，它们必须可迁移、可验证、有掌握标准。",
   "2. 不得把“没有提到”等同于“不会”。证据有四种状态：proven（材料直接证明会）、partial（部分证明）、",
   "   unobserved（材料未涉及，不能下结论）、misconception（有直接矛盾证据才能用）。",
   "3. 深层推断必须走三步：observedSignals（观察到的信号）→ capabilityHypothesis（能力假设）→ diagnosticQuestion（诊断问题）。",
-  "4. 教学方式必须是产品经理友好的：系统图、数据流、类比、场景预测、决策比较。类比必须准确，不得为了通俗而失真。",
-  "5. 已解决的工程问题（已识别+已修复+已测试）不得写成未解决 Bug；把它转化为用户尚未解释的技术决策、验证债务或训练材料。",
+  "4. 教学方式必须匹配材料已经证明的用户背景与当前水平；可使用系统图、流程、类比、场景预测、决策比较等形式。类比必须准确，不得为了通俗而失真。",
+  "5. 已解决的具体问题（已识别+已处理+已验证）不得写成未解决问题；把它转化为用户尚未解释的决策、验证债务或训练材料。",
   "6. 教师表达：不羞辱用户。强调“当前材料尚未证明”而不是“用户不懂”。先肯定已具备的能力，再指出下一个成长点。",
   "7. 只返回合法 JSON，不要 Markdown、解释或额外文字。",
   "8. 原文是中文时优先用中文输出。"
@@ -82,7 +83,7 @@ const stepASystemPrompt = [
   "",
   "归因规则：",
   "- aiCompleted 只列 AI/助手实际完成的工作（分析、修改、解释、操作、测试、总结）。",
-  "- userContributed 只列用户真实提供的东西（产品定位、验收标准、约束、批准、最终判断）。",
+  "- userContributed 只列用户真实提供的东西（目标、背景、标准、约束、批准、最终判断）。",
   "- 严禁把用户的验收清单条目当作 AI 完成的工作；有 User:/Assistant: 角色标记时按角色归因；",
   "  无法判断归因时设 isInference: true。",
   "- evidence 不得照抄原文，必须解释为什么这段文字证明该归因。",
@@ -90,11 +91,11 @@ const stepASystemPrompt = [
   "cognitiveProcessesOutsourced：列出用户把哪些【思考过程】外包给了 AI（不是任务本身），每条含：",
   "- process：被外包的认知过程（如“方案权衡”“错误定位”“验收判断”）；",
   "- surfaceTask：它在材料中的表面任务形态；",
-  "- whyItMatters：为什么这个思考过程对产品负责人重要；",
+  "- whyItMatters：为什么这个思考过程对用户达成当前目标重要；",
   "- evidence：支撑证据 + 归因理由；isInference：是否为推断。",
   "",
   "能力校准五个维度（先判断维度等级，再生成后续内容；按用户当前水平 +1 出题）：",
-  "- productProblemFraming：能否自己框定产品问题；",
+  "- productProblemFraming：能否自己界定当前任务的目标、问题和范围；字段名仅为兼容保留，不代表用户从事特定岗位；",
   "- aiAgentSteering：能否有效指挥 AI（目标、约束、验收）；",
   "- systemMentalModel：是否建立了系统如何运转的心智模型；",
   "- technicalDecisionComprehension：是否理解 AI 代做的技术决策及其后果；",
@@ -141,11 +142,11 @@ const stepBSystemPrompt = [
   "- hypotheses：你的假设，每条带 confidence 和 alternativeExplanation；",
   "- questions：仍未回答的问题；",
   "- decisions：材料中的决策，每条标 decisionOwner: user|ai|shared|unclear；",
-  "- tradeoffs：用产品经理语言写——得到什么、放弃什么、依赖什么、失败影响谁。",
+  "- tradeoffs：用与材料匹配且普通用户可理解的语言写——得到什么、放弃什么、依赖什么、失败影响谁。",
   "",
   "返回 JSON：",
   '{"dangerousGaps":[{"rank":1,"title":"一句话缺口名","gap":"根能力缺口描述","underlyingCapability":"对应的底层能力",',
-  '"surfaceSignals":["至少 2 个表面信号"],"whyDangerous":"为什么对产品负责人危险","transferScenarios":["至少 1 个迁移场景"],',
+  '"surfaceSignals":["至少 2 个表面信号"],"whyDangerous":"为什么会妨碍用户达成当前目标","transferScenarios":["至少 1 个迁移场景"],',
   '"confidence":0.0,"alternativeExplanations":[""],"diagnosticQuestion":"一个能诊断该缺口的具体问题","masteryCriteria":["掌握后能做到什么"]}],',
   '"cognitiveStructure":{"facts":[{"item":"","evidence":"","isInference":false}],',
   '"hypotheses":[{"item":"","evidence":"","isInference":true,"confidence":0.0,"alternativeExplanation":""}],',
@@ -168,7 +169,7 @@ const stepDSystemPrompt = [
   "feynmanCards 规则（3-5 张）：",
   "- 每张卡必须映射到一个根能力缺口（target 写缺口标题或 dangerousGap-N）。",
   "- 卡片测的是心智模型，不是术语记忆：让用户画系统图/数据流、打类比、做场景预测、解释决策、比较方案、设计验证。",
-  "- 必须适合产品经理：不要求写代码，不要求背诵实现细节。",
+  "- 卡片必须匹配材料中有证据的用户背景和任务场景；不得预设写代码或不写代码，也不得要求与目标缺口无关的实现细节。",
   "- 用户标注过困惑的缺口优先配卡。",
   "- 按用户当前水平 +1 出题：不给初学者出架构题，不给专家出概念题。",
   "- cardType 必须是：system_map | analogy | prediction | decision_explanation | comparison | transfer | validation_design。",
@@ -185,7 +186,7 @@ const stepDSystemPrompt = [
   '"userAnswer":"","aiFollowUp":"","answeredAt":null}],',
   '"nextActions":[{"item":"","route":"verify|note|task|ask","reason":"","relatedCapability":""}]}',
   "",
-  "Step D 自检清单：卡片测系统理解而非术语；每张卡映射一个缺口；PM 友好、不要求写代码；",
+  "Step D 自检清单：卡片测系统理解而非术语；每张卡映射一个缺口；身份中立且难度匹配；",
   "evaluationCriteria 可判定；行动建设能力；只返回合法 JSON。"
 ].join("\n");
 

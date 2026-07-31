@@ -256,11 +256,18 @@ describe("Golden sample: ai_workflow_transcript (multi-step pipeline)", () => {
     });
 
     it("shared preamble defines the diagnostic-teacher stance", () => {
-      const { attribution } = getReportStepPrompts();
+      const prompts = getReportStepPrompts();
+      const { attribution } = prompts;
       expect(attribution).toContain("诊断型教师");
-      expect(attribution).toContain("产品经理");
-      expect(attribution).toContain("已解决的工程问题");
+      expect(attribution).toContain("只根据材料中的明确证据判断用户的职业");
+      expect(attribution).toContain("证据不足时统一称为“用户”");
+      expect(attribution).toContain("已解决的具体问题");
       expect(attribution).toContain("不羞辱用户");
+      for (const prompt of Object.values(prompts)) {
+        expect(prompt).not.toContain("产品经理");
+        expect(prompt).not.toContain("产品负责人");
+        expect(prompt).not.toContain("创业者");
+      }
     });
   });
 
