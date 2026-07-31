@@ -52,6 +52,24 @@ import {
   generateRuleBasedReviewTask,
   createAttemptFromClearanceSession
 } from "./review-generator.js";
+import { createCognitiveRepaymentStore } from "./cognitive-repayment-store.js";
+import {
+  EVALUATOR_VERSION,
+  PROMPT_SCHEMA_VERSION,
+  DATA_SCHEMA_VERSION,
+  createGapFromReport,
+  transitionGapStatus,
+  normalizeRepaymentEvaluation,
+  createFallbackEvaluation,
+  getRepaymentEvaluationPrompt,
+  buildAttemptRecord,
+  applyAttemptOutcome,
+  resolveAttemptOutcome,
+  upsertReviewItemForGap,
+  refreshReviewDue,
+  completePendingReviewItems,
+  updateCapabilityProfile
+} from "./cognitive-repayment.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -104,6 +122,10 @@ const mvp1Sessions = { values: () => mvp1Store.listSessions() };
 const trainingStorePath = process.env.TRAINING_STORE_PATH || "tmp/training-store.json";
 const trainingStore = createTrainingStore(trainingStorePath);
 await trainingStore.load();
+const cognitiveRepaymentV1 = process.env.COGNITIVE_REPAYMENT_V1 === "1";
+const repaymentStorePath = process.env.COGNITIVE_REPAYMENT_STORE_PATH || "tmp/cognitive-repayment-store.json";
+const repaymentStore = createCognitiveRepaymentStore(repaymentStorePath);
+await repaymentStore.load();
 const authStore = createAuthStore(authStorePath);
 const rawWebResearch = researchProvider === "public_web"
   ? createPublicWebResearch({ timeoutMs: openAiResearchTimeoutMs })
@@ -656,6 +678,16 @@ async function chatJson(messages, fallback) {
   if (!response.ok) throw new Error(payload.error?.message || `OpenAI HTTP ${response.status}`);
   const content = payload.choices?.[0]?.message?.content || "{}";
   return parseJsonObject(content);
+}
+
+function classifyRepaymentError(error) {
+  if (error?.errorCategory) return error.errorCategory;
+  const message = String(error?.message || "");
+  if (error?.name === "AbortError" || /abort|timeout|timed out/i.test(message)) return "timeout";
+  if (/429/.test(message)) return "rate_limited";
+  if (/http\s*\d|openai http/i.test(message)) return "http";
+  if (/json|parse/i.test(message)) return "parse";
+  return "unknown";
 }
 
 async function analyzeClearanceAnswer(input) {
@@ -1431,6 +1463,7 @@ const server = createServer(async (req, res) => {
         model: chatModel,
         stt: Boolean(sttApiKey && sttBaseUrl),
         sttModel,
+        cognitiveRepaymentV1: cognitiveRepaymentV1,
         ...(live ? { providerStatus: await checkAiConnectivity() } : {})
       });
       return;
@@ -1886,6 +1919,272 @@ const server = createServer(async (req, res) => {
         }
         return;
       }
+    }
+
+    // ── Cognitive repayment V1: evidence-bound gap repayment loop ──
+
+    if (req.method === "GET" && url.pathname === "/api/repayment/status") {
+      jsonResponse(res, 200, {
+        ok: true,
+        enabled: cognitiveRepaymentV1,
+        versions: {
+          evaluatorVersion: EVALUATOR_VERSION,
+          promptSchemaVersion: PROMPT_SCHEMA_VERSION,
+          dataSchemaVersion: DATA_SCHEMA_VERSION
+        }
+      });
+      return;
+    }
+
+    const repaymentGapMatch = url.pathname.match(/^\/api\/repayment\/gaps\/([^/]+)$/);
+    const repaymentAttemptsMatch = url.pathname.match(/^\/api\/repayment\/gaps\/([^/]+)\/attempts$/);
+    const repaymentDismissMatch = url.pathname.match(/^\/api\/repayment\/review-queue\/([^/]+)\/dismiss$/);
+    const isRepaymentRoute =
+      url.pathname === "/api/repayment/gaps/import" ||
+      url.pathname === "/api/repayment/gaps" ||
+      Boolean(repaymentGapMatch) ||
+      Boolean(repaymentAttemptsMatch) ||
+      url.pathname === "/api/repayment/review-queue" ||
+      Boolean(repaymentDismissMatch) ||
+      url.pathname === "/api/repayment/profile";
+    if (isRepaymentRoute) {
+      if (!cognitiveRepaymentV1) {
+        jsonResponse(res, 404, { ok: false, error: "Cognitive repayment V1 is disabled" });
+        return;
+      }
+      const user = requireAuth(req, res);
+      if (!user) return;
+
+      if (req.method === "POST" && url.pathname === "/api/repayment/gaps/import") {
+        const payload = parseJson(await readBody(req));
+        const reportId = clean(payload.reportId || "");
+        if (!reportId) {
+          jsonResponse(res, 400, { ok: false, error: "Missing reportId" });
+          return;
+        }
+        let report;
+        try {
+          report = mvp0Store.getReport(reportId, user.id);
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+          return;
+        }
+        const hasGapRank = payload.gapRank !== undefined && payload.gapRank !== null && payload.gapRank !== "";
+        const cardId = clean(payload.cardId || "");
+        if (!hasGapRank && !cardId) {
+          jsonResponse(res, 400, { ok: false, error: "Missing gapRank or cardId" });
+          return;
+        }
+        let gap;
+        try {
+          gap = createGapFromReport({
+            report,
+            gapRef: hasGapRank ? { gapRank: Number(payload.gapRank) } : { cardId },
+            userId: user.id,
+            now: new Date().toISOString()
+          });
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+          return;
+        }
+        const existing = repaymentStore.listGaps(user.id).find(
+          item => item.reportId === gap.reportId && item.gapRank === gap.gapRank
+        );
+        if (existing) {
+          jsonResponse(res, 200, { ok: true, gap: existing, deduplicated: true });
+          return;
+        }
+        await repaymentStore.saveGap(gap);
+        jsonResponse(res, 200, { ok: true, gap });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/repayment/gaps") {
+        const status = clean(url.searchParams.get("status") || "");
+        const gaps = repaymentStore.listGaps(user.id, status ? { status } : {}).map(gap => {
+          const attempts = repaymentStore.listAttemptsForGap(gap.gapId);
+          const pendingReview = repaymentStore.listReviewItems(user.id, { status: "pending" })
+            .find(item => item.gapId === gap.gapId);
+          return {
+            ...gap,
+            latestAttempt: attempts[attempts.length - 1] || null,
+            nextReviewAt: pendingReview ? pendingReview.dueAt : null
+          };
+        });
+        jsonResponse(res, 200, { ok: true, gaps });
+        return;
+      }
+
+      if (req.method === "GET" && repaymentGapMatch) {
+        const gapId = decodeURIComponent(repaymentGapMatch[1]);
+        let gap;
+        try {
+          gap = repaymentStore.getGap(gapId, user.id);
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+          return;
+        }
+        const statusBefore = gap.status;
+        refreshReviewDue(gap, { now: new Date().toISOString(), reviewQueue: repaymentStore.getState().reviewQueue });
+        if (gap.status !== statusBefore) {
+          await repaymentStore.persist();
+        }
+        jsonResponse(res, 200, {
+          ok: true,
+          gap,
+          attempts: repaymentStore.listAttemptsForGap(gap.gapId),
+          reviewItems: repaymentStore.getState().reviewQueue.filter(item => item.gapId === gap.gapId)
+        });
+        return;
+      }
+
+      if (req.method === "POST" && repaymentAttemptsMatch) {
+        const gapId = decodeURIComponent(repaymentAttemptsMatch[1]);
+        const payload = parseJson(await readBody(req));
+        const answer = String(payload.answer || "").trim();
+        if (!answer) {
+          jsonResponse(res, 400, { ok: false, error: "Missing answer" });
+          return;
+        }
+        let gap;
+        try {
+          gap = repaymentStore.getGap(gapId, user.id);
+        } catch (error) {
+          jsonResponse(res, 404, { ok: false, error: error.message });
+          return;
+        }
+        const clientAttemptId = clean(payload.clientAttemptId || "");
+        if (clientAttemptId) {
+          const existingAttempt = repaymentStore.findAttemptByClientId(gap.gapId, clientAttemptId);
+          if (existingAttempt) {
+            jsonResponse(res, 200, { ok: true, attempt: existingAttempt, gap, deduplicated: true });
+            return;
+          }
+        }
+        const now = new Date().toISOString();
+        refreshReviewDue(gap, { now, reviewQueue: repaymentStore.getState().reviewQueue });
+        if (gap.status === "archived") {
+          jsonResponse(res, 409, { ok: false, error: "Repayment gap is archived and cannot be answered" });
+          return;
+        }
+        if (gap.status !== "attempting") {
+          transitionGapStatus(gap, "attempting", { reason: "提交清偿回答", now });
+        }
+        const previousAttempts = repaymentStore.listAttemptsForGap(gap.gapId);
+        let evaluation;
+        let feedback = "";
+        let nextQuestion = "";
+        let fallbackUsed = false;
+        let errorCategory = null;
+        try {
+          if (!aiApiKey || disableAi) {
+            const error = new Error(disableAi ? "AI is disabled (SPIRAL_DISABLE_AI=1)" : "AI_API_KEY is not set");
+            error.errorCategory = "unavailable";
+            throw error;
+          }
+          const raw = await chatJson([
+            { role: "system", content: getRepaymentEvaluationPrompt() },
+            {
+              role: "user",
+              content: JSON.stringify({
+                gapTitle: gap.title,
+                evidence: gap.evidence,
+                verificationMethod: gap.verificationMethod,
+                answer,
+                previousAttempts: previousAttempts
+                  .map(item => ({ answer: item.answer, passed: Boolean(item.evaluation?.passed) }))
+                  .slice(-3)
+              })
+            }
+          ], () => ({ __unavailable: true }));
+          evaluation = normalizeRepaymentEvaluation(raw);
+          feedback = evaluation.overallFeedback;
+          nextQuestion = evaluation.nextQuestion;
+        } catch (error) {
+          errorCategory = classifyRepaymentError(error);
+          const fallback = createFallbackEvaluation({ gap, answer });
+          evaluation = fallback;
+          feedback = fallback.overallFeedback;
+          nextQuestion = fallback.nextQuestion;
+          fallbackUsed = true;
+          console.warn(`Repayment evaluation degraded to fallback (${errorCategory}): ${error.message}`);
+        }
+        const attempt = buildAttemptRecord({
+          gap,
+          answer,
+          selfConfidence: payload.selfConfidence,
+          evaluation,
+          feedback,
+          nextQuestion,
+          repaymentStatus: resolveAttemptOutcome({ evaluation }, previousAttempts),
+          fallbackUsed,
+          errorCategory,
+          modelProvider: aiProvider,
+          modelName: chatModel,
+          clientAttemptId,
+          now
+        });
+        const { record: savedAttempt } = await repaymentStore.saveAttempt(attempt);
+        completePendingReviewItems({ reviewQueue: repaymentStore.getState().reviewQueue, gapId: gap.gapId, now });
+        applyAttemptOutcome(gap, savedAttempt, { now, previousAttempts });
+        upsertReviewItemForGap({ reviewQueue: repaymentStore.getState().reviewQueue, gap, attempt: savedAttempt, now });
+        let domain = "general";
+        try {
+          const gapReport = mvp0Store.getReport(gap.reportId, user.id);
+          domain = clean(gapReport?.analysis?.userCapability?.currentDomain || "") || "general";
+        } catch {}
+        updateCapabilityProfile({
+          profiles: repaymentStore.getState().capabilityProfiles,
+          userId: user.id,
+          domain,
+          attempt: savedAttempt,
+          now
+        });
+        await repaymentStore.persist();
+        jsonResponse(res, 200, { ok: true, attempt: savedAttempt, gap });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/repayment/review-queue") {
+        const items = repaymentStore.listReviewItems(user.id, { status: "pending" }).map(item => {
+          let gap = null;
+          try {
+            gap = repaymentStore.getGap(item.gapId, user.id);
+          } catch {}
+          return { ...item, gapTitle: gap?.title || null, gapStatus: gap?.status || null };
+        });
+        jsonResponse(res, 200, { ok: true, items });
+        return;
+      }
+
+      if (req.method === "POST" && repaymentDismissMatch) {
+        const reviewItemId = decodeURIComponent(repaymentDismissMatch[1]);
+        const item = repaymentStore.getState().reviewQueue.find(
+          entry => entry.reviewItemId === reviewItemId && entry.userId === user.id
+        );
+        if (!item) {
+          jsonResponse(res, 404, { ok: false, error: "Review item not found" });
+          return;
+        }
+        item.status = "dismissed";
+        item.updatedAt = new Date().toISOString();
+        await repaymentStore.persist();
+        jsonResponse(res, 200, { ok: true, item });
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/repayment/profile") {
+        const profiles = repaymentStore.listCapabilityProfiles(user.id);
+        if (profiles.length === 0) {
+          jsonResponse(res, 200, { ok: true, profiles: [], degraded: true, note: "暂无能力画像数据" });
+          return;
+        }
+        jsonResponse(res, 200, { ok: true, profiles });
+        return;
+      }
+
+      jsonResponse(res, 404, { ok: false, error: "Not found" });
+      return;
     }
 
     // ── Device channels (Rokid/G2 glasses): a per-user device token scopes

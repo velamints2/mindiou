@@ -3488,3 +3488,331 @@ body {
   }
 }
 
+/* ── 认知清偿 V1 页面（repayment.ts） ── */
+
+.page-repayment .section-title,
+.page-repayment-detail .section-title {
+  margin: 26px 0 12px;
+  font-size: 1.02rem;
+}
+
+.repayment-summary {
+  margin-bottom: 8px;
+}
+
+.repayment-title {
+  margin: 0 0 8px;
+  font-size: 1.3rem;
+  line-height: 1.4;
+}
+
+.section-text {
+  margin: 0;
+  color: var(--muted-strong);
+  line-height: 1.7;
+}
+
+.section-hint {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.gap-list,
+.review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gap-row,
+.review-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.review-row {
+  cursor: default;
+}
+
+.gap-row-title,
+.review-row-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.gap-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.status-badge,
+.priority-badge,
+.uncertainty-badge,
+.evidence-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  border: 1px solid transparent;
+}
+
+.status-identified { color: var(--info); background: var(--info-soft); }
+.status-queued { color: var(--info); background: var(--info-soft); }
+.status-attempting { color: var(--warning); background: var(--warning-soft); }
+.status-partiallyRepaid { color: var(--warning); background: var(--warning-soft); }
+.status-reviewDue { color: var(--warning); background: var(--warning-soft); }
+.status-repaid { color: var(--success); background: var(--success-soft); }
+.status-archived { color: var(--muted); background: var(--surface-subtle); }
+
+.priority-high { color: var(--danger); background: var(--danger-soft); }
+.priority-medium { color: var(--warning); background: var(--warning-soft); }
+.priority-low { color: var(--success); background: var(--success-soft); }
+
+.review-reason {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.review-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.repayment-import {
+  margin-top: 8px;
+}
+
+.report-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.report-import-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.report-import-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 16px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.report-import-toggle {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.report-import-body {
+  padding: 0 16px 14px;
+}
+
+.import-gap-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.import-gap-text {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.repayment-section {
+  margin-top: 4px;
+}
+
+.evidence-block {
+  margin-bottom: 12px;
+}
+
+.evidence-quote {
+  margin: 0 0 6px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--brand);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  background: var(--surface-subtle);
+  color: var(--muted-strong);
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+.evidence-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.evidence-direct { color: var(--success); background: var(--success-soft); }
+.evidence-inferred { color: var(--warning); background: var(--warning-soft); }
+
+.evidence-inferred-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.dim-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.dim-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.dim-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.dim-score {
+  color: var(--muted-strong);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.uncertainty-low { color: var(--success); background: var(--success-soft); }
+.uncertainty-medium { color: var(--warning); background: var(--warning-soft); }
+.uncertainty-high { color: var(--danger); background: var(--danger-soft); }
+
+.dim-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  overflow: hidden;
+}
+
+.dim-meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--brand), var(--accent));
+}
+
+.dim-feedback,
+.dim-evidence {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.dim-overall {
+  margin: 4px 0 0;
+  font-weight: 600;
+}
+
+.feedback-box,
+.next-question-box {
+  margin-top: 14px;
+  padding: 13px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.next-question-box {
+  border-color: rgba(91, 91, 214, 0.3);
+  background: var(--brand-soft);
+}
+
+.feedback-title {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+}
+
+.feedback-text {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.repayment-answer .answer-textarea {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.confidence-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.confidence-label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.confidence-select {
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface-solid);
+  font: inherit;
+}
+
+.attempt-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.attempt-score {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.attempt-pass.passed { color: var(--success); }
+.attempt-pass.failed { color: var(--danger); }
+
+.attempt-status,
+.attempt-date {
+  color: var(--muted);
+}
+
+.repayment-error-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}

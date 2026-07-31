@@ -380,3 +380,143 @@ export type SubmitReviewResponse = {
   debtStatus: string
   nextReviewAt: string
 }
+
+// ── 认知清偿 V1 相关（与后端 cognitive-repayment.js 契约对齐） ──
+
+export type RepaymentSourceLocation =
+  | { kind: 'artifact'; start: number; end: number }
+  | { kind: 'unlocated' }
+
+export type RepaymentEvidence = {
+  excerpt: string
+  evidenceType: 'direct_quote' | 'inferred'
+  sourceLocation: RepaymentSourceLocation
+}
+
+export type RepaymentGapStatus =
+  | 'identified'
+  | 'queued'
+  | 'attempting'
+  | 'partiallyRepaid'
+  | 'repaid'
+  | 'reviewDue'
+  | 'archived'
+
+export type RepaymentGap = {
+  gapId: string
+  userId: string
+  reportId: string
+  cardId: string | null
+  gapRank: number | null
+  title: string
+  whyItMatters: string
+  evidence: RepaymentEvidence[]
+  systemReasoningSummary: string
+  confidence: number
+  userCapabilityLevel: string
+  verificationMethod: string
+  status: RepaymentGapStatus
+  statusHistory: { from: string; to: string; at: string; reason: string }[]
+  createdAt: string
+  updatedAt: string
+  dataSchemaVersion: string
+  // 列表接口附加字段
+  latestAttempt?: RepaymentAttempt | null
+  nextReviewAt?: string | null
+}
+
+export type RepaymentDimensionScore = {
+  score: number
+  evidence: string
+  feedback: string
+  uncertainty: 'low' | 'medium' | 'high'
+}
+
+export type RepaymentEvaluation = {
+  dimensions: {
+    conceptualUnderstanding: RepaymentDimensionScore
+    causalExplanation: RepaymentDimensionScore
+    practicalReproduction: RepaymentDimensionScore
+    boundariesAndRisks: RepaymentDimensionScore
+    transferAbility: RepaymentDimensionScore
+  }
+  overallScore: number
+  passed: boolean
+  overallFeedback: string
+  nextQuestion: string
+}
+
+export type RepaymentErrorCategory =
+  | 'timeout'
+  | 'rate_limited'
+  | 'http'
+  | 'parse'
+  | 'schema'
+  | 'placeholder'
+  | 'unavailable'
+
+export type RepaymentAttempt = {
+  attemptId: string
+  gapId: string
+  userId: string
+  answer: string
+  submittedAt: string
+  selfConfidence: number | null
+  evaluation: RepaymentEvaluation
+  feedback: string
+  nextQuestion: string
+  repaymentStatus: string
+  evaluatorVersion: string
+  promptSchemaVersion: string
+  dataSchemaVersion: string
+  modelProvider: string
+  modelName: string
+  fallbackUsed: boolean
+  errorCategory: RepaymentErrorCategory | null
+  clientAttemptId: string | null
+}
+
+export type RepaymentReviewItem = {
+  reviewItemId: string
+  gapId: string
+  userId: string
+  dueAt: string
+  priority: 'high' | 'medium' | 'low'
+  reason: string
+  attemptCount: number
+  lastResult: 'passed' | 'failed'
+  nextQuestionType: 'feynman_reexplain' | 'boundary_probe' | 'transfer_scenario' | 'verification_plan'
+  status: 'pending' | 'done' | 'dismissed'
+  createdAt: string
+  updatedAt: string
+  // 复习队列接口附加字段
+  gapTitle?: string | null
+  gapStatus?: string | null
+}
+
+export type RepaymentStatusResponse = {
+  ok: boolean
+  enabled: boolean
+  versions: {
+    evaluatorVersion: string
+    promptSchemaVersion: string
+    dataSchemaVersion: string
+  }
+}
+
+export type RepaymentProfileDimension = {
+  score: number
+  level: string
+  stability: string
+  evidence: { attemptId: string; source: string; at: string }[]
+  updatedAt?: string
+}
+
+export type RepaymentProfile = {
+  userId: string
+  domain: string
+  dimensions: Record<string, RepaymentProfileDimension>
+  createdAt: string
+  updatedAt: string
+  dataSchemaVersion: string
+}
