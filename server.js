@@ -18,6 +18,7 @@ import {
   submitClearanceAnswer
 } from "./mvp1-clearance.js";
 import { createOpenAiWebResearch } from "./mvp1-openai.js";
+import { createPublicWebResearch } from "./mvp1-public-web.js";
 import {
   createDemoAnswerFallback,
   createDemoResearchFallback,
@@ -104,12 +105,14 @@ const trainingStorePath = process.env.TRAINING_STORE_PATH || "tmp/training-store
 const trainingStore = createTrainingStore(trainingStorePath);
 await trainingStore.load();
 const authStore = createAuthStore(authStorePath);
-const rawWebResearch = createOpenAiWebResearch({
-  apiKey: researchApiKey,
-  baseUrl: researchBaseUrl,
-  model: researchModel,
-  timeoutMs: openAiResearchTimeoutMs
-});
+const rawWebResearch = researchProvider === "public_web"
+  ? createPublicWebResearch({ timeoutMs: openAiResearchTimeoutMs })
+  : createOpenAiWebResearch({
+      apiKey: researchApiKey,
+      baseUrl: researchBaseUrl,
+      model: researchModel,
+      timeoutMs: openAiResearchTimeoutMs
+    });
 
 const learningCoachSystemPrompt = [
   "You are Learn Coach, a rigorous but patient AI teacher for smart glasses including Even G2 and Rokid AIUI devices.",
@@ -670,7 +673,8 @@ async function analyzeClearanceAnswer(input) {
 
 async function researchClearanceContext(request) {
   try {
-    if (researchProvider !== "openai" || !researchApiKey || !researchBaseUrl) {
+    const openAiResearchConfigured = researchProvider === "openai" && researchApiKey && researchBaseUrl;
+    if (!openAiResearchConfigured && researchProvider !== "public_web") {
       throw new Error(`Live web research is not configured for provider: ${researchProvider}`);
     }
     const evidence = await rawWebResearch(request);
@@ -703,7 +707,9 @@ async function researchClearanceContext(request) {
 // (query) => { sources: [{title,url,snippet}] } shape expected by the
 // multi-step report pipeline. Returns null when research is not configured,
 // which makes the pipeline mark research as "skipped" transparently.
-const mvp0ResearchFn = (researchProvider === "openai" && researchApiKey && researchBaseUrl)
+const researchConfigured = researchProvider === "public_web"
+  || (researchProvider === "openai" && researchApiKey && researchBaseUrl);
+const mvp0ResearchFn = researchConfigured
   ? async query => {
       const evidence = await rawWebResearch({
         originalQuestion: query,
