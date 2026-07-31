@@ -6,12 +6,35 @@ const apiBase = (process.env.MINDIOU_API_URL || "http://127.0.0.1:8793").replace
 const token = process.env.LEARNING_API_TOKEN || "";
 const fixturePath = path.resolve("evals/mvp1-samples.json");
 const outputPath = path.resolve(process.env.MVP1_EVAL_OUTPUT || "tmp/mvp1-eval-results.json");
+let sessionCookie = String(process.env.MVP1_EVAL_SESSION_COOKIE || "").trim();
 
 function headers() {
   return {
     "content-type": "application/json",
-    ...(token ? { authorization: `Bearer ${token}` } : {})
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(sessionCookie ? { cookie: sessionCookie } : {})
   };
+}
+
+async function ensureAuthenticatedSession() {
+  if (sessionCookie) return;
+  const suffix = `${process.pid}-${Date.now()}`;
+  const response = await fetch(`${apiBase}/api/auth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: `mvp1-eval-${suffix}@example.invalid`,
+      password: `mvp1-eval-${suffix}-secret`
+    })
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(`/api/auth/register: ${data.error || `HTTP ${response.status}`}`);
+  }
+  sessionCookie = (response.headers.get("set-cookie") || "").split(";")[0];
+  if (!sessionCookie) {
+    throw new Error("/api/auth/register: session cookie was not returned");
+  }
 }
 
 async function post(pathname, body = {}) {
@@ -48,6 +71,8 @@ const samples = sampleFilter
   : allSamples;
 if (samples.length === 0) throw new Error(`No MVP-1 eval sample matched: ${sampleFilter}`);
 const results = [];
+
+await ensureAuthenticatedSession();
 
 for (const sample of samples) {
   const generated = await post("/api/mvp0/report", {
