@@ -3816,3 +3816,14 @@ body {
   justify-content: space-between;
   gap: 12px;
 }
+
+@media (max-width: 640px) {
+  .review-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .review-row-actions {
+    justify-content: flex-end;
+  }
+}
