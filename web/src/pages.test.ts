@@ -1,12 +1,21 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fetchSession } from "./api";
-import { renderAppPage, renderSessionPage } from "./pages";
+import { createSession, fetchReport, fetchSession } from "./api";
+import { renderAppPage, renderReportPage, renderSessionPage } from "./pages";
 import { el } from "./router";
 
 // Mock API module to avoid network calls
 vi.mock("./api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
   generateTimeline: vi.fn().mockResolvedValue({ draft: { id: "d-1" } }),
   checkHealth: vi.fn().mockResolvedValue({ ok: true }),
+  createSession: vi.fn(),
+  fetchReport: vi.fn(),
   logoutAccess: vi.fn(),
   getAccessToken: vi.fn().mockReturnValue("fake-token"),
   setAccessToken: vi.fn(),
@@ -80,6 +89,68 @@ describe("renderAppPage", () => {
     const steps = root.querySelectorAll(".step-dot");
     expect(steps.length).toBe(3);
     expect(steps[0].classList.contains("is-active")).toBe(true);
+  });
+});
+
+describe("renderReportPage", () => {
+  let root: HTMLElement;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    root = el("div");
+    document.body.appendChild(root);
+  });
+
+  it("shows one retryable error when session creation fails repeatedly", async () => {
+    vi.mocked(fetchReport).mockResolvedValue({
+      ok: true,
+      report: {
+        id: "r-1",
+        generation: { fallback: false },
+        sections: {
+          aiCompleted: [],
+          userContributed: [],
+          dangerousGaps: [],
+          cognitiveStructure: {
+            facts: [],
+            hypotheses: [],
+            questions: [],
+            decisions: [],
+            tradeoffs: []
+          },
+          feynmanCards: [{
+            id: "c-1",
+            target: "目标能力",
+            prompt: "请解释这个问题",
+            difficulty: "intermediate"
+          }],
+          nextActions: []
+        },
+        confusionResolutions: []
+      } as never
+    });
+    vi.mocked(createSession).mockRejectedValue(
+      new Error("服务暂时不可用，请稍后重试")
+    );
+
+    await renderReportPage(root, "r-1");
+    const button = root.querySelector(".card-start-btn") as HTMLButtonElement;
+
+    button.click();
+    await vi.waitFor(() => {
+      expect(button.disabled).toBe(false);
+      expect(root.querySelectorAll(".error-inline")).toHaveLength(1);
+    });
+
+    button.click();
+    await vi.waitFor(() => {
+      expect(createSession).toHaveBeenCalledTimes(2);
+      expect(root.querySelectorAll(".error-inline")).toHaveLength(1);
+    });
+
+    const error = root.querySelector(".error-inline");
+    expect(error?.textContent).toBe("服务暂时不可用，请稍后重试");
+    expect(error?.getAttribute("role")).toBe("alert");
   });
 });
 

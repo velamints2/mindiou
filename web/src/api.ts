@@ -71,6 +71,19 @@ export class ApiError extends Error {
   }
 }
 
+function defaultErrorMessage(status: number): string {
+  if ([502, 503, 504].includes(status)) {
+    return '服务暂时不可用，请稍后重试'
+  }
+  if (status === 500) {
+    return '服务处理失败，请稍后重试'
+  }
+  if (status === 429) {
+    return '请求过于频繁，请稍后重试'
+  }
+  return `请求失败（${status}）`
+}
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -93,19 +106,29 @@ async function apiFetch<T>(
 
   const text = await res.text()
   let data: unknown = null
+  let isJson = false
   if (text) {
     try {
       data = JSON.parse(text)
+      isJson = true
     } catch {
-      data = { ok: false, error: text }
+      // 网关可能返回 HTML/text 错误页，绝不能把原始正文暴露到用户界面。
+      data = null
     }
   }
 
   if (!res.ok) {
+    const body = isJson && data && typeof data === 'object'
+      ? data as { error?: unknown; message?: unknown }
+      : null
+    const bodyMessage = typeof body?.error === 'string'
+      ? body.error.trim()
+      : typeof body?.message === 'string'
+        ? body.message.trim()
+        : ''
     const msg =
-      (data as { error?: string })?.error ||
-      (data as { message?: string })?.message ||
-      `请求失败（${res.status}）`
+      bodyMessage ||
+      defaultErrorMessage(res.status)
     throw new ApiError(res.status, msg)
   }
 

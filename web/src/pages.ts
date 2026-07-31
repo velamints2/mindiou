@@ -682,6 +682,7 @@ function renderCard(reportId: string, card: FeynmanCard): HTMLElement {
 
   const btn = el('button', 'btn btn-primary card-start-btn', '开始清偿')
   btn.onclick = async () => {
+    node.querySelector('.error-inline')?.remove()
     btn.disabled = true
     btn.textContent = '正在创建会话…'
     try {
@@ -693,8 +694,8 @@ function renderCard(reportId: string, card: FeynmanCard): HTMLElement {
       btn.textContent = '开始清偿'
       const msg = err instanceof Error ? err.message : '创建会话失败'
       const errNode = el('p', 'error-inline', msg)
+      errNode.setAttribute('role', 'alert')
       node.appendChild(errNode)
-      setTimeout(() => errNode.remove(), 10000)
     }
   }
   node.appendChild(btn)
