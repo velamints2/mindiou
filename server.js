@@ -705,6 +705,13 @@ async function analyzeClearanceAnswer(input) {
 
 async function researchClearanceContext(request) {
   try {
+    // With SPIRAL_DISABLE_AI=1 chatJson only returns an empty-scaffold
+    // fallback, so running live rawWebResearch would filter every source
+    // out and fail session creation with "no cited sources". Treat the
+    // research chain as unavailable and degrade transparently instead.
+    if (disableAi) {
+      throw new Error("Live research is disabled (SPIRAL_DISABLE_AI=1)");
+    }
     const openAiResearchConfigured = researchProvider === "openai" && researchApiKey && researchBaseUrl;
     if (!openAiResearchConfigured && researchProvider !== "public_web") {
       throw new Error(`Live web research is not configured for provider: ${researchProvider}`);
