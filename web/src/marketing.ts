@@ -95,6 +95,35 @@ export function renderLandingPage(root: HTMLElement): void {
   hero.appendChild(heroVisual)
   page.appendChild(hero)
 
+  // 研究信号：先建立问题，再进入产品解释
+  const evidence = el('section', 'landing-section landing-evidence')
+  const evidenceIntro = el('div', 'landing-evidence-intro')
+  evidenceIntro.appendChild(el('p', 'landing-kicker', '一个正在发生的问题'))
+  evidenceIntro.appendChild(el('h2', 'section-heading', '产出越来越好，能力却未必同步增长'))
+  evidenceIntro.appendChild(el('p', 'landing-lead', 'AI 可以显著提高当下表现，但一旦代劳的推理没有被重新取回，结果就可能留在工具这一侧。'))
+  evidence.appendChild(evidenceIntro)
+
+  const evidenceStats = el('div', 'landing-stat-grid')
+  const assistedStat = el('article', 'landing-stat')
+  assistedStat.appendChild(el('span', 'landing-stat-value', '+48%'))
+  assistedStat.appendChild(el('h3', 'landing-stat-title', '有 AI 辅助时，练习表现更好'))
+  assistedStat.appendChild(el('p', 'landing-stat-desc', '在一项高中数学随机对照研究中，定制 AI 辅导显著提高了练习阶段的成绩。'))
+  evidenceStats.appendChild(assistedStat)
+
+  const independentStat = el('article', 'landing-stat landing-stat-risk')
+  independentStat.appendChild(el('span', 'landing-stat-value', '−17%'))
+  independentStat.appendChild(el('h3', 'landing-stat-title', '撤去 AI 后，独立表现反而下降'))
+  independentStat.appendChild(el('p', 'landing-stat-desc', '同一研究提示：即时完成得更好，不等于已经形成可以独立调用的能力。'))
+  evidenceStats.appendChild(independentStat)
+  evidence.appendChild(evidenceStats)
+
+  const evidenceBoundary = el('div', 'landing-evidence-boundary')
+  evidenceBoundary.appendChild(el('span', 'landing-evidence-mark', '研究边界'))
+  evidenceBoundary.appendChild(el('p', 'landing-evidence-note', '这不意味着所有 AI 使用都会伤害学习。它说明的是一种风险：如果认知工作被持续代劳，产出提升与能力增长可能彼此分离。'))
+  evidenceBoundary.appendChild(el('p', 'landing-evidence-source', '数据来源：Bastani 等，PNAS，2025。'))
+  evidence.appendChild(evidenceBoundary)
+  page.appendChild(evidence)
+
   // 痛点区
   const pains = el('section', 'landing-section pains')
   pains.appendChild(el('h2', 'section-heading', '你以为你会了，其实只是 AI 会'))
@@ -118,6 +147,41 @@ export function renderLandingPage(root: HTMLElement): void {
   pains.appendChild(painList)
   page.appendChild(pains)
 
+  // 概念区：解释认知债务与普通知识盲区的差异
+  const definition = el('section', 'landing-section debt-definition')
+  const definitionIntro = el('div', 'debt-definition-intro')
+  definitionIntro.appendChild(el('p', 'landing-kicker', '先看清债务是什么'))
+  definitionIntro.appendChild(el('h2', 'section-heading', '认知债务，不是普通的知识盲区'))
+  definitionIntro.appendChild(el('p', 'landing-lead', '真正危险的不是“我不会”，而是借助 AI 完成交付后，把一份可用的结果误认为自己的能力。'))
+  definition.appendChild(definitionIntro)
+
+  const definitionGrid = el('div', 'definition-grid')
+  const blindSpot = el('article', 'definition-item')
+  blindSpot.appendChild(el('span', 'definition-index', '01'))
+  blindSpot.appendChild(el('p', 'definition-label', '知识盲区'))
+  blindSpot.appendChild(el('h3', 'definition-title', '我没有学过，也知道自己不会'))
+  blindSpot.appendChild(el('p', 'definition-desc', '边界清楚，因此更容易主动学习、询问或补足。'))
+  definitionGrid.appendChild(blindSpot)
+
+  const debt = el('article', 'definition-item definition-item-debt liquid-glass')
+  debt.appendChild(el('span', 'definition-index', '02'))
+  debt.appendChild(el('p', 'definition-label', '认知债务'))
+  debt.appendChild(el('h3', 'definition-title', '我借助 AI 做完了，因此误以为自己掌握'))
+  debt.appendChild(el('p', 'definition-desc', '它会在需要解释、判断、验证或独立决策的时刻暴露。'))
+  definitionGrid.appendChild(debt)
+  definition.appendChild(definitionGrid)
+
+  definition.appendChild(el('blockquote', 'definition-quote', '“知识盲区是我不知道；认知债务是我不知道自己不知道。”'))
+
+  const productivityNote = el('div', 'productivity-note')
+  productivityNote.appendChild(el('span', 'productivity-value', '+15%'))
+  const productivityCopy = el('div', 'productivity-copy')
+  productivityCopy.appendChild(el('h3', 'productivity-title', 'MindIOU 不是让你少用 AI'))
+  productivityCopy.appendChild(el('p', 'productivity-desc', '真实工作研究已经证明 AI 可以提升生产率。问题不在于代劳本身，而在于你是否知道交出了什么、哪些能力必须拿回来。'))
+  productivityNote.appendChild(productivityCopy)
+  definition.appendChild(productivityNote)
+  page.appendChild(definition)
+
   // 工作原理缩影
   const how = el('section', 'landing-section how-overview')
   how.appendChild(el('h2', 'section-heading', '三步，把债务变成能力'))
@@ -132,7 +196,7 @@ export function renderLandingPage(root: HTMLElement): void {
   const step2 = el('div', 'how-step')
   step2.appendChild(el('div', 'step-number', '2'))
   step2.appendChild(el('h3', 'step-title', '生成认知债务报告'))
-  step2.appendChild(el('p', 'step-desc', '六部分报告揭示：AI 完成了什么、你真正贡献了什么、最危险的缺口在哪里。'))
+  step2.appendChild(el('p', 'step-desc', '七部分报告揭示：AI 完成了什么、你真正贡献了什么、最危险的缺口在哪里。'))
   steps.appendChild(step2)
 
   const step3 = el('div', 'how-step')
@@ -150,12 +214,70 @@ export function renderLandingPage(root: HTMLElement): void {
   how.appendChild(howMore)
   page.appendChild(how)
 
+  // 报告价值：将长文档中的六部分能力诊断与困惑回执压缩成可扫读的七项
+  const reportPreview = el('section', 'landing-section report-preview')
+  const reportPreviewHeader = el('div', 'report-preview-header')
+  const reportPreviewCopy = el('div')
+  reportPreviewCopy.appendChild(el('p', 'landing-kicker', '一份报告，不是一份总结'))
+  reportPreviewCopy.appendChild(el('h2', 'section-heading', '它要回答的，是你究竟欠下了什么'))
+  reportPreviewHeader.appendChild(reportPreviewCopy)
+  reportPreviewHeader.appendChild(el('p', 'landing-lead', 'MindIOU 把真实协作拆成七个视角，让“我好像会了”变成一组可以验证和行动的具体问题。'))
+  reportPreview.appendChild(reportPreviewHeader)
+
+  const reportParts = [
+    ['AI 完成了什么', '哪些拆解、推理、判断与权衡被代劳'],
+    ['你真正贡献了什么', '保留你已经做出的理解与决定'],
+    ['最危险的理解缺口', '优先识别高风险、可复用的根能力'],
+    ['事实与推断', '区分证据、假设、待验证问题与取舍'],
+    ['费曼补偿卡', '把缺口变成需要你亲自解释的任务'],
+    ['下一步行动', '验证、记录、请教或安排再次练习'],
+    ['困惑处理回执', '看见你提出的问题如何进入报告']
+  ]
+  const reportPartList = el('div', 'report-part-list')
+  reportParts.forEach(([title, desc], index) => {
+    const item = el('article', 'report-part')
+    item.appendChild(el('span', 'report-part-index', String(index + 1).padStart(2, '0')))
+    const copy = el('div', 'report-part-copy')
+    copy.appendChild(el('h3', 'report-part-title', title))
+    copy.appendChild(el('p', 'report-part-desc', desc))
+    item.appendChild(copy)
+    reportPartList.appendChild(item)
+  })
+  reportPreview.appendChild(reportPartList)
+  page.appendChild(reportPreview)
+
+  // 清偿节奏：把大块工作与碎片时间连接起来
+  const microtime = el('section', 'landing-section microtime-section')
+  microtime.appendChild(el('p', 'landing-kicker', '大块工作产生欠条，小块时间完成清偿'))
+  microtime.appendChild(el('h2', 'section-heading', '工作时拿到结果，碎片时间把能力拿回来'))
+  microtime.appendChild(el('p', 'landing-lead', '无需重新学习整份材料。MindIOU 把最值得清偿的一笔债务，变成几分钟内可以完成的解释、反馈与再回答。'))
+
+  const microtimeFlow = el('div', 'microtime-flow')
+  const microtimeItems = [
+    ['工作时', '借助 AI 完成真实任务', '留下认知欠条'],
+    ['碎片时间', '选一张卡，用自己的话解释', '收到基于来源的反馈'],
+    ['之后复盘', '再次回答同一笔债务', '谨慎更新清偿状态']
+  ]
+  microtimeItems.forEach(([time, title, desc], index) => {
+    const item = el('article', 'microtime-item')
+    item.appendChild(el('span', 'microtime-index', String(index + 1).padStart(2, '0')))
+    item.appendChild(el('p', 'microtime-label', time))
+    item.appendChild(el('h3', 'microtime-title', title))
+    item.appendChild(el('p', 'microtime-desc', desc))
+    microtimeFlow.appendChild(item)
+  })
+  microtime.appendChild(microtimeFlow)
+  microtime.appendChild(el('p', 'microtime-belief', '目标不是减少 AI 代劳，而是让代劳变得可见、可控、可清偿。'))
+  page.appendChild(microtime)
+
   // 底部 CTA
   const bottomCta = el('section', 'landing-section bottom-cta')
   bottomCta.appendChild(el('h2', 'cta-heading', '别让理解停留在 AI 那一侧'))
-  const ctaBtn = el('button', 'btn btn-primary btn-lg', '开始体验')
+  bottomCta.appendChild(el('p', 'cta-copy', '粘贴一段真实的 AI 协作材料，生成你的第一笔认知欠条。'))
+  const ctaBtn = el('button', 'btn btn-primary btn-lg', '生成我的第一笔认知欠条')
   ctaBtn.onclick = () => navigate(getAccessToken() ? { name: 'app' } : { name: 'login' })
   bottomCta.appendChild(ctaBtn)
+  bottomCta.appendChild(el('p', 'cta-note', '无需配置 · 固定样本可直接体验 · 先看见，再决定清偿什么'))
   page.appendChild(bottomCta)
 
   // 页脚
