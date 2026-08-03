@@ -148,6 +148,7 @@ export async function bootMindIOUConsole(root: HTMLElement): Promise<void> {
   let display: EvenHubDisplayAdapter | null = null;
   let inputAdapter: EvenHubInputAdapter | null = null;
   let lifecycle: EvenHubLifecycleAdapter | null = null;
+  let glassesReady = false;
 
   let deckSource: DeckSource = "demo";
   let lastEventDescription = "（无）";
@@ -316,7 +317,7 @@ export async function bootMindIOUConsole(root: HTMLElement): Promise<void> {
     renderQueueList(state);
     updateActionButtons(state);
     demoBanner.hidden = deckSource !== "demo";
-    setStatus(demoMode ? "demo" : bridge ? "live + g2" : "live");
+    setStatus(demoMode ? "demo" : glassesReady ? "live + g2" : "live");
     updateDebug();
   }
 
@@ -449,6 +450,7 @@ export async function bootMindIOUConsole(root: HTMLElement): Promise<void> {
       storage.setBridge(bridge);
       display = new EvenHubDisplayAdapter(bridge, { modeMarker: modeMarker() });
       const created = await display.init();
+      glassesReady = created;
       bridgeDescription = created ? "已连接（G2）" : `异常：${display.getLastError() || "启动页创建失败"}`;
 
       inputAdapter = new EvenHubInputAdapter(bridge, {
@@ -542,7 +544,12 @@ export async function bootMindIOUConsole(root: HTMLElement): Promise<void> {
   // ── Boot ──
 
   demoToggleButton.textContent = `使用演示 fixture：${demoMode ? "开" : "关"}`;
-  const savedSnapshot = await storage.load(STORAGE_KEY_QUEUE);
+  // Test/development affordance: ?fresh=1 clears the persisted queue so
+  // headless simulator verification runs are hermetic and repeatable.
+  if (params.get("fresh") === "1") {
+    await storage.save(STORAGE_KEY_QUEUE, "");
+  }
+  const savedSnapshot = (await storage.load(STORAGE_KEY_QUEUE)) || null;
   if (demoMode) {
     deckSource = "demo";
     rebuildStore(DEMO_CARDS, savedSnapshot);

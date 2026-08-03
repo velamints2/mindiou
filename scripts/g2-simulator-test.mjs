@@ -5,9 +5,24 @@
  *
  *   npm run dev
  *   evenhub-simulator \
- *     "http://localhost:5175/?surface=mindiou&demo=1" \
+ *     "http://localhost:5175/?surface=mindiou&demo=1&fresh=1" \
  *     --automation-port 9898 --no-glow
  *   npm run test:g2-simulator
+ *
+ * Hermetic gate contract: each run requires a FRESHLY STARTED simulator
+ * process. The simulator has no page-reload API, so a long-lived simulator
+ * keeps the app state left by the previous run and Gate 1 would pass on stale
+ * console history. The `fresh=1` query param clears the host-persisted queue
+ * (which survives simulator restarts) when the page boots, so a fresh
+ * simulator process plus `fresh=1` always starts from card 1/3.
+ *
+ * Transport note (investigated 2026-08-03): the simulator's flutter->WebView
+ * event channel drops gestures intermittently; a dropped gesture leaves no
+ * SDK echo and no '[g2m-action]' entry. Deterministic gestures therefore go
+ * through inputConfirmed() (send -> poll the console for the expected action
+ * -> retry, bounded). This absorbs a simulator automation-transport quirk;
+ * the real-device event path (glasses -> BLE -> phone app -> WebView) is
+ * different and is not covered by this observation.
  *
  * The test drives the DEMO fixture deck (3 cards, no network) and must prove:
  * - the MindIOU surface booted (not the legacy Learn Coach surface);
@@ -89,6 +104,38 @@ async function input(action, waitMs = 1700) {
   await sleep(waitMs);
 }
 
+/**
+ * Send-confirm-retry wrapper. Investigation (2026-08-03) showed the
+ * simulator's flutter->WebView event channel drops gestures intermittently:
+ * a dropped gesture produces neither the SDK echo nor a '[g2m-action]'
+ * entry, while confirmed dispatches appear within ~2s. So wait up to
+ * `confirmTimeoutMs` for the expected action before retrying; a gesture with
+ * no action entry provably never reached the app, which makes retrying safe.
+ * This is a simulator automation-transport issue only - the real-device
+ * event path (glasses -> BLE -> phone app -> WebView) is different.
+ */
+async function inputConfirmed(action, expectedAction, { confirmTimeoutMs = 5000, maxAttempts = 3, settleMs = 700 } = {}) {
+  let actions = [];
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const marker = await consoleMarker();
+    await request("/api/input", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action })
+    });
+    const deadline = Date.now() + confirmTimeoutMs;
+    while (Date.now() < deadline) {
+      await sleep(400);
+      actions = await actionsSince(marker);
+      if (actions.includes(expectedAction)) {
+        await sleep(settleMs);
+        return { confirmed: true, attempts: attempt, actions };
+      }
+    }
+  }
+  return { confirmed: false, attempts: maxAttempts, actions };
+}
+
 function entryText(entry) {
   if (typeof entry === "string") return entry;
   if (entry && typeof entry === "object") {
@@ -126,6 +173,26 @@ function assert(condition, message) {
 
 await request("/api/ping");
 
+// Gate 0: no previous run may have interacted with the app. A boot record is
+// expected (the app boots as soon as the simulator loads the URL), but
+// '[g2m-action]' entries only appear after gestures were dispatched. Without
+// a page-reload API, a simulator that already ran this test would keep the
+// leftover app state, make Gate 1 pass on stale console history, and fail
+// later gates on misleading frame hashes. Fail fast instead.
+const preExistingEntries = await consoleEntries();
+if (preExistingEntries.some(entry => entryText(entry).includes("[g2m-action]"))) {
+  const report = {
+    passed: false,
+    failures: [
+      "Simulator console already contains '[g2m-action]' records: a previous run already interacted " +
+        "with this simulator process. Restart evenhub-simulator (fresh process + ?fresh=1 URL) and re-run; " +
+        "see the header comment."
+    ]
+  };
+  console.log(JSON.stringify(report, null, 2));
+  process.exit(1);
+}
+
 // Gate 1: the MindIOU surface booted in labelled demo mode.
 let bootSeen = false;
 for (let attempt = 0; attempt < 15 && !bootSeen; attempt += 1) {
@@ -149,70 +216,71 @@ assert(boot.litPixels > 500, "Boot framebuffer is blank.");
 assert(boot.litPixels / boot.totalPixels < 0.35, "Boot framebuffer is overfilled.");
 
 // Gate 3: click reveals layers in order; answer layer clamps with a boundary hint.
-let marker = await consoleMarker();
-await input("click");
+let probe = await inputConfirmed("click", "REVEAL_HINT");
 const whyShot = await screenshot("02-card1-why");
-assert((await actionsSince(marker)).includes("REVEAL_HINT"), "Click on question layer did not dispatch REVEAL_HINT.");
+assert(probe.confirmed, "Click on question layer did not dispatch REVEAL_HINT.");
 assert(whyShot.hash !== boot.hash, "Click did not advance question -> why.");
 
-await input("click");
+probe = await inputConfirmed("click", "REVEAL_HINT");
 const evidenceShot = await screenshot("03-card1-evidence");
+assert(probe.confirmed, "Click on why layer did not dispatch REVEAL_HINT.");
 assert(evidenceShot.hash !== whyShot.hash, "Click did not advance why -> evidence.");
 
-await input("click");
+probe = await inputConfirmed("click", "REVEAL_HINT");
 const answerShot = await screenshot("04-card1-answer");
+assert(probe.confirmed, "Click on evidence layer did not dispatch REVEAL_HINT.");
 assert(answerShot.hash !== evidenceShot.hash, "Click did not advance evidence -> answer.");
 
-marker = await consoleMarker();
-await input("click");
+probe = await inputConfirmed("click", "REVEAL_HINT");
 const clampedShot = await screenshot("05-card1-answer-clamped");
-assert((await actionsSince(marker)).includes("REVEAL_HINT"), "Click on answer layer was not acknowledged.");
+assert(probe.confirmed, "Click on answer layer was not acknowledged.");
 assert(sameMainRegion(clampedShot, answerShot), "Click on the answer layer changed the main text (layers must stop at answer).");
 assert(clampedShot.hash !== answerShot.hash, "Click on the answer layer produced no boundary feedback in the footer.");
 
 // Gate 4: double_click on a deep layer steps one layer back.
-marker = await consoleMarker();
-await input("double_click");
+probe = await inputConfirmed("double_click", "LAYER_BACK");
 const backShot = await screenshot("06-card1-evidence-again");
-assert((await actionsSince(marker)).includes("LAYER_BACK"), "Double click on answer layer did not dispatch LAYER_BACK.");
+assert(probe.confirmed, "Double click on answer layer did not dispatch LAYER_BACK.");
 assert(backShot.hash === evidenceShot.hash, "Double click did not return answer -> evidence.");
 
 // Gate 5: down/up move between cards deterministically.
-marker = await consoleMarker();
-await input("down");
+probe = await inputConfirmed("down", "NEXT_CARD");
 const card2Shot = await screenshot("07-card2-question");
-assert((await actionsSince(marker)).includes("NEXT_CARD"), "Down did not dispatch NEXT_CARD.");
+assert(probe.confirmed, "Down did not dispatch NEXT_CARD.");
 assert(card2Shot.hash !== backShot.hash, "Down did not move to the next card.");
 
-marker = await consoleMarker();
-await input("up");
+probe = await inputConfirmed("up", "PREVIOUS_CARD");
 const card1Shot = await screenshot("08-card1-question-again");
-assert((await actionsSince(marker)).includes("PREVIOUS_CARD"), "Up did not dispatch PREVIOUS_CARD.");
+assert(probe.confirmed, "Up did not dispatch PREVIOUS_CARD.");
 assert(card1Shot.hash === boot.hash, "Up did not deterministically return to the first card frame.");
 
 // Gate 6: double_click on the question layer marks for review and auto-advances.
-marker = await consoleMarker();
-await input("double_click");
+probe = await inputConfirmed("double_click", "MARK_REVIEW");
 const markedShot = await screenshot("09-card2-after-mark-review");
-assert((await actionsSince(marker)).includes("MARK_REVIEW"), "Double click on question layer did not dispatch MARK_REVIEW.");
+assert(probe.confirmed, "Double click on question layer did not dispatch MARK_REVIEW.");
 assert(sameMainRegion(markedShot, card2Shot), "Marking for review did not auto-advance to the next card's question layer.");
 assert(markedShot.hash !== card2Shot.hash, "Mark acknowledgement was not shown in the footer.");
 
-// Gate 7: rapid repeated down coalesces onto the latest card and clamps at the end.
-marker = await consoleMarker();
+// Gate 7: rapid repeated down coalesces onto the latest card and clamps at
+// the end. Burst semantics forbid per-gesture retry (a retry would break the
+// 300ms cadence and the count assertion), so poll for the total instead.
+let marker = await consoleMarker();
 await input("down", 300);
 await input("down", 300);
 await input("down", 300);
-await sleep(2000);
+let rapidActions = [];
+for (let attempt = 0; attempt < 12; attempt += 1) {
+  await sleep(500);
+  rapidActions = (await actionsSince(marker)).filter(action => action === "NEXT_CARD");
+  if (rapidActions.length >= 3) break;
+}
 const rapidShot = await screenshot("10-card3-after-rapid-down");
-const rapidActions = (await actionsSince(marker)).filter(action => action === "NEXT_CARD");
 assert(rapidActions.length === 3, `Rapid down gestures were not all acknowledged (got ${rapidActions.length}/3).`);
 assert(!sameMainRegion(rapidShot, markedShot), "Rapid down did not move past the marked card.");
 
-marker = await consoleMarker();
-await input("down");
+probe = await inputConfirmed("down", "NEXT_CARD");
 const lastClampedShot = await screenshot("11-card3-clamped");
-assert((await actionsSince(marker)).includes("NEXT_CARD"), "Down on the last card was not acknowledged.");
+assert(probe.confirmed, "Down on the last card was not acknowledged.");
 assert(sameMainRegion(lastClampedShot, rapidShot), "Down on the last card wrapped instead of clamping.");
 
 // Gate 8: no console errors for the whole run.
