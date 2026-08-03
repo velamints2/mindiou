@@ -244,6 +244,10 @@ await learningOrchestratorStore.load();
 const cognitiveReportsStorePath = process.env.COGNITIVE_REPORTS_STORE_PATH || "tmp/cognitive-reports-store.json";
 const cognitiveReportsStore = createCognitiveReportsStore(cognitiveReportsStorePath);
 await cognitiveReportsStore.load();
+// G2 glasses marks: in-memory idempotency store keyed by idempotencyKey.
+// Each entry holds the response result and the per-mark records (with userId
+// and timestamp). Lost on restart, which is acceptable for session-level marks.
+const g2MarksStore = new Map();
 
 const learningCoachSystemPrompt = [
   "You are Learn Coach, a rigorous but patient AI teacher for smart glasses including Even G2 and Rokid AIUI devices.",
@@ -3739,6 +3743,107 @@ const server = createServer(async (req, res) => {
       if (!channel) return;
       const session = spiralStore.buildSession(url.searchParams.get("duration"));
       jsonResponse(res, 200, { ok: true, session, ...(channel.adminChannel ? { _adminChannel: true } : {}) });
+      return;
+    }
+
+    // G2 full deck: returns the four-layer feynman cards for the device's
+    // visible reports. Reuses the same device channel and report selection
+    // logic as /api/rokid/clearance-entry, but emits the whole cards array.
+    if (req.method === "GET" && url.pathname === "/api/g2/deck") {
+      const channel = resolveDeviceChannel(req, res);
+      if (!channel) return;
+      const reports = channel.adminChannel ? mvp0Store.listReports() : mvp0Store.listReports(channel.userId);
+      const requestedReportId = url.searchParams.get("reportId") || "";
+      const report = requestedReportId
+        ? reports.find(item => item.id === requestedReportId)
+        : reports.find(item => item.sections?.feynmanCards?.length);
+      const adminTag = channel.adminChannel ? { _adminChannel: true } : {};
+      if (!report || !report.sections?.feynmanCards?.length) {
+        jsonResponse(res, 200, {
+          ok: true,
+          contractVersion: 1,
+          reportId: "",
+          createdAt: "",
+          ...adminTag,
+          cards: []
+        });
+        return;
+      }
+      const cards = report.sections.feynmanCards.map(card => ({
+        id: clean(card.id || ""),
+        reportId: report.id,
+        gapId: clean(card.target || ""),
+        title: clean(card.prompt || ""),
+        whyItMatters: clean(card.whyItMatters || ""),
+        evidence: clean(card.evidence || ""),
+        referenceAnswer: clean(card.referenceAnswer || ""),
+        sourceRef: clean(card.sourceRef || "")
+      }));
+      jsonResponse(res, 200, {
+        ok: true,
+        contractVersion: 1,
+        reportId: report.id,
+        createdAt: report.createdAt || "",
+        ...adminTag,
+        cards
+      });
+      return;
+    }
+
+    // G2 marks: accepts a batch of card mastery marks with idempotent
+    // deduplication. Marks are session-level evidence stored in memory; they
+    // do not certify durable mastery and never upgrade to clearance state.
+    if (req.method === "POST" && url.pathname === "/api/g2/marks") {
+      const channel = resolveDeviceChannel(req, res);
+      if (!channel) return;
+      let payload;
+      try {
+        payload = parseJson(await readBody(req));
+      } catch {
+        jsonResponse(res, 400, { ok: false, error: "Invalid JSON body" });
+        return;
+      }
+      const idempotencyKey = typeof payload.idempotencyKey === "string" ? payload.idempotencyKey.trim() : "";
+      const rawMarks = Array.isArray(payload.marks) ? payload.marks : null;
+      if (!idempotencyKey || !rawMarks) {
+        jsonResponse(res, 400, { ok: false, error: "idempotencyKey and marks are required" });
+        return;
+      }
+      const validLayers = ["question", "why", "evidence", "answer"];
+      const normalized = [];
+      for (const item of rawMarks) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          jsonResponse(res, 400, { ok: false, error: "each mark must be an object" });
+          return;
+        }
+        const cardId = typeof item.cardId === "string" ? item.cardId.trim() : "";
+        const mark = item.mark;
+        const deepestLayer = item.deepestLayer;
+        if (!cardId || (mark !== "known" && mark !== "review")) {
+          jsonResponse(res, 400, { ok: false, error: "mark requires cardId and mark (known|review)" });
+          return;
+        }
+        if (!validLayers.includes(deepestLayer)) {
+          jsonResponse(res, 400, { ok: false, error: "deepestLayer must be question|why|evidence|answer" });
+          return;
+        }
+        normalized.push({
+          cardId,
+          mark,
+          deepestLayer,
+          answerRevealed: Boolean(item.answerRevealed)
+        });
+      }
+      if (g2MarksStore.has(idempotencyKey)) {
+        jsonResponse(res, 200, g2MarksStore.get(idempotencyKey).result);
+        return;
+      }
+      const userId = channel.adminChannel ? null : channel.userId;
+      const timestamp = new Date().toISOString();
+      const records = normalized.map(mark => ({ ...mark, userId, timestamp }));
+      const result = { ok: true, accepted: normalized.length, idempotencyKey };
+      g2MarksStore.set(idempotencyKey, { result, records });
+      jsonResponse(res, 200, result);
       return;
     }
 

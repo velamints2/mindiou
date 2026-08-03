@@ -148,6 +148,33 @@ describe("getDeck", () => {
     await getDeck(options);
     expect(seenAuth).toBe("Bearer dt-1");
   });
+
+  it("degrades to thin mode when deck returns 200 but cards is empty", async () => {
+    stubFetch(url =>
+      url.includes("/api/g2/deck")
+        ? jsonResponse(200, { ok: true, contractVersion: 1, reportId: "", cards: [] })
+        : jsonResponse(200, {
+            ok: true,
+            platform: "mentra",
+            entry: { reportId: "r", cardId: "c", target: "g", prompt: "q", cardNumber: 1, cardCount: 3 }
+          })
+    );
+    const deck = await getDeck(options);
+    expect(deck.mode).toBe("thin");
+    expect(deck.attempts.join("\n")).toContain("卡组为空");
+  });
+
+  it("throws empty error when clearance-entry returns a null entry", async () => {
+    stubFetch(url =>
+      url.includes("/api/g2/deck")
+        ? jsonResponse(404, { ok: false, error: "not found" })
+        : jsonResponse(200, { ok: true, platform: "mentra", entry: null })
+    );
+    const failure = await getDeck(options).catch(error => error);
+    expect(failure).toBeInstanceOf(BackendError);
+    expect((failure as BackendError).code).toBe("empty");
+    expect((failure as BackendError).attempts.join("\n")).toContain("entry 为空");
+  });
 });
 
 describe("markIdempotencyKey", () => {
@@ -195,5 +222,19 @@ describe("submitMarks", () => {
     const failure = await submitMarks({ ...options, timeoutMs: 20 }, marks).catch(error => error);
     expect(failure).toBeInstanceOf(BackendError);
     expect((failure as BackendError).code).toBe("timeout");
+  });
+
+  it("sends idempotencyKey, client, sentAt, and marks in the POST body", async () => {
+    let capturedBody = "";
+    stubFetch((_url, init) => {
+      capturedBody = init?.body ? String(init.body) : "";
+      return jsonResponse(200, { ok: true, accepted: 1, idempotencyKey: markIdempotencyKey(marks) });
+    });
+    await submitMarks(options, marks);
+    const body = JSON.parse(capturedBody || "{}");
+    expect(body.idempotencyKey).toBe(markIdempotencyKey(marks));
+    expect(body.client).toBe("even-g2");
+    expect(typeof body.sentAt).toBe("string");
+    expect(body.marks).toEqual(marks);
   });
 });
