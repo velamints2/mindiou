@@ -1629,16 +1629,26 @@ document.querySelectorAll<HTMLButtonElement>("[data-session-duration]").forEach(
   });
 });
 
-updateWebView();
-sessionStateEl.textContent = sessionLabel(sessionState);
-showApiAddressHint();
-void logEvent("app_loaded", {
-  cards: cards.length,
-  url: window.location.href,
-  hasEvenBridge: Boolean(window.EvenAppBridge)
-});
-void initBridge().catch(error => {
-  setStatus("error");
-  setCoach(error.message);
-});
-if (!simulatorTestMode) void syncSpiralToday(true);
+// MindIOU 认知欠条 surface: ?surface=mindiou replaces the whole Learn Coach
+// console, so the legacy bridge/audio/session boot below never starts.
+if (new URL(window.location.href).searchParams.get("surface") === "mindiou") {
+  const root = document.querySelector<HTMLElement>("#app")!;
+  root.replaceChildren();
+  void import("./glasses/consoleApp")
+    .then(module => module.bootMindIOUConsole(root))
+    .catch(error => console.error("MindIOU console boot failed", error));
+} else {
+  updateWebView();
+  sessionStateEl.textContent = sessionLabel(sessionState);
+  showApiAddressHint();
+  void logEvent("app_loaded", {
+    cards: cards.length,
+    url: window.location.href,
+    hasEvenBridge: Boolean(window.EvenAppBridge)
+  });
+  void initBridge().catch(error => {
+    setStatus("error");
+    setCoach(error.message);
+  });
+  if (!simulatorTestMode) void syncSpiralToday(true);
+}
