@@ -23,6 +23,7 @@
     "test:spiral": "node scripts/spiral-smoke-test.mjs",
     "test:rokid": "node scripts/rokid-smoke-test.mjs",
     "test:simulator": "node scripts/pre-release-test.mjs",
+    "test:g2-simulator": "node scripts/g2-simulator-test.mjs",
     "check:release": "node scripts/check-release.mjs",
     "pack:ehpk": "node scripts/pack-ehpk.mjs",
     "launch-url": "node scripts/print-launch-url.mjs"
