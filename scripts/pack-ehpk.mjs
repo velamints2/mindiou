@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 import { readFile } from "node:fs/promises";
 
 const appJson = JSON.parse(await readFile("app.json", "utf8"));
 const output = `release/learn-coach-${appJson.version}.ehpk`;
+mkdirSync(dirname(output), { recursive: true });
 
 const check = spawnSync(process.execPath, ["scripts/check-release.mjs"], { stdio: "inherit" });
 if (check.status !== 0) process.exit(check.status || 1);
