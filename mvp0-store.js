@@ -130,6 +130,7 @@ export function createMvp0Store(filePath) {
     const record = {
       id,
       userId: clean(report.userId || "").slice(0, 100),
+      locale: report.locale === "en" ? "en" : "zh-CN",
       createdAt: report.createdAt || now,
       draftId: clean(report.draftId || "").slice(0, 100),
       input: {
@@ -267,6 +268,7 @@ export function createMvp0Store(filePath) {
     const record = {
       id,
       userId: clean(draft.userId || existing?.userId || "").slice(0, 100),
+      locale: draft.locale === "en" ? "en" : (existing?.locale === "en" ? "en" : "zh-CN"),
       createdAt: draft.createdAt || existing?.createdAt || now,
       updatedAt: now,
       reportId: clean(draft.reportId || existing?.reportId || "").slice(0, 100),

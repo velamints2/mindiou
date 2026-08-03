@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
-# 部署 web/ SPA 前端到老服务器 (114.67.169.78)。
+# 部署 web/ SPA 前端到 MindIOU 演示服务器。
 #
 # 流程：本地构建两套前端 → 上传 → 备份旧目录 → 清空 → 部署 → 验证。
 # web/dist 作为 /mindiou/ 主 SPA；根 dist 中的旧 Learn Coach 主界面
 # 改名为 legacy.html，并保留 report/desktop/mvp1/training 等全部旧入口。
 #
 # 用法:
-#   bash scripts/deploy-web.sh                  # 默认部署到 114.67.169.78
+#   bash scripts/deploy-web.sh                  # 默认部署到 demo.mindiou.top 源站
 #   MINDIOU_SSH_HOST=1.2.3.4 bash scripts/deploy-web.sh
 #
 # 环境变量:
-#   MINDIOU_SSH_HOST    目标服务器地址（默认 114.67.169.78）
+#   MINDIOU_SSH_HOST    目标服务器地址（默认 156.225.23.88）
 #   MINDIOU_SSH_USER    SSH 用户（默认 root）
 #   MINDIOU_WEB_DIR     服务器静态目录（默认 /var/www/mindiou）
+#   MINDIOU_PUBLIC_ORIGIN 公网验收 origin（默认 http://demo.mindiou.top）
 #
 # 前置条件:
 #   - 本地 web/ 已安装依赖（npm ci）
 #   - SSH 已配置免密登录（ssh-agent 或 ~/.ssh/id_rsa）
 set -euo pipefail
 
-SSH_HOST="${MINDIOU_SSH_HOST:-114.67.169.78}"
+SSH_HOST="${MINDIOU_SSH_HOST:-156.225.23.88}"
 SSH_USER="${MINDIOU_SSH_USER:-root}"
 WEB_DIR="${MINDIOU_WEB_DIR:-/var/www/mindiou}"
+PUBLIC_ORIGIN="${MINDIOU_PUBLIC_ORIGIN:-http://demo.mindiou.top}"
 SSH_TARGET="${SSH_USER}@${SSH_HOST}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -93,7 +95,7 @@ verify_url() {
   local path="$1"
   local expected="${2:-200}"
   local code
-  code=$(curl -s -o /dev/null -w '%{http_code}' -k "https://${SSH_HOST}${path}" 2>/dev/null || echo "000")
+  code=$(curl --max-time 15 -s -o /dev/null -w '%{http_code}' -k "${PUBLIC_ORIGIN}${path}" 2>/dev/null || echo "000")
   if [ "${code}" = "${expected}" ]; then
     echo "    OK ${path} -> ${code}"
   else
@@ -108,19 +110,27 @@ verify_url "/mindiou/report.html"
 verify_url "/mindiou/desktop.html"
 verify_url "/mindiou/mvp1.html"
 verify_url "/mindiou/training.html"
+verify_url "/genesis" 302
 
 # ─── 5. 验证 SPA 包含 training 路由 ───
 echo "==> [5/6] 验证 SPA 包含 training 路由"
-SPA_JS=$(curl -s -k "https://${SSH_HOST}/mindiou/index.html" | grep -o 'index-[A-Za-z0-9_-]*\.js' | head -1)
+SPA_JS=$(curl --max-time 15 -s -k "${PUBLIC_ORIGIN}/mindiou/index.html" | grep -o 'index-[A-Za-z0-9_-]*\.js' | head -1)
 if [ -z "${SPA_JS}" ]; then
   echo "    FAIL 无法从 index.html 解析 SPA JS 文件名"
   exit 1
 fi
-TRAINING_COUNT=$(curl -s -k "https://${SSH_HOST}/mindiou/${SPA_JS}" | grep -c 'training' || true)
+TRAINING_COUNT=$(curl --max-time 15 -s -k "${PUBLIC_ORIGIN}/mindiou/${SPA_JS}" | grep -c 'training' || true)
 if [ "${TRAINING_COUNT}" -gt 0 ]; then
   echo "    OK ${SPA_JS} 包含 training 路由 (${TRAINING_COUNT} 处)"
 else
   echo "    FAIL ${SPA_JS} 不包含 training 路由"
+  exit 1
+fi
+GENESIS_COUNT=$(curl --max-time 15 -s -k "${PUBLIC_ORIGIN}/mindiou/${SPA_JS}" | grep -c 'Permanent archive' || true)
+if [ "${GENESIS_COUNT}" -gt 0 ]; then
+  echo "    OK ${SPA_JS} 包含 Genesis 永久档案"
+else
+  echo "    FAIL ${SPA_JS} 不包含 Genesis 永久档案"
   exit 1
 fi
 
@@ -129,13 +139,14 @@ echo "==> [6/6] 验证训练系统后端 API"
 verify_url "/mindiou-api/health"
 verify_url "/mindiou-api/api/training/today"
 verify_url "/mindiou-api/api/training/debts"
+verify_url "/mindiou-api/api/genesis"
 
 echo ""
 echo "========================================"
 echo "部署完成"
 echo "========================================"
 echo "访问地址:"
-echo "  SPA:       https://${SSH_HOST}/mindiou/"
+echo "  SPA:       ${PUBLIC_ORIGIN}/mindiou/"
 echo "  旧主界面: https://${SSH_HOST}/mindiou/legacy.html"
 echo "  旧报告页: https://${SSH_HOST}/mindiou/report.html"
 echo "  桌面界面: https://${SSH_HOST}/mindiou/desktop.html"

@@ -10,7 +10,9 @@ import {
   createSession,
   endSession,
   fetchCurrentUser,
+  fetchDashboard,
   fetchDraft,
+  fetchGenesis,
   fetchReport,
   fetchSession,
   fetchTodayTraining,
@@ -28,9 +30,11 @@ import {
   setAccessToken,
   startReviewTask,
   submitAnswer,
-  submitReviewAnswer
+  submitReviewAnswer,
+  updateGenesisIdentity
 } from './api'
-import type { DeviceTokenInfo } from './api'
+import type { DeviceTokenInfo, GenesisIdentity } from './api'
+import { isEnglish, t } from './i18n'
 import type {
   ClearanceReport,
   ClearanceSession,
@@ -77,6 +81,16 @@ AI：重启 nginx 只是缓解了症状。根因可能是：
 
 用户：好的，我先把日志级别调高，重启后负载正常了。
 但我不确定根因是否真的修复了，因为只是减少了写入量而不是解决了 I/O 瓶颈。`
+
+const DEMO_SAMPLE_TEXT_EN = `User: Our production server suddenly became slow. The load average exceeded 40, many processes were stuck in D state, and iowait was above 60%. I asked AI to investigate.
+
+AI: Those symptoms usually indicate a disk I/O bottleneck. Check kernel disk errors, identify the heaviest writers with iotop, and rule out swap thrashing.
+
+User: There were no disk errors. iotop showed nginx workers writing a large volume of logs. I restarted nginx and the load dropped temporarily.
+
+AI: Restarting nginx treated the symptom. Possible causes include synchronous logging, insufficient disk performance, or an excessively verbose log level. Consider buffering logs, improving storage, or shipping logs remotely.
+
+User: I raised the log level and the load returned to normal, but I am not sure the root cause is fixed because I reduced writes rather than proving the I/O bottleneck was removed.`
 
 // ── 通用组件 ──
 
@@ -206,6 +220,13 @@ export function renderRegisterPage(root: HTMLElement): void {
   const card = el('div', 'login-card')
   card.appendChild(el('h2', 'login-heading', '创建账户'))
   card.appendChild(el('p', 'login-desc', '填写邮箱和密码创建你的 MindIOU 账户'))
+  const genesisNotice = el('aside', 'genesis-register-notice')
+  genesisNotice.appendChild(el('strong', undefined, t('首发体验者 001 期', 'Genesis Cohort 001')))
+  genesisNotice.appendChild(el('p', undefined, t(
+    '注册后将预留唯一编号；完成第一次认知欠条清偿后自动激活。是否公开由你决定。',
+    'Register now to reserve a unique ID. Complete your first cognitive-debt repayment to activate it. Public display is always optional.'
+  )))
+  card.appendChild(genesisNotice)
 
   const form = el('form', 'login-form') as HTMLFormElement
 
@@ -291,7 +312,7 @@ export function renderRegisterPage(root: HTMLElement): void {
 
 // ── 产品页：输入材料 ──
 
-export function renderAppPage(root: HTMLElement): void {
+export async function renderAppPage(root: HTMLElement): Promise<void> {
   const page = el('div', 'page page-app')
   const header = el('header', 'page-header')
   header.appendChild(el('h1', 'page-title', 'MindIOU'))
@@ -320,7 +341,85 @@ export function renderAppPage(root: HTMLElement): void {
   header.appendChild(headerActions)
   page.appendChild(header)
 
+  const dashboard = el('section', 'dashboard-shell')
+  dashboard.appendChild(el('p', 'dashboard-kicker', t('我的认知仪表盘', 'My cognitive dashboard')))
+  const dashboardBody = el('div', 'dashboard-body')
+  dashboardBody.appendChild(loading(t('正在加载你的认知账户…', 'Loading your cognitive account…')))
+  dashboard.appendChild(dashboardBody)
+  page.appendChild(dashboard)
+  root.appendChild(page)
+
+  try {
+    const response = await fetchDashboard()
+    const data = response.dashboard
+    clear(dashboardBody)
+    const metrics = el('div', 'dashboard-metrics')
+    const reportMetric = el('article', 'dashboard-metric')
+    reportMetric.appendChild(el('strong', 'dashboard-metric-value', String(data.reportCount)))
+    reportMetric.appendChild(el('span', 'dashboard-metric-label', t('已生成报告', 'Reports created')))
+    metrics.appendChild(reportMetric)
+    const debtMetric = el('article', 'dashboard-metric dashboard-metric-accent')
+    debtMetric.appendChild(el('strong', 'dashboard-metric-value', String(data.outstandingDebts.length)))
+    debtMetric.appendChild(el('span', 'dashboard-metric-label', t('尚未清偿', 'Outstanding debts')))
+    metrics.appendChild(debtMetric)
+    dashboardBody.appendChild(metrics)
+
+    const grid = el('div', 'dashboard-grid')
+    const latestReport = el('article', 'dashboard-card')
+    latestReport.appendChild(el('p', 'dashboard-card-label', t('最近一份报告', 'Latest report')))
+    if (data.latestReport) {
+      const reportTitle = data.latestReport.sections.dangerousGaps?.[0]?.gap || data.latestReport.analysis?.artifactKind || t('认知债务报告', 'Cognitive debt report')
+      latestReport.appendChild(el('h3', 'dashboard-card-title', reportTitle))
+      latestReport.appendChild(el('p', 'dashboard-card-meta', new Date(data.latestReport.createdAt).toLocaleString(isEnglish() ? 'en' : 'zh-CN')))
+      const view = el('button', 'btn btn-ghost btn-sm', t('查看报告', 'View report'))
+      view.onclick = () => navigate({ name: 'report', reportId: data.latestReport!.id })
+      latestReport.appendChild(view)
+    } else latestReport.appendChild(el('p', 'dashboard-empty', t('暂无报告', 'No reports yet')))
+    grid.appendChild(latestReport)
+
+    const latestSession = el('article', 'dashboard-card')
+    latestSession.appendChild(el('p', 'dashboard-card-label', t('最近一次会话', 'Latest session')))
+    if (data.latestSession) {
+      latestSession.appendChild(el('h3', 'dashboard-card-title', data.latestSession.clearanceQuestion || t('认知清偿', 'Cognitive repayment')))
+      latestSession.appendChild(el('span', 'dashboard-status', data.latestSession.state === 'ended' ? t('已结束', 'Completed') : t('进行中', 'In progress')))
+    } else latestSession.appendChild(el('p', 'dashboard-empty', t('暂无清偿会话', 'No clearance sessions yet')))
+    grid.appendChild(latestSession)
+    dashboardBody.appendChild(grid)
+
+    const debts = el('section', 'dashboard-debts')
+    debts.appendChild(el('h3', 'dashboard-section-title', t('尚未清偿的认知欠条', 'Outstanding cognitive debts')))
+    if (data.outstandingDebts.length) {
+      const list = el('div', 'dashboard-debt-list')
+      data.outstandingDebts.slice(0, 5).forEach(debt => {
+        const item = el('article', 'dashboard-debt-item')
+        item.appendChild(el('span', 'dashboard-debt-title', debt.title))
+        const action = el('button', 'btn btn-ghost btn-sm', t('继续清偿', 'Continue repayment'))
+        action.onclick = async () => {
+          const created = await createSession(debt.reportId, debt.cardId)
+          navigate({ name: 'session', sessionId: created.session.id })
+        }
+        item.appendChild(action)
+        list.appendChild(item)
+      })
+      debts.appendChild(list)
+    } else debts.appendChild(el('p', 'dashboard-empty', t('暂无待清偿欠条', 'No outstanding debts')))
+    dashboardBody.appendChild(debts)
+
+    if (data.continuable) {
+      const continuation = el('section', 'dashboard-continuation')
+      continuation.appendChild(el('div', 'dashboard-continuation-copy', `${t('可以继续', 'Continue where you left off')}: ${data.continuable.title}`))
+      const continueBtn = el('button', 'btn btn-primary btn-sm', t('继续清偿', 'Continue repayment'))
+      continueBtn.onclick = () => navigate({ name: 'session', sessionId: data.continuable!.sessionId })
+      continuation.appendChild(continueBtn)
+      dashboardBody.appendChild(continuation)
+    }
+  } catch {
+    clear(dashboardBody)
+    dashboardBody.appendChild(errorBox(t('加载失败，请重试', 'Could not load your dashboard. Try again.')))
+  }
+
   const intro = el('section', 'app-intro')
+  intro.appendChild(el('p', 'dashboard-kicker', t('开始新的分析', 'Start a new analysis')))
   intro.appendChild(el('h2', 'app-heading', '识别你跳过的认知债务'))
   intro.appendChild(el('p', 'app-desc', '粘贴一段你用 AI 辅助完成的工作材料。MindIOU 会分析哪些理解过程被 AI 代劳了，并生成一份认知债务报告。'))
   page.appendChild(intro)
@@ -345,7 +444,7 @@ export function renderAppPage(root: HTMLElement): void {
   const demoBtn = el('button', 'btn-demo-sample', '使用演示样本（服务器事故排查）')
   demoBtn.type = 'button'
   demoBtn.onclick = () => {
-    textarea.value = DEMO_SAMPLE_TEXT
+    textarea.value = isEnglish() ? DEMO_SAMPLE_TEXT_EN : DEMO_SAMPLE_TEXT
     textarea.dispatchEvent(new Event('input'))
   }
   demoBar.appendChild(demoBtn)
@@ -401,7 +500,6 @@ export function renderAppPage(root: HTMLElement): void {
   }
 
   page.appendChild(form)
-  root.appendChild(page)
 }
 
 // ── 时间线与困惑标注页（三段式·第二段） ──
@@ -855,6 +953,9 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
       const res = await endSession(session.id)
       clear(page)
       drawSession(page, res.session)
+      if (res.genesisIdentity?.activatedAt) {
+        page.appendChild(renderGenesisIdentityChoice(res.genesisIdentity as GenesisIdentity))
+      }
     } catch (err) {
       status.textContent = err instanceof Error ? err.message : '结束会话失败'
     } finally {
@@ -865,6 +966,76 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
   }
 
   page.appendChild(inputArea)
+}
+
+function renderGenesisIdentityChoice(identity: GenesisIdentity): HTMLElement {
+  const panel = el('section', 'genesis-identity-panel')
+  panel.appendChild(el('p', 'genesis-kicker', t('身份已激活', 'Identity activated')))
+  panel.appendChild(el('h2', 'genesis-identity-number', identity.number))
+  panel.appendChild(el('p', 'genesis-identity-copy', t(
+    '你已进入 MindIOU 001 期产品历史。公开展示完全自愿，可以以后修改。',
+    'You are now part of MindIOU Cohort 001 history. Public display is optional and can be changed later.'
+  )))
+  const select = el('select', 'genesis-visibility-select') as HTMLSelectElement
+  ;[
+    ['public', t('公开头像、昵称和编号', 'Show avatar, nickname, and ID')],
+    ['anonymous', t('只公开匿名编号', 'Show anonymous ID only')],
+    ['private', t('完全不公开，仅账户保留', 'Keep completely private')]
+  ].forEach(([value, label]) => {
+    const option = document.createElement('option'); option.value = value; option.textContent = label; select.appendChild(option)
+  })
+  select.value = identity.visibility
+  panel.appendChild(select)
+  const name = el('input', 'genesis-profile-input') as HTMLInputElement
+  name.placeholder = t('公开昵称（可选）', 'Public nickname (optional)')
+  panel.appendChild(name)
+  const avatar = el('input', 'genesis-profile-input') as HTMLInputElement
+  avatar.placeholder = t('头像 HTTPS 地址（可选）', 'Avatar HTTPS URL (optional)')
+  panel.appendChild(avatar)
+  const status = el('p', 'genesis-choice-status')
+  const save = el('button', 'btn btn-primary', t('保存公开选择', 'Save privacy choice'))
+  save.onclick = async () => {
+    save.disabled = true
+    try {
+      await updateGenesisIdentity({ visibility: select.value as GenesisIdentity['visibility'], displayName: name.value.trim() || undefined, avatarUrl: avatar.value.trim() || undefined })
+      status.textContent = t('已保存。你可以随时再次修改。', 'Saved. You can change this at any time.')
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : t('保存失败', 'Could not save')
+    } finally { save.disabled = false }
+  }
+  panel.append(save, status)
+  return panel
+}
+
+export async function renderGenesisPage(root: HTMLElement): Promise<void> {
+  const page = el('div', 'page page-genesis')
+  const header = el('header', 'genesis-header')
+  const home = el('a', 'site-brand', 'MindIOU') as HTMLAnchorElement; home.href = '#/'
+  header.appendChild(home)
+  const registerLink = el('a', 'btn btn-primary btn-sm', t('加入 001 期', 'Join Cohort 001')) as HTMLAnchorElement; registerLink.href = '#/register'
+  header.appendChild(registerLink); page.appendChild(header)
+  page.appendChild(el('p', 'genesis-kicker', t('永久档案 · 001 期', 'Permanent archive · Cohort 001')))
+  page.appendChild(el('h1', 'genesis-title', t('第一批用户，参与了 MindIOU 的诞生', 'The first users helped shape MindIOU')))
+  page.appendChild(el('p', 'genesis-lead', t(
+    '2026 年 8 月，MindIOU 启动第一期认知清债挑战。这一页将永久记录真实参与者、被采纳的建议，以及产品由此发生的改变。',
+    'In August 2026, MindIOU opened its first cognitive-debt repayment challenge. This page permanently records the real participants, adopted suggestions, and product changes that followed.'
+  )))
+  page.appendChild(loading(t('正在读取 001 期档案…', 'Loading the Cohort 001 archive…')))
+  root.appendChild(page)
+  try {
+    const { genesis } = await fetchGenesis(); page.querySelector('.loading')?.remove()
+    const metrics = el('section', 'genesis-metrics')
+    ;[[t('已加入', 'Joined'), genesis.actual.joined, genesis.goals.joined], [t('已完成一次清偿', 'Completed one repayment'), genesis.actual.completed, genesis.goals.completed], [t('建议采纳目标', 'Adopted suggestion goal'), genesis.adoptedSuggestions.length, genesis.goals.adoptedSuggestions]].forEach(([label, actual, goal]) => {
+      const item = el('article', 'genesis-metric'); item.appendChild(el('span', 'genesis-metric-label', String(label))); item.appendChild(el('strong', undefined, String(actual))); item.appendChild(el('small', undefined, `${t('目标', 'Goal')} ${goal}`)); metrics.appendChild(item)
+    }); page.appendChild(metrics)
+    const history = el('section', 'genesis-history'); history.appendChild(el('h2', undefined, t('正在共同书写的产品历史', 'Product history in the making')))
+    const stage = isEnglish() ? (genesis.stageEn || genesis.stage) : genesis.stage
+    history.appendChild(el('p', undefined, `${t('产品阶段', 'Product stage')}: ${stage}`)); history.appendChild(el('p', undefined, t('活动日期：待正式公布', 'Dates: to be announced')))
+    history.appendChild(el('p', undefined, t('被采纳的建议和产品改进将在确认并上线后记录于此，不提前虚构。', 'Adopted suggestions and product improvements will be recorded here only after they are verified and shipped.'))); page.appendChild(history)
+    const wall = el('section', 'genesis-wall'); wall.appendChild(el('h2', undefined, t('首发体验者名录', 'Genesis participants')))
+    if (!genesis.members.length) wall.appendChild(el('p', 'genesis-empty', t('等待第一位主动选择公开的完成者。', 'Waiting for the first finisher who chooses to be listed.')))
+    genesis.members.forEach(member => { const card = el('article', 'genesis-member'); card.appendChild(el('strong', undefined, member.nickname || t('匿名首发体验者', 'Anonymous genesis participant'))); card.appendChild(el('span', undefined, member.number)); wall.appendChild(card) }); page.appendChild(wall)
+  } catch (error) { page.querySelector('.loading')?.remove(); page.appendChild(errorBox(error instanceof Error ? error.message : t('档案加载失败', 'Could not load archive'))) }
 }
 
 function renderAttempt(answer: string, feedback: string, teaching?: string, nextQuestion?: string): HTMLElement {

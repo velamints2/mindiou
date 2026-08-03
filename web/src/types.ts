@@ -59,6 +59,7 @@ export type UserCapability = {
 
 export type ClearanceReport = {
   id: string
+  locale?: 'zh-CN' | 'en'
   createdAt: string
   input: {
     artifactText: string
@@ -107,6 +108,7 @@ export type TimelineStep = {
 
 export type Draft = {
   id: string
+  locale?: 'zh-CN' | 'en'
   createdAt: string
   updatedAt: string
   reportId: string
@@ -188,6 +190,7 @@ export type FinalResult = {
 }
 
 export type ClearanceSession = {
+  locale?: 'zh-CN' | 'en'
   id: string
   reportId: string
   cardId: string
@@ -244,6 +247,11 @@ export type SubmitAnswerResponse = {
 export type EndSessionResponse = {
   result: FinalResult
   session: ClearanceSession
+  genesisIdentity?: {
+    number: string
+    activatedAt: string | null
+    visibility: 'public' | 'anonymous' | 'private'
+  } | null
 }
 
 export type SubmitCardAnswerResponse = {

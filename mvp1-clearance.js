@@ -94,6 +94,7 @@ export function buildResearchRequest(report, card) {
   const gap = relatedGap(report, card);
   return {
     reportId: clean(report?.id),
+    locale: report?.locale === "en" ? "en" : "zh-CN",
     domain: fit(report?.analysis?.userCapability?.currentDomain || "", 300),
     originalQuestion: fit(card?.prompt, 800),
     targetDebt: fit(card?.target || gap?.gap || "", 500),
@@ -126,6 +127,7 @@ export async function startClearanceSession({ report, cardId, researchFn, now = 
   return {
     id: crypto.randomUUID(),
     reportId: report.id,
+    locale: report.locale === "en" ? "en" : "zh-CN",
     cardId: card.id,
     createdAt: now(),
     endedAt: null,
@@ -182,6 +184,7 @@ export async function submitClearanceAnswer({ session, answer, analyzeFn, now = 
   if (!text) throw new Error("Answer is required");
   if (typeof analyzeFn !== "function") throw new Error("Answer analysis is unavailable");
   const raw = await analyzeFn({
+    locale: session.locale === "en" ? "en" : "zh-CN",
     question: session.clearanceQuestion,
     answer: text,
     scaffold: session.scaffold,
@@ -219,11 +222,17 @@ export function endClearanceSession(session, { now = () => new Date().toISOStrin
     demonstrated: latest?.demonstrated || [],
     remainingGaps: latest?.missing || ["No valid learner attempt was recorded."],
     materialSourceIds: latest?.materialSourceIds || [],
-    nextRecommendation: finalStatus === "provisionally_cleared"
-      ? "请在新的验证任务中应用这段解释，再把它视为稳定能力。"
-      : finalStatus === "needs_verification"
-        ? "请核对材料来源或官方文档，再决定是否清偿这笔认知欠条。"
-        : "请复习教学反馈，再用自己的话解释一次。"
+    nextRecommendation: session.locale === "en"
+      ? (finalStatus === "provisionally_cleared"
+        ? "Apply this explanation in a new verification task before treating it as stable ability."
+        : finalStatus === "needs_verification"
+          ? "Check the source material or official documentation before clearing this cognitive debt."
+          : "Review the teaching feedback, then explain it again in your own words.")
+      : (finalStatus === "provisionally_cleared"
+        ? "请在新的验证任务中应用这段解释，再把它视为稳定能力。"
+        : finalStatus === "needs_verification"
+          ? "请核对材料来源或官方文档，再决定是否清偿这笔认知欠条。"
+          : "请复习教学反馈，再用自己的话解释一次。")
   };
   return session.finalResult;
 }
@@ -235,7 +244,7 @@ export function getClearanceAnalysisPrompt() {
     "Use the hidden scaffold and cited sources as a checking aid, not as text the learner must repeat verbatim.",
     "Check causal reasoning, important boundaries, trade-offs, and ability to verify AI work.",
     "If the answer is weak, teach briefly and ask one concrete question that requires the learner to explain again.",
-    "Use the learner's language for all learner-facing fields. If the learner answers in Chinese, feedback, teaching, missing items, misconceptions, evidence, and nextQuestion must be Chinese.",
+    "Use input.locale for every learner-facing field. When locale is en, feedback, teaching, missing items, misconceptions, evidence, and nextQuestion must be natural English even if quoted evidence is Chinese. Preserve quoted evidence in its original language.",
     "Never claim durable mastery. Use one cautious status: provisionally_cleared, needs_practice, needs_verification, no_valid_attempt.",
     "Only recommend end when the core explanation is substantially demonstrated.",
     "Return JSON with: status, coverage (0-1), demonstrated[], missing[], misconceptions[], evidence[], materialSourceIds[], feedback, teaching, nextQuestion, recommendation (continue|end)."

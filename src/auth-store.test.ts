@@ -121,6 +121,60 @@ describe("auth store", () => {
     });
   });
 
+  describe("genesis identity", () => {
+    it("reserves sequential private identities at registration", () => {
+      const alice = store.register("alice@example.com", "secret-1", "Alice").user;
+      const bob = store.register("bob@example.com", "secret-2", "Bob").user;
+      expect(alice.genesisIdentity.number).toBe("MIOU-001-0001");
+      expect(bob.genesisIdentity.number).toBe("MIOU-001-0002");
+      expect(alice.genesisIdentity.activatedAt).toBeNull();
+      expect(alice.genesisIdentity.visibility).toBe("private");
+      expect(store.getGenesisArchive()).toMatchObject({ joined: 2, completed: 0, members: [] });
+    });
+
+    it("activates once and keeps public listing opt-in", () => {
+      const { user } = store.register("alice@example.com", "secret-1", "Alice");
+      const first = store.activateGenesisIdentity(user.id, "2026-08-03T10:00:00.000Z");
+      const second = store.activateGenesisIdentity(user.id, "2026-08-04T10:00:00.000Z");
+      expect(second.activatedAt).toBe(first.activatedAt);
+      expect(store.getGenesisArchive()).toMatchObject({ joined: 1, completed: 1, members: [] });
+
+      store.updateGenesisIdentity(user.id, { visibility: "public", displayName: "Alice", avatarUrl: "https://example.com/a.png" });
+      expect(store.getGenesisArchive().members).toEqual([expect.objectContaining({
+        number: "MIOU-001-0001", nickname: "Alice", visibility: "public"
+      })]);
+
+      store.updateGenesisIdentity(user.id, { visibility: "anonymous" });
+      expect(store.getGenesisArchive().members[0]).not.toHaveProperty("nickname");
+      store.updateGenesisIdentity(user.id, { visibility: "private" });
+      expect(store.getGenesisArchive().members).toEqual([]);
+    });
+
+    it("rejects profile changes before activation and unsafe avatar URLs", () => {
+      const { user } = store.register("alice@example.com", "secret-1");
+      expect(() => store.updateGenesisIdentity(user.id, { visibility: "public" })).toThrow("not active");
+      store.activateGenesisIdentity(user.id);
+      expect(() => store.updateGenesisIdentity(user.id, { visibility: "public", avatarUrl: "http://example.com/a.png" })).toThrow("HTTPS");
+    });
+
+    it("backfills identities for accounts created before the genesis migration", async () => {
+      const legacyPath = path.join(tmpDir, "auth-store-legacy.sqlite");
+      const legacy = new Database(legacyPath);
+      legacy.exec(`CREATE TABLE users (
+        id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL, email_verified INTEGER NOT NULL DEFAULT 0
+      )`);
+      legacy.prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
+        .run("legacy-1", "legacy@example.com", "unused", "2026-07-01T00:00:00.000Z");
+      legacy.close();
+      const migrated = createAuthStore(legacyPath);
+      expect(migrated.getUserById("legacy-1").genesisIdentity).toMatchObject({
+        number: "MIOU-001-0001", reservedAt: "2026-07-01T00:00:00.000Z", activatedAt: null, visibility: "private"
+      });
+      await rm(legacyPath, { force: true });
+    });
+  });
+
   describe("listUsersWithStats", () => {
     it("returns an empty array when no users exist", () => {
       const users = store.listUsersWithStats();

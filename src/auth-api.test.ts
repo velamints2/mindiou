@@ -206,6 +206,27 @@ describe("auth API", () => {
     expect((await response.json()).error).toBe("Authentication required");
   });
 
+  it("exposes targets separately from actual genesis participation", async () => {
+    const response = await fetch(`${BASE}/api/genesis`);
+    expect(response.status).toBe(200);
+    const { genesis } = await response.json();
+    expect(genesis.goals).toEqual({ joined: 300, completed: 87, adoptedSuggestions: 19 });
+    expect(genesis.actual.joined).toBeGreaterThanOrEqual(1);
+    expect(genesis.actual.completed).toBe(0);
+    expect(genesis.members).toEqual([]);
+  });
+
+  it("keeps the reserved identity private and immutable before activation", async () => {
+    const { data, cookie } = await registerUser("reserved@example.com");
+    expect(data.user.genesisIdentity).toMatchObject({ activatedAt: null, visibility: "private" });
+    const update = await fetch(`${BASE}/api/genesis/identity`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ visibility: "public", displayName: "Too early" })
+    });
+    expect(update.status).toBe(400);
+  });
+
   it("invalidates the session on logout", async () => {
     const { cookie } = await registerUser("logout@example.com");
     const logout = await fetch(`${BASE}/api/auth/logout`, { method: "POST", headers: { cookie } });
@@ -264,6 +285,9 @@ describe("MVP-0/MVP-1 route protection and isolation", () => {
     const listReports = await fetch(`${BASE}/api/mvp0/reports`);
     expect(listReports.status).toBe(401);
 
+    const dashboard = await fetch(`${BASE}/api/dashboard`);
+    expect(dashboard.status).toBe(401);
+
     const getReport = await fetch(`${BASE}/api/mvp0/reports/some-id`);
     expect(getReport.status).toBe(401);
 
@@ -310,6 +334,19 @@ describe("MVP-0/MVP-1 route protection and isolation", () => {
     const bobList = await fetch(`${BASE}/api/mvp0/reports`, { headers: { cookie: bob.cookie } });
     const bobReports = (await bobList.json()).reports;
     expect(bobReports.map(item => item.id)).not.toContain(reportId);
+
+    const aliceDashboardResponse = await fetch(`${BASE}/api/dashboard`, { headers: { cookie: alice.cookie } });
+    expect(aliceDashboardResponse.status).toBe(200);
+    const aliceDashboard = (await aliceDashboardResponse.json()).dashboard;
+    expect(aliceDashboard.reportCount).toBeGreaterThanOrEqual(1);
+    expect(aliceDashboard.latestReport.id).toBe(reportId);
+    expect(aliceDashboard.outstandingDebts.some(item => item.reportId === reportId && item.cardId === cardId)).toBe(true);
+
+    const bobDashboardResponse = await fetch(`${BASE}/api/dashboard`, { headers: { cookie: bob.cookie } });
+    expect(bobDashboardResponse.status).toBe(200);
+    const bobDashboard = (await bobDashboardResponse.json()).dashboard;
+    expect(bobDashboard.reportCount).toBe(0);
+    expect(bobDashboard.outstandingDebts).toEqual([]);
 
     const aliceGet = await fetch(`${BASE}/api/mvp0/reports/${reportId}`, { headers: { cookie: alice.cookie } });
     expect(aliceGet.status).toBe(200);
@@ -377,5 +414,35 @@ describe("MVP-0/MVP-1 route protection and isolation", () => {
       headers: { cookie: bob.cookie }
     });
     expect(bobEnd.status).toBe(404);
+
+    const aliceAnswer = await fetch(`${BASE}/api/mvp1/sessions/${session.id}/answers`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: alice.cookie },
+      body: JSON.stringify({ answer: "The session id is looked up by the server to recover the user id." })
+    });
+    expect(aliceAnswer.status).toBe(200);
+    const aliceEnd = await fetch(`${BASE}/api/mvp1/sessions/${session.id}/end`, {
+      method: "POST",
+      headers: { cookie: alice.cookie }
+    });
+    expect(aliceEnd.status).toBe(200);
+    const ended = await aliceEnd.json();
+    expect(ended.genesisIdentity).toMatchObject({
+      number: alice.data.user.genesisIdentity.number,
+      visibility: "private"
+    });
+    expect(ended.genesisIdentity.activatedAt).toBeTruthy();
+
+    const publish = await fetch(`${BASE}/api/genesis/identity`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: alice.cookie },
+      body: JSON.stringify({ visibility: "anonymous" })
+    });
+    expect(publish.status).toBe(200);
+    const archive = (await (await fetch(`${BASE}/api/genesis`)).json()).genesis;
+    expect(archive.members).toContainEqual(expect.objectContaining({
+      number: alice.data.user.genesisIdentity.number,
+      visibility: "anonymous"
+    }));
   });
 });

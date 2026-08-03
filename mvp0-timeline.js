@@ -49,6 +49,7 @@ const timelineSystemPrompt = [
   "keyActions 列出真实出现的命令、配置、代码改动或排查动作（没有就留空数组）；",
   "keyConcepts 只保留真正影响用户理解的 1-3 个概念，不要堆砌术语。",
   "不要复述完整对话；只保留真正推动工作前进的内容。",
+  "用户载荷含 outputLanguage 时，title、aiDid、keyActions、keyConcepts 和 note 必须使用该语言；原始引用保留原文。",
   "",
   "只返回合法 JSON，不要 Markdown、解释或额外文字：",
   '{"steps":[{"title":"一句话说明这一步在做什么","aiDid":"AI 的具体分析、修改、解释或操作","keyActions":["命令/配置/代码改动/排查动作"],"keyConcepts":["真正影响理解的 1-3 个概念"]}]}',
@@ -106,13 +107,14 @@ function splitIntoSentences(text) {
  * labeled as structural splits, not AI analysis. Used when AI is unavailable;
  * callers must label it via generation.fallback=true.
  */
-export function generateFallbackTimeline(artifactText) {
+export function generateFallbackTimeline(artifactText, locale = "zh-CN") {
   const text = truncate(artifactText, MAX_TEXT);
+  const english = locale === "en";
   const sentences = splitIntoSentences(text);
   if (sentences.length === 0) {
     return normalizeTimeline([{
-      title: "材料片段 1（结构性拆分，非 AI 分析）",
-      aiDid: truncate(text, 300) || "材料过短或为空，无法拆分协作步骤。"
+      title: english ? "Material excerpt 1 (structural split, not AI analysis)" : "材料片段 1（结构性拆分，非 AI 分析）",
+      aiDid: truncate(text, 300) || (english ? "The material is too short or empty to split into collaboration steps." : "材料过短或为空，无法拆分协作步骤。")
     }]);
   }
   const stepCount = Math.min(Math.max(Math.ceil(sentences.length / 4), MIN_STEPS), 5);
@@ -122,7 +124,9 @@ export function generateFallbackTimeline(artifactText) {
     const chunk = sentences.slice(i * chunkSize, (i + 1) * chunkSize).join(" ");
     if (!chunk) continue;
     steps.push({
-      title: `材料片段 ${steps.length + 1}（结构性拆分，非 AI 分析）`,
+      title: english
+        ? `Material excerpt ${steps.length + 1} (structural split, not AI analysis)`
+        : `材料片段 ${steps.length + 1}（结构性拆分，非 AI 分析）`,
       aiDid: truncate(chunk, 300)
     });
   }
@@ -137,13 +141,13 @@ export function generateFallbackTimeline(artifactText) {
  * @param {function|null} chatFn - Injected chatJson(messages, fallbackFn). null = fallback only.
  * @returns {Promise<{steps:Array, note?:string, generation:{fallback:boolean, error:string}}>}
  */
-export async function generateCollaborationTimeline(artifactText, artifactType, chatFn) {
+export async function generateCollaborationTimeline(artifactText, artifactType, chatFn, options = {}) {
   const text = truncate(artifactText, MAX_TEXT);
   const type = VALID_ARTIFACT_TYPES.includes(artifactType) ? artifactType : "other";
 
   function fallbackResult(error) {
     return {
-      ...generateFallbackTimeline(text),
+      ...generateFallbackTimeline(text, options.locale),
       generation: { fallback: true, error: truncate(error, 300) }
     };
   }
@@ -160,6 +164,7 @@ export async function generateCollaborationTimeline(artifactText, artifactType, 
         content: JSON.stringify({
           artifactText: text,
           artifactType: type,
+          outputLanguage: options.locale === "en" ? "English" : "Chinese",
           charCount: clean(text).length
         })
       }

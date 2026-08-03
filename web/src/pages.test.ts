@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { createSession, fetchReport, fetchSession } from "./api";
+import { createSession, fetchDashboard, fetchReport, fetchSession } from "./api";
 import { renderAppPage, renderReportPage, renderSessionPage } from "./pages";
 import { el } from "./router";
 
@@ -22,6 +22,16 @@ vi.mock("./api", () => ({
   validateAccessToken: vi.fn().mockResolvedValue(true),
   checkAccessSession: vi.fn().mockResolvedValue(true),
   fetchCurrentUser: vi.fn().mockResolvedValue(null),
+  fetchDashboard: vi.fn().mockResolvedValue({
+    ok: true,
+    dashboard: {
+      reportCount: 0,
+      latestReport: null,
+      outstandingDebts: [],
+      latestSession: null,
+      continuable: null
+    }
+  }),
   fetchSession: vi.fn()
 }));
 
@@ -44,23 +54,23 @@ describe("renderAppPage", () => {
     document.body.appendChild(root);
   });
 
-  it("renders input form with textarea", () => {
-    renderAppPage(root);
+  it("renders input form with textarea", async () => {
+    await renderAppPage(root);
     const textarea = root.querySelector("textarea");
     expect(textarea).not.toBeNull();
     expect(textarea?.placeholder).toContain("粘贴");
     expect(textarea?.maxLength).toBe(30000);
   });
 
-  it("renders demo sample button", () => {
-    renderAppPage(root);
+  it("renders demo sample button", async () => {
+    await renderAppPage(root);
     const demoBtn = root.querySelector(".btn-demo-sample");
     expect(demoBtn).not.toBeNull();
     expect(demoBtn?.textContent).toContain("演示样本");
   });
 
-  it("demo button fills textarea with sample text", () => {
-    renderAppPage(root);
+  it("demo button fills textarea with sample text", async () => {
+    await renderAppPage(root);
     const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
     const demoBtn = root.querySelector(".btn-demo-sample") as HTMLButtonElement;
     expect(textarea.value).toBe("");
@@ -69,14 +79,14 @@ describe("renderAppPage", () => {
     expect(textarea.value).toContain("服务器");
   });
 
-  it("submit button starts disabled", () => {
-    renderAppPage(root);
+  it("submit button starts disabled", async () => {
+    await renderAppPage(root);
     const submit = root.querySelector(".btn-primary") as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
   });
 
-  it("submit button enables when textarea has content", () => {
-    renderAppPage(root);
+  it("submit button enables when textarea has content", async () => {
+    await renderAppPage(root);
     const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
     const submit = root.querySelector(".btn-primary") as HTMLButtonElement;
     textarea.value = "这是一段足够长的测试文本内容";
@@ -84,11 +94,35 @@ describe("renderAppPage", () => {
     expect(submit.disabled).toBe(false);
   });
 
-  it("shows step indicator at step 1", () => {
-    renderAppPage(root);
+  it("shows step indicator at step 1", async () => {
+    await renderAppPage(root);
     const steps = root.querySelectorAll(".step-dot");
     expect(steps.length).toBe(3);
     expect(steps[0].classList.contains("is-active")).toBe(true);
+  });
+
+  it("renders persisted dashboard summary from the authenticated API", async () => {
+    vi.mocked(fetchDashboard).mockResolvedValueOnce({
+      ok: true,
+      dashboard: {
+        reportCount: 3,
+        latestReport: {
+          id: "r-3",
+          createdAt: "2026-08-03T00:00:00.000Z",
+          analysis: { artifactKind: "API incident review" },
+          sections: { dangerousGaps: [], feynmanCards: [] }
+        },
+        outstandingDebts: [{ reportId: "r-3", cardId: "c-1", title: "Explain the retry strategy", status: "outstanding" }],
+        latestSession: { id: "s-1", reportId: "r-3", cardId: "c-1", state: "awaiting_answer", endedAt: null },
+        continuable: { sessionId: "s-1", reportId: "r-3", cardId: "c-1", title: "Explain the retry strategy", state: "awaiting_answer" }
+      }
+    } as never);
+
+    await renderAppPage(root);
+
+    expect(root.querySelector(".dashboard-metric-value")?.textContent).toBe("3");
+    expect(root.textContent).toContain("API incident review");
+    expect(root.textContent).toContain("Explain the retry strategy");
   });
 });
 

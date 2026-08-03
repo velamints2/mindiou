@@ -8,6 +8,7 @@ import { renderHowItWorksPage, renderLandingPage } from './marketing'
 import {
   renderAppPage,
   renderDevicesPage,
+  renderGenesisPage,
   renderLoginPage,
   renderRegisterPage,
   renderReportPage,
@@ -20,11 +21,35 @@ import {
 import { renderRepaymentDetailPage, renderRepaymentPage } from './repayment'
 import { clear, el, navigate, parseRoute, type Route } from './router'
 import { initTracker, trackRoute } from './tracker'
+import { getLocale, observeTranslations, setLocale } from './i18n'
 
 const app = document.getElementById('app') as HTMLElement
+observeTranslations(app)
+
+function renderLanguageSwitch(route: Route): void {
+  document.querySelector('.language-switch')?.remove()
+  if (route.name === 'admin') return
+  const publicRoute = route.name === 'landing' || route.name === 'how-it-works' || route.name === 'genesis'
+  const wrap = el('div', `language-switch${publicRoute ? ' language-switch-public' : ''}`)
+  wrap.setAttribute('aria-label', 'Language')
+  const zh = el('button', `language-switch-option ${getLocale() === 'zh-CN' ? 'is-active' : ''}`, '中文')
+  const en = el('button', `language-switch-option ${getLocale() === 'en' ? 'is-active' : ''}`, 'English')
+  const choose = (locale: 'zh-CN' | 'en') => {
+    setLocale(locale)
+    const url = new URL(location.href)
+    if (locale === 'en') url.searchParams.set('lang', 'en')
+    else url.searchParams.delete('lang')
+    location.href = url.toString()
+  }
+  zh.onclick = () => choose('zh-CN')
+  en.onclick = () => choose('en')
+  wrap.append(zh, en)
+  document.body.appendChild(wrap)
+}
 
 async function render(route: Route): Promise<void> {
   clear(app)
+  renderLanguageSwitch(route)
 
   // 运营后台：独立鉴权，不走邀请码
   if (route.name === 'admin') {
@@ -46,6 +71,11 @@ async function render(route: Route): Promise<void> {
   if (route.name === 'how-it-works') {
     renderHowItWorksPage(app)
     trackRoute('how-it-works')
+    return
+  }
+  if (route.name === 'genesis') {
+    await renderGenesisPage(app)
+    trackRoute('genesis')
     return
   }
 
@@ -83,7 +113,7 @@ async function render(route: Route): Promise<void> {
 
   switch (route.name) {
     case 'app':
-      renderAppPage(app)
+      await renderAppPage(app)
       trackRoute('app')
       return
     case 'timeline':

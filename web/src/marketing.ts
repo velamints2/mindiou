@@ -18,8 +18,11 @@ function renderPublicHeader(parent: HTMLElement, active: 'landing' | 'how-it-wor
   ;(navHome as HTMLAnchorElement).href = '#'
   const navHow = el('a', `site-nav-link ${active === 'how-it-works' ? 'is-active' : ''}`, '原理')
   ;(navHow as HTMLAnchorElement).href = '#/how-it-works'
+  const navGenesis = el('a', 'site-nav-link', '创始档案')
+  ;(navGenesis as HTMLAnchorElement).href = '#/genesis'
   nav.appendChild(navHome)
   nav.appendChild(navHow)
+  nav.appendChild(navGenesis)
 
   // 右侧 CTA：已登录显示进入产品，未登录显示开始体验
   const ctaWrap = el('div', 'site-header-cta')

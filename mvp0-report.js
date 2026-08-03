@@ -71,7 +71,7 @@ const teacherPreamble = [
   "5. 已解决的具体问题（已识别+已处理+已验证）不得写成未解决问题；把它转化为用户尚未解释的决策、验证债务或训练材料。",
   "6. 教师表达：不羞辱用户。强调“当前材料尚未证明”而不是“用户不懂”。先肯定已具备的能力，再指出下一个成长点。",
   "7. 只返回合法 JSON，不要 Markdown、解释或额外文字。",
-  "8. 原文是中文时优先用中文输出。"
+  "8. 用户载荷含 outputLanguage 时，所有面向用户的分析必须使用该语言；原始证据引用保留原文。未指定时才跟随原文语言。"
 ].join("\n");
 
 const stepASystemPrompt = [
@@ -369,9 +369,11 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
   const researchTimeoutMs = Number(options.researchTimeoutMs) || DEFAULT_RESEARCH_TIMEOUT_MS;
   const timeline = options.timeline && typeof options.timeline === "object" ? options.timeline : null;
   const confusions = normalizeConfusionsInput(options.confusions);
+  const outputLanguage = options.locale === "en" ? "English" : "Chinese";
 
   function fallbackReport(error, failedStep) {
     const report = generateFallbackReport(text, type);
+    report.locale = options.locale === "en" ? "en" : "zh-CN";
     report.input.preprocess = preprocess;
     report.input.confusions = confusions;
     return withGenerationStatus(report, true, error, failedStep);
@@ -392,6 +394,7 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
     const stepA = validateStepA(await callStep(chatFn, stepASystemPrompt, {
       artifactText: text,
       artifactType: type,
+      outputLanguage,
       charCount: clean(text).length,
       preprocess,
       hint: [
@@ -407,6 +410,7 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
     currentStep = "root_gaps";
     const stepB = validateStepB(await callStep(chatFn, stepBSystemPrompt, {
       artifactKind: stepA.artifactKind || "unknown",
+      outputLanguage,
       aiCompleted: Array.isArray(stepA.aiCompleted) ? stepA.aiCompleted : [],
       userContributed: Array.isArray(stepA.userContributed) ? stepA.userContributed : [],
       cognitiveProcessesOutsourced: Array.isArray(stepA.cognitiveProcessesOutsourced)
@@ -428,6 +432,7 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
     // ── Step D: cards + next actions ──
     currentStep = "cards";
     const stepD = validateStepD(await callStep(chatFn, stepDSystemPrompt, {
+      outputLanguage,
       dangerousGaps: stepB.dangerousGaps,
       userCapability: stepA.userCapability || null,
       userConfusions: confusions,

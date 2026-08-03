@@ -48,8 +48,49 @@ export function createAuthStore(dbPath) {
     );
   `);
 
+  const userColumns = new Set(db.prepare("PRAGMA table_info(users)").all().map(column => column.name));
+  const migrations = [
+    ["display_name", "ALTER TABLE users ADD COLUMN display_name TEXT"],
+    ["genesis_number", "ALTER TABLE users ADD COLUMN genesis_number INTEGER"],
+    ["genesis_reserved_at", "ALTER TABLE users ADD COLUMN genesis_reserved_at TEXT"],
+    ["genesis_activated_at", "ALTER TABLE users ADD COLUMN genesis_activated_at TEXT"],
+    ["genesis_visibility", "ALTER TABLE users ADD COLUMN genesis_visibility TEXT NOT NULL DEFAULT 'private'"],
+    ["genesis_avatar_url", "ALTER TABLE users ADD COLUMN genesis_avatar_url TEXT"]
+  ];
+  for (const [column, sql] of migrations) {
+    if (!userColumns.has(column)) db.exec(sql);
+  }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_genesis_number ON users(genesis_number)");
+  const unnumberedUsers = db.prepare(
+    "SELECT id, created_at FROM users WHERE genesis_number IS NULL ORDER BY created_at ASC, id ASC"
+  ).all();
+  if (unnumberedUsers.length) {
+    let nextNumber = Number(db.prepare("SELECT COALESCE(MAX(genesis_number), 0) + 1 AS value FROM users").get().value);
+    const reserve = db.prepare(
+      "UPDATE users SET genesis_number = ?, genesis_reserved_at = COALESCE(genesis_reserved_at, created_at) WHERE id = ?"
+    );
+    db.transaction(() => {
+      for (const user of unnumberedUsers) reserve.run(nextNumber++, user.id);
+    })();
+  }
+
+  function formatGenesisNumber(value) {
+    return value ? `MIOU-001-${String(value).padStart(4, "0")}` : null;
+  }
+
   function publicUser(row) {
-    return { id: row.id, email: row.email };
+    return {
+      id: row.id,
+      email: row.email,
+      name: row.display_name || undefined,
+      genesisIdentity: row.genesis_number ? {
+        number: formatGenesisNumber(row.genesis_number),
+        reservedAt: row.genesis_reserved_at,
+        activatedAt: row.genesis_activated_at,
+        visibility: row.genesis_visibility || "private",
+        avatarUrl: row.genesis_avatar_url || undefined
+      } : undefined
+    };
   }
 
   function createSession(userId) {
@@ -61,7 +102,7 @@ export function createAuthStore(dbPath) {
     return sessionId;
   }
 
-  function register(email, password) {
+  function register(email, password, name) {
     const normalizedEmail = normalizeEmail(email);
     const rawPassword = String(password || "");
     if (!normalizedEmail || !rawPassword) {
@@ -77,11 +118,12 @@ export function createAuthStore(dbPath) {
       passwordHash: bcrypt.hashSync(rawPassword, BCRYPT_COST),
       createdAt: new Date().toISOString()
     };
+    const nextNumber = Number(db.prepare("SELECT COALESCE(MAX(genesis_number), 0) + 1 AS value FROM users").get().value);
     db.prepare(
-      "INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)"
-    ).run(user.id, user.email, user.passwordHash, user.createdAt);
+      "INSERT INTO users (id, email, password_hash, created_at, display_name, genesis_number, genesis_reserved_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(user.id, user.email, user.passwordHash, user.createdAt, cleanName(name), nextNumber, user.createdAt);
     const sessionId = createSession(user.id);
-    return { user: { id: user.id, email: user.email }, sessionId };
+    return { user: getUserById(user.id), sessionId };
   }
 
   function login(email, password) {
@@ -105,7 +147,7 @@ export function createAuthStore(dbPath) {
   function getUserBySession(sessionId) {
     if (!sessionId) return null;
     const row = db.prepare(
-      `SELECT users.id, users.email, sessions.expires_at
+      `SELECT users.*, sessions.expires_at
        FROM sessions JOIN users ON users.id = sessions.user_id
        WHERE sessions.id = ?`
     ).get(String(sessionId));
@@ -114,12 +156,60 @@ export function createAuthStore(dbPath) {
       db.prepare("DELETE FROM sessions WHERE id = ?").run(String(sessionId));
       return null;
     }
-    return { id: row.id, email: row.email };
+    return publicUser(row);
   }
 
   function getUserById(id) {
-    const row = db.prepare("SELECT id, email FROM users WHERE id = ?").get(String(id || ""));
+    const row = db.prepare("SELECT * FROM users WHERE id = ?").get(String(id || ""));
     return row ? publicUser(row) : null;
+  }
+
+  function cleanName(value) {
+    const name = String(value || "").replace(/\s+/g, " ").trim();
+    return name ? name.slice(0, 80) : null;
+  }
+
+  function activateGenesisIdentity(userId, activatedAt = new Date().toISOString()) {
+    db.prepare(
+      "UPDATE users SET genesis_activated_at = COALESCE(genesis_activated_at, ?) WHERE id = ?"
+    ).run(activatedAt, String(userId));
+    return getUserById(userId)?.genesisIdentity || null;
+  }
+
+  function updateGenesisIdentity(userId, { visibility, displayName, avatarUrl } = {}) {
+    const allowed = new Set(["public", "anonymous", "private"]);
+    if (!allowed.has(visibility)) throw new Error("Invalid genesis visibility");
+    const user = getUserById(userId);
+    if (!user?.genesisIdentity?.activatedAt) throw new Error("Genesis identity is not active");
+    const safeAvatar = String(avatarUrl || "").trim();
+    if (safeAvatar && !/^https:\/\//i.test(safeAvatar)) throw new Error("Avatar URL must use HTTPS");
+    db.prepare(
+      "UPDATE users SET genesis_visibility = ?, display_name = COALESCE(?, display_name), genesis_avatar_url = ? WHERE id = ?"
+    ).run(visibility, cleanName(displayName), safeAvatar ? safeAvatar.slice(0, 500) : null, String(userId));
+    return getUserById(userId).genesisIdentity;
+  }
+
+  function getGenesisArchive() {
+    const totals = db.prepare(
+      `SELECT COUNT(*) AS joined,
+       SUM(CASE WHEN genesis_activated_at IS NOT NULL THEN 1 ELSE 0 END) AS completed
+       FROM users WHERE genesis_number IS NOT NULL`
+    ).get();
+    const members = db.prepare(
+      `SELECT display_name, genesis_number, genesis_activated_at, genesis_visibility, genesis_avatar_url
+       FROM users
+       WHERE genesis_activated_at IS NOT NULL AND genesis_visibility IN ('public', 'anonymous')
+       ORDER BY genesis_number ASC`
+    ).all().map(row => ({
+      number: formatGenesisNumber(row.genesis_number),
+      activatedAt: row.genesis_activated_at,
+      visibility: row.genesis_visibility,
+      ...(row.genesis_visibility === "public" ? {
+        nickname: row.display_name || "首发体验者",
+        avatarUrl: row.genesis_avatar_url || undefined
+      } : {})
+    }));
+    return { joined: Number(totals.joined || 0), completed: Number(totals.completed || 0), members };
   }
 
   // The plaintext token is returned exactly once here; only its bcrypt hash
@@ -206,6 +296,9 @@ export function createAuthStore(dbPath) {
     revokeDeviceToken,
     validateDeviceToken,
     listDeviceTokens,
-    listUsersWithStats
+    listUsersWithStats,
+    activateGenesisIdentity,
+    updateGenesisIdentity,
+    getGenesisArchive
   };
 }

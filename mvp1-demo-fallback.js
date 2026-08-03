@@ -3,6 +3,7 @@ function clean(value) {
 }
 
 export function ensureLearnerFacingLanguage(result, input) {
+  if (input?.locale === "en") return result;
   const answer = clean(input?.answer);
   const learnerFacing = clean(`${result?.feedback || ""} ${result?.teaching || ""} ${result?.nextQuestion || ""}`);
   const learnerUsedChinese = /[\u3400-\u9fff]/.test(answer);
@@ -201,6 +202,7 @@ export function createDemoAnswerFallback(input) {
     !signals[2] && "Separate the visible service from the underlying cause.",
     !signals[3] && "Name evidence you would collect to verify the diagnosis and repair."
   ].filter(Boolean);
+  const english = input?.locale === "en";
   return {
     status: coverage >= 0.75 ? "needs_verification" : "needs_practice",
     coverage,
@@ -214,11 +216,11 @@ export function createDemoAnswerFallback(input) {
     misconceptions: [],
     evidence: ["Demo fallback checked the answer for four required explanation boundaries; live AI evaluation was unavailable."],
     materialSourceIds: ["source-kernel-proc", "source-systemd-resource", "source-kernel-psi"],
-    feedback: coverage >= 0.75
-      ? "你已经覆盖了主要诊断链。当前缺少实时 AI 评价，因此仍需查证。"
-      : "回答已记录。请补充进程状态、I/O wait、根因和验证证据之间的关系。",
-    teaching: "D 状态和 I/O wait 都是现象。完整解释需要提出原因、支持证据，以及能推翻该判断的结果。",
-    nextQuestion: "哪些证据可以区分存储瓶颈、Nginx 问题和上游服务故障？",
+    feedback: english
+      ? (coverage >= 0.75 ? "You covered the main diagnostic chain. Live AI evaluation was unavailable, so the conclusion still needs verification." : "Your answer was saved. Connect the process state, I/O wait, root cause, and verification evidence more explicitly.")
+      : (coverage >= 0.75 ? "你已经覆盖了主要诊断链。当前缺少实时 AI 评价，因此仍需查证。" : "回答已记录。请补充进程状态、I/O wait、根因和验证证据之间的关系。"),
+    teaching: english ? "D-state and I/O wait are symptoms. A complete explanation needs a causal hypothesis, supporting evidence, and evidence that could falsify it." : "D 状态和 I/O wait 都是现象。完整解释需要提出原因、支持证据，以及能推翻该判断的结果。",
+    nextQuestion: english ? "What evidence would distinguish a storage bottleneck, an Nginx problem, and an upstream service failure?" : "哪些证据可以区分存储瓶颈、Nginx 问题和上游服务故障？",
     recommendation: "continue"
   };
 }

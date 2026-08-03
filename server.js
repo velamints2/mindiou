@@ -1481,7 +1481,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
       const payload = parseJson(await readBody(req));
       try {
-        const { user, sessionId } = authStore.register(payload.email, payload.password);
+        const { user, sessionId } = authStore.register(payload.email, payload.password, payload.name);
         jsonResponse(res, 201, { ok: true, user }, { "set-cookie": authSessionCookie(sessionId) });
       } catch (error) {
         const status = /already registered/i.test(String(error.message)) ? 409 : 400;
@@ -1509,6 +1509,43 @@ const server = createServer(async (req, res) => {
       const user = requireAuth(req, res);
       if (!user) return;
       jsonResponse(res, 200, { ok: true, user });
+      return;
+    }
+    if (url.pathname === "/api/genesis" && req.method === "GET") {
+      const archive = authStore.getGenesisArchive();
+      jsonResponse(res, 200, {
+        ok: true,
+        genesis: {
+          cohort: "001",
+          status: "in_progress",
+          stage: "MVP-1.x 首发体验阶段",
+          stageEn: "MVP-1.x genesis experience stage",
+          dates: { start: null, end: null },
+          goals: { joined: 300, completed: 87, adoptedSuggestions: 19 },
+          actual: { joined: archive.joined, completed: archive.completed },
+          adoptedSuggestions: [],
+          productImprovements: [],
+          members: archive.members
+        }
+      });
+      return;
+    }
+    if (url.pathname === "/api/genesis/identity" && req.method === "GET") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      jsonResponse(res, 200, { ok: true, identity: authStore.getUserById(user.id)?.genesisIdentity || null });
+      return;
+    }
+    if (url.pathname === "/api/genesis/identity" && req.method === "PATCH") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      try {
+        const payload = parseJson(await readBody(req));
+        const identity = authStore.updateGenesisIdentity(user.id, payload);
+        jsonResponse(res, 200, { ok: true, identity });
+      } catch (error) {
+        jsonResponse(res, 400, { ok: false, error: error.message });
+      }
       return;
     }
     if (url.pathname === "/api/auth/device-token" && req.method === "POST") {
@@ -1604,7 +1641,7 @@ const server = createServer(async (req, res) => {
     const trainingReviewStartMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/start$/);
     const trainingReviewSubmitMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/submit$/);
     const isWebMvpRoute =
-      (req.method === "GET" && (url.pathname === "/api/mvp0/reports" || mvp1SessionMatch || mvp0ReportMatch)) ||
+      (req.method === "GET" && (url.pathname === "/api/dashboard" || url.pathname === "/api/mvp0/reports" || mvp1SessionMatch || mvp0ReportMatch)) ||
       (req.method === "POST" && (
         url.pathname === "/api/mvp1/sessions" || mvp1AnswerMatch || mvp1EndMatch ||
         url.pathname === "/api/mvp0/report" || mvp0CardAnswerMatch || mvp0CorrectionMatch
@@ -1615,6 +1652,43 @@ const server = createServer(async (req, res) => {
 
       if (req.method === "GET" && url.pathname === "/api/mvp0/reports") {
         jsonResponse(res, 200, { ok: true, reports: mvp0Store.listReports(user.id) });
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/dashboard") {
+        const reports = mvp0Store.listReports(user.id);
+        const sessions = mvp1Store.listSessions(user.id);
+        const latestReport = reports[0] || null;
+        const latestSession = sessions[0] || null;
+        const outstandingDebts = reports.flatMap(report =>
+          (report.sections?.feynmanCards || [])
+            .filter(card => !["provisionally_cleared"].includes(card.clearance?.status))
+            .map(card => ({
+              reportId: report.id,
+              cardId: card.id,
+              title: card.target || card.prompt || "Cognitive debt",
+              status: card.clearance?.status || "not_started",
+              locale: report.locale || "zh-CN"
+            }))
+        ).slice(0, 12);
+        const activeSession = sessions.find(session => session.state !== "ended") || null;
+        const activeCard = activeSession
+          ? reports.find(report => report.id === activeSession.reportId)?.sections?.feynmanCards?.find(card => card.id === activeSession.cardId)
+          : null;
+        jsonResponse(res, 200, {
+          ok: true,
+          dashboard: {
+            reportCount: reports.length,
+            latestReport,
+            outstandingDebts,
+            latestSession: latestSession ? publicSession(latestSession, { revealScaffold: latestSession.attempts?.length > 0 }) : null,
+            continuable: activeSession ? {
+              sessionId: activeSession.id,
+              reportId: activeSession.reportId,
+              cardId: activeSession.cardId,
+              title: activeCard?.target || activeSession.clearanceQuestion || "Cognitive debt"
+            } : null
+          }
+        });
         return;
       }
       if (req.method === "GET" && mvp1SessionMatch) {
@@ -1655,6 +1729,7 @@ const server = createServer(async (req, res) => {
           const report = mvp0Store.getReport(reportId, user.id);
           const session = await startClearanceSession({ report, cardId, researchFn: researchClearanceContext });
           session.userId = user.id;
+          session.locale = report.locale || (payload.locale === "en" ? "en" : "zh-CN");
           await mvp1Store.saveSession(session);
           jsonResponse(res, 200, { ok: true, session: publicSession(session) });
         } catch (error) {
@@ -1695,6 +1770,9 @@ const server = createServer(async (req, res) => {
           return;
         }
         const result = endClearanceSession(session);
+        const genesisIdentity = session.attempts?.length > 0
+          ? authStore.activateGenesisIdentity(user.id, session.endedAt)
+          : authStore.getUserById(user.id)?.genesisIdentity || null;
         try {
           await mvp0Store.updateCardClearance(session.reportId, session.cardId, {
             sessionId: session.id,
@@ -1778,7 +1856,8 @@ const server = createServer(async (req, res) => {
         jsonResponse(res, 200, {
           ok: true,
           result,
-          session: publicSession(session, { revealScaffold: true })
+          session: publicSession(session, { revealScaffold: true }),
+          genesisIdentity
         });
         return;
       }
@@ -1814,10 +1893,12 @@ const server = createServer(async (req, res) => {
         const report = await generateClearanceReport(artifactText, artifactType, chatFn, {
           researchFn: mvp0ResearchFn,
           timeline,
-          confusions
+          confusions,
+          locale: draft?.locale || (payload.locale === "en" ? "en" : "zh-CN")
         });
         if (draft) report.draftId = draft.id;
         report.userId = user.id;
+        report.locale = draft?.locale || (payload.locale === "en" ? "en" : "zh-CN");
         const saved = await mvp0Store.saveReport(report);
         if (draft) {
           await mvp0Store.attachReportToDraft(draft.id, saved.id, user.id);
@@ -2552,9 +2633,11 @@ const server = createServer(async (req, res) => {
         artifactType = detectArtifactType(artifactText);
       }
       const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-      const timeline = await generateCollaborationTimeline(artifactText, artifactType, chatFn);
+      const locale = payload.locale === "en" ? "en" : "zh-CN";
+      const timeline = await generateCollaborationTimeline(artifactText, artifactType, chatFn, { locale });
       const draft = await mvp0Store.saveDraft({
         userId: user.id,
+        locale,
         input: {
           artifactText: artifactText.slice(0, 30000),
           artifactType,

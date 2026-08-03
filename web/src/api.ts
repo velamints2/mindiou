@@ -26,6 +26,7 @@ import type {
   SubmitReviewResponse,
   TodayTrainingResponse
 } from './types'
+import { getLocale, t } from './i18n'
 
 // ── API 基址 ──
 //   公网部署（路径以 /mindiou/ 开头）→ /mindiou-api 由 Nginx 反代
@@ -78,15 +79,15 @@ export class ApiError extends Error {
 
 function defaultErrorMessage(status: number): string {
   if ([502, 503, 504].includes(status)) {
-    return '服务暂时不可用，请稍后重试'
+    return t('服务暂时不可用，请稍后重试')
   }
   if (status === 500) {
-    return '服务处理失败，请稍后重试'
+    return t('服务处理失败，请稍后重试')
   }
   if (status === 429) {
-    return '请求过于频繁，请稍后重试'
+    return t('请求过于频繁，请稍后重试')
   }
-  return `请求失败（${status}）`
+  return t(`请求失败（${status}）`, `Request failed (${status})`)
 }
 
 async function apiFetch<T>(
@@ -95,6 +96,7 @@ async function apiFetch<T>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
+    'x-mindiou-locale': getLocale(),
     ...(options.headers as Record<string, string> | undefined)
   }
 
@@ -106,7 +108,7 @@ async function apiFetch<T>(
       credentials: 'same-origin'
     })
   } catch (e) {
-    throw new ApiError(0, '网络连接失败，请检查网络或后端服务是否可用')
+    throw new ApiError(0, t('网络连接失败，请检查网络或后端服务是否可用'))
   }
 
   const text = await res.text()
@@ -131,9 +133,7 @@ async function apiFetch<T>(
       : typeof body?.message === 'string'
         ? body.message.trim()
         : ''
-    const msg =
-      bodyMessage ||
-      defaultErrorMessage(res.status)
+    const msg = bodyMessage ? t(bodyMessage) : defaultErrorMessage(res.status)
     throw new ApiError(res.status, msg)
   }
 
@@ -158,6 +158,28 @@ export type AuthUser = {
   id: string
   email: string
   name?: string
+  genesisIdentity?: GenesisIdentity
+}
+
+export type GenesisIdentity = {
+  number: string
+  reservedAt: string
+  activatedAt: string | null
+  visibility: 'public' | 'anonymous' | 'private'
+  avatarUrl?: string
+}
+
+export type GenesisArchive = {
+  cohort: string
+  status: 'in_progress' | 'archived'
+  stage: string
+  stageEn?: string
+  dates: { start: string | null; end: string | null }
+  goals: { joined: number; completed: number; adoptedSuggestions: number }
+  actual: { joined: number; completed: number }
+  adoptedSuggestions: string[]
+  productImprovements: string[]
+  members: Array<{ number: string; activatedAt: string; visibility: 'public' | 'anonymous'; nickname?: string; avatarUrl?: string }>
 }
 
 export type DeviceTokenInfo = {
@@ -255,7 +277,7 @@ export async function generateTimeline(
 ): Promise<GenerateTimelineResponse> {
   return apiFetch<GenerateTimelineResponse>('/api/mvp0/timelines', {
     method: 'POST',
-    body: JSON.stringify({ artifactText, artifactType })
+    body: JSON.stringify({ artifactText, artifactType, locale: getLocale() })
   })
 }
 
@@ -283,7 +305,7 @@ export async function generateReport(
 ): Promise<GenerateReportResponse> {
   return apiFetch<GenerateReportResponse>('/api/mvp0/report', {
     method: 'POST',
-    body: JSON.stringify(req)
+    body: JSON.stringify({ ...req, locale: getLocale() })
   })
 }
 
@@ -311,7 +333,7 @@ export async function createSession(
 ): Promise<CreateSessionResponse> {
   return apiFetch<CreateSessionResponse>('/api/mvp1/sessions', {
     method: 'POST',
-    body: JSON.stringify({ reportId, cardId })
+    body: JSON.stringify({ reportId, cardId, locale: getLocale() })
   })
 }
 
@@ -452,4 +474,38 @@ export async function getRepaymentProfile(): Promise<
 /** 当前用户的认知债务报告列表（导入欠条入口用） */
 export async function listMvp0Reports(): Promise<ApiResult<{ reports: ClearanceReport[] }>> {
   return apiFetch<ApiResult<{ reports: ClearanceReport[] }>>('/api/mvp0/reports')
+}
+
+export type DashboardSummary = {
+  reportCount: number
+  latestReport: ClearanceReport | null
+  outstandingDebts: Array<{
+    reportId: string
+    cardId: string
+    title: string
+    status: string
+    locale?: string
+  }>
+  latestSession: ClearanceSession | null
+  continuable: { sessionId: string; reportId: string; cardId: string; title: string } | null
+}
+
+export async function fetchDashboard(): Promise<ApiResult<{ dashboard: DashboardSummary }>> {
+  return apiFetch<ApiResult<{ dashboard: DashboardSummary }>>('/api/dashboard')
+}
+
+export async function fetchGenesis(): Promise<ApiResult<{ genesis: GenesisArchive }>> {
+  return apiFetch<ApiResult<{ genesis: GenesisArchive }>>('/api/genesis')
+}
+
+export async function fetchGenesisIdentity(): Promise<ApiResult<{ identity: GenesisIdentity | null }>> {
+  return apiFetch<ApiResult<{ identity: GenesisIdentity | null }>>('/api/genesis/identity')
+}
+
+export async function updateGenesisIdentity(payload: {
+  visibility: GenesisIdentity['visibility']; displayName?: string; avatarUrl?: string
+}): Promise<ApiResult<{ identity: GenesisIdentity }>> {
+  return apiFetch<ApiResult<{ identity: GenesisIdentity }>>('/api/genesis/identity', {
+    method: 'PATCH', body: JSON.stringify(payload)
+  })
 }
