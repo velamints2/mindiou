@@ -2465,6 +2465,37 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── 欠条关系（Phase 2）：手动全量扫描（幂等，复用 detectRelations 编排） ──
+
+    if (req.method === "POST" && url.pathname === "/api/training/relations/scan") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      if (debtIntelligenceDisabled) {
+        jsonResponse(res, 503, { ok: false, error: "Debt intelligence is disabled (DEBT_INTELLIGENCE_DISABLED=1)" });
+        return;
+      }
+      if (!aiApiKey || disableAi) {
+        jsonResponse(res, 503, { ok: false, error: "Debt relation scan requires an active AI configuration" });
+        return;
+      }
+      const result = await detectRelations({
+        graphStore: conceptGraphStore,
+        intelligenceStore: debtIntelligenceStore,
+        trainingStore,
+        userId: user.id,
+        chatFn: chatJson,
+        trigger: "manual_scan"
+      });
+      jsonResponse(res, 200, {
+        ok: true,
+        pairsConsidered: result.pairsConsidered,
+        created: result.created,
+        pending: result.pending,
+        ...(result.skipped ? { skipped: result.skipped } : {})
+      });
+      return;
+    }
+
     if (req.method === "POST" && trainingDebtReanalyzeMatch) {
       const user = getOptionalUser(req);
       const userId = user?.id || "demo-user";
