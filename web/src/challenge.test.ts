@@ -14,22 +14,20 @@ describe('001 期挑战活动 Landing 页', () => {
     expect(root.querySelector('.site-footer')).not.toBeNull()
   })
 
-  it('exposes the free assessment entry and the mascot asset', () => {
+  it('exposes the free assessment entry and mascot placeholder', () => {
     const root = document.createElement('div')
     renderChallengePage(root)
     expect(root.querySelector('.challenge-header-link[href="#/assessment"]')).not.toBeNull()
-    const mascot = root.querySelector('img.challenge-mascot') as HTMLImageElement
-    expect(mascot).not.toBeNull()
-    expect(mascot.getAttribute('src')).toBe('assets/challenge/cloud-mascot-hero.jpg')
+    expect(root.querySelector('.challenge-mascot-placeholder')).not.toBeNull()
   })
 
-  it('keeps purchase and redemption disabled while Afdian is unconfigured, without fake functionality', () => {
+  it('renders purchase link with configured Afdian URL', () => {
     const root = document.createElement('div')
     renderChallengePage(root)
     const join = root.querySelector('#challenge-join') as HTMLElement
-    const buttons = Array.from(join.querySelectorAll('button')) as HTMLButtonElement[]
-    expect(buttons.length).toBeGreaterThanOrEqual(2)
-    buttons.forEach(btn => expect(btn.disabled).toBe(true))
-    expect(join.textContent).toContain('即将开放')
+    const link = join.querySelector('a[href*="ifdian.net"]') as HTMLAnchorElement
+    expect(link).not.toBeNull()
+    expect(link.href).toContain('ifdian.net/item/2a561d748fe811f1a3b552540025c377')
+    expect(link.target).toBe('_blank')
   })
 })

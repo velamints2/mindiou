@@ -13,7 +13,7 @@ const CHALLENGE = {
   // 首期建议价，仅作展示，不涉交易
   priceDisplay: '¥39.9',
   // 爱发电商品链接：配置后购买按钮自动可用；留空则按钮显示「即将开放」
-  afdianUrl: '',
+  afdianUrl: 'https://ifdian.net/item/2a561d748fe811f1a3b552540025c377',
   openDays: 20,
   personalDays: 7,
   statusText: { zh: '首期筹备中 · 可先免费体验', en: 'Cohort 001 in preparation · try the free test first' }
@@ -73,14 +73,10 @@ function renderHero(page: HTMLElement): void {
   hero.appendChild(copy)
 
   const visual = el('figure', 'challenge-hero-visual')
-  const img = el('img', 'challenge-mascot') as HTMLImageElement
-  img.src = 'assets/challenge/cloud-mascot-hero.jpg'
-  img.alt = label('黑云正在纸上写下一张认知欠条', 'The MindIOU cloud writing a cognitive-debt note on paper')
-  img.width = 1024
-  img.height = 1024
-  img.loading = 'lazy'
-  visual.appendChild(img)
-  visual.appendChild(el('figcaption', 'challenge-mascot-caption', label('AI 可以替你完成工作，但理解不能永远外包。', 'AI can do the work for you, but understanding cannot be outsourced forever.')))
+  const placeholder = el('div', 'challenge-mascot-placeholder')
+  placeholder.appendChild(el('p', 'challenge-mascot-placeholder-label', label('黑云 IP 形象', 'MindIOU mascot')))
+  placeholder.appendChild(el('p', 'challenge-mascot-placeholder-hint', label('请替换为一张 1024×1024 的插画：黑云在纸上写认知欠条', 'Replace with a 1024×1024 illustration: the cloud writing a cognitive-debt note on paper')))
+  visual.appendChild(placeholder)
   hero.appendChild(visual)
   page.appendChild(hero)
 }
