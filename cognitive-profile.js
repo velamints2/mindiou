@@ -611,7 +611,7 @@ export async function generateInsights({
     const pct = Math.round((skill.masteredRatio || 0) * 100);
     const avgText = skill.averageMastery ? `六维平均掌握度 ${skill.averageMastery.overallMastery}。` : "尚无掌握度画像。";
     const weakestText = skill.weakestDimensions.length > 0
-      ? `最弱维度为「${skill.weakestDimensions.map(item => `${item.label}」(${item.value})`).join(" 和 ")}。`
+      ? `最弱维度为${skill.weakestDimensions.map(item => `「${item.label}」(${item.value})`).join(" 和 ")}。`
       : "";
     if ((skill.masteredRatio || 0) >= 0.5 && skill.masteredDebtCount >= 1) {
       insights.push(buildInsight({

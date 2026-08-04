@@ -2425,7 +2425,8 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/cognitive-profile/summary") {
       const user = getOptionalUser(req);
       const userId = user?.id || "demo-user";
-      const requestedDays = Number(url.searchParams.get("periodDays"));
+      const rawPeriodDays = url.searchParams.get("periodDays");
+      const requestedDays = rawPeriodDays === null ? NaN : Number(rawPeriodDays);
       const periodDays = Number.isFinite(requestedDays)
         ? Math.min(90, Math.max(7, Math.round(requestedDays)))
         : 30;
@@ -2473,7 +2474,8 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/cognitive-profile/patterns") {
       const user = getOptionalUser(req);
       const userId = user?.id || "demo-user";
-      const requestedDays = Number(url.searchParams.get("periodDays"));
+      const rawPeriodDays = url.searchParams.get("periodDays");
+      const requestedDays = rawPeriodDays === null ? NaN : Number(rawPeriodDays);
       const periodDays = Number.isFinite(requestedDays)
         ? Math.min(90, Math.max(7, Math.round(requestedDays)))
         : 30;
