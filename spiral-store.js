@@ -1,6 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
 import crypto from "node:crypto";
+import { createSqliteStateNamespace } from "./sqlite-state-store.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -48,14 +47,14 @@ function priorityScore(card, now) {
   return 0.35 * overdue + 0.25 * recency + 0.2 * masteryGap + 0.2 * repetition;
 }
 
-export function createSpiralStore(filePath) {
-  const resolvedPath = path.resolve(filePath);
+export function createSpiralStore(dbPath, options = {}) {
+  const persistence = createSqliteStateNamespace(dbPath, "spiral", options);
   let state = emptyState();
   let writeQueue = Promise.resolve();
 
   async function load() {
     try {
-      const parsed = JSON.parse(await readFile(resolvedPath, "utf8"));
+      const parsed = await persistence.load(emptyState());
       state = {
         ...emptyState(),
         ...parsed,
@@ -72,9 +71,7 @@ export function createSpiralStore(filePath) {
       const migratedCards = normalizeKnowledgeCards();
       if (migratedDebts > 0 || migratedCards > 0) await persist();
     } catch (error) {
-      if (error.code !== "ENOENT") {
-        console.warn(`Spiral store could not be loaded: ${error.message}`);
-      }
+      console.warn(`Spiral store could not be loaded: ${error.message}`);
     }
     return state;
   }
@@ -140,12 +137,9 @@ export function createSpiralStore(filePath) {
   }
 
   function persist() {
-    const snapshot = JSON.stringify(state, null, 2);
+    const snapshot = structuredClone(state);
     writeQueue = writeQueue.then(async () => {
-      await mkdir(path.dirname(resolvedPath), { recursive: true });
-      const temporaryPath = `${resolvedPath}.tmp`;
-      await writeFile(temporaryPath, snapshot);
-      await rename(temporaryPath, resolvedPath);
+      persistence.save(snapshot);
     });
     return writeQueue;
   }

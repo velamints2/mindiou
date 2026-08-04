@@ -1130,6 +1130,33 @@ a {
   color: var(--danger);
 }
 
+.input-counter.is-error {
+  color: #b42318;
+  font-weight: 700;
+}
+
+.input-limits {
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(47, 92, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(47, 92, 255, 0.055);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.input-limit-title {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.input-limit-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  line-height: 1.65;
+}
+
 .input-hint {
   margin: 0;
   color: var(--muted);
@@ -3082,6 +3109,59 @@ body {
 .genesis-choice-status { color: #475569; }
 @media (max-width: 700px) { .genesis-metrics { grid-template-columns: 1fr; } .genesis-metric { min-height: 150px; border-right: 0; border-bottom: 1px solid rgba(17,24,39,.12); } .genesis-member { align-items: flex-start; flex-direction: column; gap: 8px; } }
 
+/* Genesis 001 permanent archive */
+.page-genesis { --archive-blue: #315cff; --archive-ink: #111827; }
+.genesis-header { margin-bottom: clamp(64px, 10vw, 120px); }
+.genesis-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+.genesis-action-note { max-width: 720px; margin: 16px 0 0; color: #697386; font-size: .82rem; line-height: 1.65; }
+.genesis-forecast { display: flex; flex-wrap: wrap; gap: 10px 24px; margin: -62px 0 90px; color: #697386; font-size: .78rem; }
+.genesis-forecast span { position: relative; padding-left: 14px; }
+.genesis-forecast span::before { position: absolute; top: .48em; left: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--archive-blue); content: ""; }
+.genesis-progress,.genesis-final-cta { margin: 90px 0; padding: clamp(28px, 5vw, 64px); border: 1px solid rgba(49,92,255,.2); border-radius: 30px; background: linear-gradient(145deg,rgba(238,242,255,.92),rgba(255,247,237,.78)); }
+.genesis-progress h2,.genesis-final-cta h2,.genesis-section h2 { max-width: 900px; margin: 10px 0 20px; font-family: "Songti SC","STSong",serif; font-size: clamp(2rem,4vw,4rem); line-height: 1.08; letter-spacing: -.045em; }
+.genesis-section { margin-top: clamp(90px, 12vw, 150px); }
+.genesis-section-index { margin: 0; color: var(--archive-blue); font-family: ui-monospace,"SF Mono",Menlo,monospace; font-size: .72rem; font-weight: 800; letter-spacing: .13em; }
+.genesis-section-copy { max-width: 800px; color: #5f6672; line-height: 1.8; }
+.genesis-card-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; margin-top: 34px; }
+.genesis-card-grid-two { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.genesis-archive-card { position: relative; min-height: 240px; padding: clamp(24px,4vw,40px); overflow: hidden; border: 1px solid rgba(17,24,39,.1); border-radius: 24px; background: rgba(255,255,255,.68); }
+.genesis-archive-card h3 { max-width: 80%; margin: 0 0 18px; font-size: clamp(1.15rem,2vw,1.5rem); }
+.genesis-archive-card p { margin: 0; color: #5f6672; line-height: 1.75; }
+.genesis-card-number { position: absolute; top: 24px; right: 26px; color: rgba(49,92,255,.38); font-family: ui-monospace,"SF Mono",Menlo,monospace; font-size: .72rem; }
+.genesis-callout { margin-top: 16px; padding: 20px 24px; border-left: 3px solid var(--archive-blue); border-radius: 0 16px 16px 0; background: rgba(49,92,255,.06); color: #475569; line-height: 1.7; }
+.genesis-callout p { margin: 6px 0 0; }
+.genesis-check-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 30px 0; padding: 0; list-style: none; }
+.genesis-check-list li { padding: 18px 20px 18px 48px; border: 1px solid rgba(17,24,39,.1); border-radius: 16px; background: rgba(255,255,255,.64); }
+.genesis-check-list li::before { margin-left: -28px; margin-right: 12px; color: var(--archive-blue); content: "◇"; }
+.genesis-status-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; }
+.genesis-status { padding: 7px 11px; border: 1px solid rgba(17,24,39,.12); border-radius: 999px; color: #64748b; font-size: .72rem; }
+.genesis-status.is-active { border-color: rgba(49,92,255,.24); color: #2448ce; background: #eef2ff; }
+.genesis-unlocks { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-top: 30px; }
+.genesis-unlock { display: flex; min-height: 96px; flex-direction: column; justify-content: space-between; gap: 18px; padding: 18px; border: 1px dashed rgba(17,24,39,.17); border-radius: 16px; background: rgba(255,255,255,.44); }
+.genesis-unlock small { color: #94a3b8; font-family: ui-monospace,"SF Mono",Menlo,monospace; }
+.genesis-member div { display: grid; gap: 5px; }
+.genesis-member small { color: #94a3b8; }
+.genesis-quote { margin: 24px 0 0; padding: clamp(24px,4vw,44px); border-radius: 24px; color: #fff; background: #111827; font-family: "Songti SC","STSong",serif; font-size: clamp(1.3rem,2.5vw,2.2rem); line-height: 1.5; }
+.genesis-privacy-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; margin-top: 30px; }
+.genesis-privacy-card { padding: 26px; border: 1px solid rgba(17,24,39,.1); border-radius: 20px; background: rgba(255,255,255,.66); }
+.genesis-privacy-card h3 { margin: 0 0 14px; }
+.genesis-privacy-card ul { margin: 0; padding-left: 1.2rem; color: #5f6672; line-height: 1.8; }
+.genesis-final-cta { margin-bottom: 0; }
+.genesis-final-cta > p:not(.genesis-section-index) { max-width: 760px; color: #5f6672; line-height: 1.8; }
+.genesis-final-cta > small { display: block; max-width: 760px; margin-top: 18px; color: #697386; line-height: 1.6; }
+
+@media (max-width: 700px) {
+  .page-genesis { width: min(calc(100% - 24px),1180px); padding-top: 20px; }
+  .genesis-header { margin-bottom: 72px; }
+  .genesis-title { font-size: clamp(2.75rem,14vw,4.7rem); }
+  .genesis-actions { display: grid; grid-template-columns: 1fr; }
+  .genesis-actions .btn { width: 100%; justify-content: center; text-align: center; }
+  .genesis-forecast { margin-top: -58px; flex-direction: column; }
+  .genesis-card-grid,.genesis-card-grid-two,.genesis-check-list,.genesis-unlocks,.genesis-privacy-grid { grid-template-columns: 1fr; }
+  .genesis-archive-card { min-height: 0; }
+  .genesis-progress,.genesis-final-cta { border-radius: 22px; }
+}
+
 /* ═══════════════════════════════════════════════
    运营后台样式（内部工具，不交付设计师）
    ═══════════════════════════════════════════════ */
@@ -3296,6 +3376,62 @@ body {
 .glass-chip > * {
   position: relative;
   z-index: 2;
+}
+
+.persistent-site-navigation {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 1100;
+}
+
+body.has-persistent-navigation #app {
+  padding-top: 76px;
+}
+
+.persistent-site-navigation .site-header-controls {
+  isolation: isolate;
+}
+
+.persistent-site-navigation .persistent-site-cta {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .persistent-site-navigation {
+    top: 12px;
+    right: 12px;
+    left: 12px;
+  }
+
+  body.has-persistent-navigation #app {
+    padding-top: 70px;
+  }
+
+  .persistent-site-navigation .site-header-controls {
+    width: 100%;
+    gap: 3px;
+    padding: 4px;
+  }
+
+  .persistent-site-navigation .site-nav {
+    min-width: 0;
+    flex: 1 1 auto;
+    justify-content: space-between;
+    gap: 0;
+  }
+
+  .persistent-site-navigation .site-nav-link {
+    padding: 9px 8px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .persistent-site-navigation .persistent-site-cta {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
 }
 
 .hero-visual {

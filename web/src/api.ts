@@ -171,15 +171,24 @@ export type GenesisIdentity = {
 
 export type GenesisArchive = {
   cohort: string
-  status: 'in_progress' | 'archived'
+  status: 'recruiting' | 'in_progress' | 'archived'
   stage: string
   stageEn?: string
   dates: { start: string | null; end: string | null }
-  goals: { joined: number; completed: number; adoptedSuggestions: number }
-  actual: { joined: number; completed: number }
+  capacity: number
+  estimates: { completed: number }
+  actual: { registered: number; joined: number; completedFirstClearance: number; adoptedSuggestions: number }
   adoptedSuggestions: string[]
   productImprovements: string[]
   members: Array<{ number: string; activatedAt: string; visibility: 'public' | 'anonymous'; nickname?: string; avatarUrl?: string }>
+  participant: null | {
+    registered: boolean
+    officiallyJoined: boolean
+    reportCount: number
+    completedClearanceCount: number
+    activeSessionId: string | null
+    identity: GenesisIdentity | null
+  }
 }
 
 export type DeviceTokenInfo = {

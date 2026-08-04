@@ -1,5 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { createSqliteStateNamespace } from "./sqlite-state-store.js";
 
 function emptyState() {
   return {
@@ -19,14 +18,14 @@ function clean(value) {
  * Cognitive Repayment V1 store: gaps, attempts, review queue and capability
  * profiles. Independent from the other stores; atomic JSON persistence.
  */
-export function createCognitiveRepaymentStore(filePath) {
-  const resolvedPath = path.resolve(filePath);
+export function createCognitiveRepaymentStore(dbPath, options = {}) {
+  const persistence = createSqliteStateNamespace(dbPath, "cognitive-repayment", options);
   let state = emptyState();
   let writeQueue = Promise.resolve();
 
   async function load() {
     try {
-      const parsed = JSON.parse(await readFile(resolvedPath, "utf8"));
+      const parsed = await persistence.load(emptyState());
       state = {
         ...emptyState(),
         ...parsed,
@@ -37,20 +36,15 @@ export function createCognitiveRepaymentStore(filePath) {
         capabilityProfiles: Array.isArray(parsed.capabilityProfiles) ? parsed.capabilityProfiles : []
       };
     } catch (error) {
-      if (error.code !== "ENOENT") {
-        console.warn(`Cognitive repayment store could not be loaded: ${error.message}`);
-      }
+      console.warn(`Cognitive repayment store could not be loaded: ${error.message}`);
     }
     return state;
   }
 
   function persist() {
-    const snapshot = JSON.stringify(state, null, 2);
+    const snapshot = structuredClone(state);
     writeQueue = writeQueue.then(async () => {
-      await mkdir(path.dirname(resolvedPath), { recursive: true });
-      const temporaryPath = `${resolvedPath}.tmp`;
-      await writeFile(temporaryPath, snapshot);
-      await rename(temporaryPath, resolvedPath);
+      persistence.save(snapshot);
     });
     return writeQueue;
   }

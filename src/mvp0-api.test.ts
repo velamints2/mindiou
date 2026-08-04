@@ -48,6 +48,7 @@ beforeAll(async () => {
       PORT: String(TEST_PORT),
       MVP0_STORE_PATH: TEST_STORE,
       AUTH_STORE_PATH: TEST_AUTH_STORE,
+      DAILY_ANALYSIS_LIMIT: "100",
       SPIRAL_DISABLE_AI: "1",
       LEARNING_API_TOKEN: ""
     },

@@ -223,8 +223,8 @@ export function renderRegisterPage(root: HTMLElement): void {
   const genesisNotice = el('aside', 'genesis-register-notice')
   genesisNotice.appendChild(el('strong', undefined, t('首发体验者 001 期', 'Genesis Cohort 001')))
   genesisNotice.appendChild(el('p', undefined, t(
-    '注册后将预留唯一编号；完成第一次认知欠条清偿后自动激活。是否公开由你决定。',
-    'Register now to reserve a unique ID. Complete your first cognitive-debt repayment to activate it. Public display is always optional.'
+    '注册后将预留候选编号；完成首次真实分析后计入正式参与。永久身份需完成 15 天训练并通过结业审核，是否公开始终由你决定。',
+    'Registration reserves a candidate ID. Your first real analysis makes you an official participant. Permanent status requires the 15-day program and completion review; public display is always optional.'
   )))
   card.appendChild(genesisNotice)
 
@@ -451,15 +451,29 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
   form.appendChild(demoBar)
 
   const textarea = el('textarea', 'artifact-input') as HTMLTextAreaElement
-  textarea.placeholder = '粘贴 ChatGPT/Claude 对话、AI 生成的方案、黑客松记录、会议纪要…'
-  textarea.maxLength = 30000
+  textarea.placeholder = t(
+    '粘贴 ChatGPT/Claude 对话、AI 生成的方案、黑客松记录、会议纪要…',
+    'Paste a ChatGPT/Claude conversation, AI-generated plan, hackathon log, or meeting notes…'
+  )
   form.appendChild(textarea)
 
   // 字数计数
-  const counter = el('p', 'input-counter', '0 / 30000')
+  const counter = el('p', 'input-counter', '0 / 30,000')
   form.appendChild(counter)
 
-  const hint = el('p', 'input-hint', '公开体验环境：请勿粘贴密码、密钥或客户隐私。')
+  const limits = el('div', 'input-limits')
+  limits.appendChild(el('p', 'input-limit-title', t('首期导入限制', 'Launch limits')))
+  const limitList = el('ul', 'input-limit-list')
+  limitList.appendChild(el('li', '', t('仅支持粘贴纯文本，最多 30,000 字符；暂不支持文件上传。', 'Paste plain text only, up to 30,000 characters. File upload is not supported yet.')))
+  limitList.appendChild(el('li', '', t('超长内容请分段导入，或先摘要后再粘贴。', 'For longer content, import it in sections or summarize it first.')))
+  limitList.appendChild(el('li', '', t('每位用户每天最多进行 3 次新分析。', 'Each user can start up to 3 new analyses per day.')))
+  limits.appendChild(limitList)
+  form.appendChild(limits)
+
+  const hint = el('p', 'input-hint', t(
+    '公开体验环境：请勿粘贴密码、密钥或客户隐私。',
+    'Public preview: do not paste passwords, secrets, or customer data.'
+  ))
   form.appendChild(hint)
 
   const actions = el('div', 'form-actions')
@@ -474,15 +488,47 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
 
   textarea.oninput = () => {
     const len = textarea.value.length
-    counter.textContent = `${len} / 30000`
-    counter.classList.toggle('is-warn', len > 27000)
-    submit.disabled = textarea.value.trim().length < 10
+    counter.textContent = `${len.toLocaleString()} / 30,000`
+    counter.classList.toggle('is-warn', len > 27000 && len <= 30000)
+    counter.classList.toggle('is-error', len > 30000)
+    if (len > 30000) {
+      status.dataset.inputLimit = 'true'
+      status.textContent = t(
+        '文本超过 30,000 字符，请分段导入或先摘要后再分析。',
+        'Text exceeds 30,000 characters. Split it into sections or summarize it first.'
+      )
+    } else if (status.dataset.inputLimit === 'true') {
+      status.textContent = ''
+      delete status.dataset.inputLimit
+    }
+    submit.disabled = textarea.value.trim().length < 10 || len > 30000
   }
+
+  const rejectFiles = (event: DragEvent | ClipboardEvent) => {
+    const files = event instanceof DragEvent ? event.dataTransfer?.files : event.clipboardData?.files
+    if (!files?.length) return
+    event.preventDefault()
+    status.dataset.inputLimit = 'true'
+    status.textContent = t(
+      '当前仅支持粘贴纯文本，暂不支持文件上传。请打开文件并复制其中的文字。',
+      'Only pasted plain text is supported right now. Open the file and copy its text instead.'
+    )
+  }
+  textarea.ondrop = rejectFiles
+  textarea.onpaste = rejectFiles
 
   form.onsubmit = async (e) => {
     e.preventDefault()
     const text = textarea.value.trim()
     if (text.length < 10) return
+    if (text.length > 30000) {
+      status.dataset.inputLimit = 'true'
+      status.textContent = t(
+        '文本超过 30,000 字符，请分段导入或先摘要后再分析。',
+        'Text exceeds 30,000 characters. Split it into sections or summarize it first.'
+      )
+      return
+    }
     submit.disabled = true
     status.textContent = ''
     const overlay = spinnerOverlay('AI 正在拆解你的协作步骤，通常需要 15-30 秒…')
@@ -1009,32 +1055,175 @@ function renderGenesisIdentityChoice(identity: GenesisIdentity): HTMLElement {
 
 export async function renderGenesisPage(root: HTMLElement): Promise<void> {
   const page = el('div', 'page page-genesis')
-  const header = el('header', 'genesis-header')
-  const home = el('a', 'site-brand', 'MindIOU') as HTMLAnchorElement; home.href = '#/'
-  header.appendChild(home)
-  const registerLink = el('a', 'btn btn-primary btn-sm', t('加入 001 期', 'Join Cohort 001')) as HTMLAnchorElement; registerLink.href = '#/register'
-  header.appendChild(registerLink); page.appendChild(header)
   page.appendChild(el('p', 'genesis-kicker', t('永久档案 · 001 期', 'Permanent archive · Cohort 001')))
   page.appendChild(el('h1', 'genesis-title', t('第一批用户，参与了 MindIOU 的诞生', 'The first users helped shape MindIOU')))
   page.appendChild(el('p', 'genesis-lead', t(
-    '2026 年 8 月，MindIOU 启动第一期认知清债挑战。这一页将永久记录真实参与者、被采纳的建议，以及产品由此发生的改变。',
-    'In August 2026, MindIOU opened its first cognitive-debt repayment challenge. This page permanently records the real participants, adopted suggestions, and product changes that followed.'
+    '连续 15 天，每天花 5—10 分钟，找出一件 AI 替你完成、但你还没有真正理解的事情，并通过解释、复习和迁移训练把它真正变成自己的能力。',
+    'For 15 days, spend 5–10 minutes a day finding something AI completed for you that you do not yet truly understand—then turn it into your own ability through explanation, review, and transfer practice.'
+  )))
+  const heroActions = el('div', 'genesis-actions')
+  const join = el('a', 'btn btn-primary', t('加入 001 期挑战', 'Join Cohort 001')) as HTMLAnchorElement; join.href = '#/register'
+  const test = el('a', 'btn btn-secondary', t('先测测我的认知债务', 'Take the 3-minute debt scan')) as HTMLAnchorElement; test.href = '#/app'
+  heroActions.append(join, test); page.appendChild(heroActions)
+  page.appendChild(el('p', 'genesis-action-note', t(
+    '首期限量 300 人。完成首次真实认知欠条分析后，才视为正式加入。',
+    'Cohort 001 is limited to 300 people. You officially join only after completing your first real cognitive-debt analysis.'
   )))
   page.appendChild(loading(t('正在读取 001 期档案…', 'Loading the Cohort 001 archive…')))
   root.appendChild(page)
   try {
     const { genesis } = await fetchGenesis(); page.querySelector('.loading')?.remove()
+
+    const participant = genesis.participant
+    let ctaLabel = t('加入 001 期挑战', 'Join Cohort 001')
+    let ctaHref = '#/register'
+    if (participant?.registered && !participant.officiallyJoined) {
+      ctaLabel = t('完成首次认知债务扫描', 'Complete your first debt scan'); ctaHref = '#/app'
+    } else if (participant?.registered) {
+      ctaLabel = t('查看我的 001 期进度', 'View my Cohort 001 progress'); ctaHref = '#genesis-progress'
+    }
+    ;[join].forEach(link => { link.textContent = ctaLabel; link.href = ctaHref })
+
     const metrics = el('section', 'genesis-metrics')
-    ;[[t('已加入', 'Joined'), genesis.actual.joined, genesis.goals.joined], [t('已完成一次清偿', 'Completed one repayment'), genesis.actual.completed, genesis.goals.completed], [t('建议采纳目标', 'Adopted suggestion goal'), genesis.adoptedSuggestions.length, genesis.goals.adoptedSuggestions]].forEach(([label, actual, goal]) => {
-      const item = el('article', 'genesis-metric'); item.appendChild(el('span', 'genesis-metric-label', String(label))); item.appendChild(el('strong', undefined, String(actual))); item.appendChild(el('small', undefined, `${t('目标', 'Goal')} ${goal}`)); metrics.appendChild(item)
-    }); page.appendChild(metrics)
+    const metricData = [
+      [t('已正式加入', 'Officially joined'), genesis.actual.joined, t('完成首次认知债务扫描后计入', 'Counted after the first cognitive-debt scan')],
+      [t('已完成首次清偿', 'Completed first repayment'), genesis.actual.completedFirstClearance, t('不是登录签到，而是完成一次真实理解训练', 'A real understanding exercise—not a login check-in')],
+      [t('共创建议已采纳', 'Co-creation ideas shipped'), genesis.actual.adoptedSuggestions, t('仅记录已经进入产品的真实改进', 'Only verified improvements already shipped')]
+    ] as const
+    metricData.forEach(([label, actual, note]) => {
+      const item = el('article', 'genesis-metric'); item.appendChild(el('span', 'genesis-metric-label', label)); item.appendChild(el('strong', undefined, String(actual))); item.appendChild(el('small', undefined, note)); metrics.appendChild(item)
+    })
+    const forecast = el('div', 'genesis-forecast')
+    forecast.append(
+      el('span', '', t(`首期名额：${genesis.capacity} 人`, `Cohort capacity: ${genesis.capacity}`)),
+      el('span', '', t(`预期完成者：约 ${genesis.estimates.completed} 人（预估）`, `Expected finishers: about ${genesis.estimates.completed} (estimate)`)),
+      el('span', '', t('计划采纳建议：不设数量目标，以实际质量为准', 'Suggestions: no quota; quality determines adoption'))
+    )
+    page.append(metrics, forecast)
+
+    if (participant) {
+      const progress = el('section', 'genesis-progress'); progress.id = 'genesis-progress'
+      progress.appendChild(el('p', 'genesis-section-index', 'RECORD · MY 001'))
+      progress.appendChild(el('h2', '', t('我的 001 期状态', 'My Cohort 001 status')))
+      progress.appendChild(el('p', 'genesis-section-copy', participant.officiallyJoined
+        ? t(`已生成 ${participant.reportCount} 份真实报告，完成 ${participant.completedClearanceCount} 次清偿。正式挑战尚未开始，15 天进度不会提前计时。`, `You have generated ${participant.reportCount} real reports and completed ${participant.completedClearanceCount} repayments. The formal challenge has not started, so the 15-day clock is not running yet.`)
+        : t('账户已创建，但完成首次真实认知债务扫描后才计入正式参与人数。', 'Your account is ready. Complete your first real cognitive-debt scan to be counted as an official participant.')))
+      const progressAction = el('a', 'btn btn-primary', participant.officiallyJoined ? t('开始一次新的分析', 'Start a new analysis') : t('完成首次认知债务扫描', 'Complete first debt scan')) as HTMLAnchorElement
+      progressAction.href = '#/app'; progress.appendChild(progressAction); page.appendChild(progress)
+    }
+
+    const section = (index: string, titleZh: string, titleEn: string, copyZh?: string, copyEn?: string) => {
+      const node = el('section', 'genesis-section')
+      node.appendChild(el('p', 'genesis-section-index', index))
+      node.appendChild(el('h2', '', t(titleZh, titleEn)))
+      if (copyZh) node.appendChild(el('p', 'genesis-section-copy', t(copyZh, copyEn || copyZh)))
+      return node
+    }
+    const cards = (items: Array<[string, string, string, string]>, className = '') => {
+      const grid = el('div', `genesis-card-grid ${className}`.trim())
+      items.forEach(([titleZh, titleEn, bodyZh, bodyEn], index) => {
+        const card = el('article', 'genesis-archive-card')
+        card.appendChild(el('span', 'genesis-card-number', String(index + 1).padStart(2, '0')))
+        card.appendChild(el('h3', '', t(titleZh, titleEn)))
+        card.appendChild(el('p', '', t(bodyZh, bodyEn)))
+        grid.appendChild(card)
+      })
+      return grid
+    }
+
+    const journey = section('TIMELINE · 15 DAYS', '这 15 天会发生什么', 'What happens over 15 days')
+    journey.appendChild(cards([
+      ['第 1—3 天：发现欠条', 'Days 1–3: Find the debt', '导入一次真实 AI 协作内容，识别自己能够使用、但无法解释的部分，并完成第一次认知清偿。', 'Import real AI-assisted work, identify what you can use but cannot explain, and complete your first repayment.'],
+      ['第 4—7 天：建立清偿习惯', 'Days 4–7: Build the habit', '识别 AI 答案中的隐含假设、关键选择和潜在风险，生成第一周认知报告。', 'Identify hidden assumptions, key choices, and risks in AI answers, then generate your first-week report.'],
+      ['第 8—12 天：验证是否真正学会', 'Days 8–12: Verify learning', '脱离原答案重新解释，审核 AI 输出，并在相似问题中验证能力能否迁移。', 'Explain without the original answer, audit AI output, and test whether the ability transfers to a similar problem.'],
+      ['第 13—15 天：形成个人协作方法', 'Days 13–15: Form your method', '整理最重要的认知欠条，制定自己的 AI 协作规则，并生成 15 天成长报告。', 'Organize your most important debts, define personal AI collaboration rules, and generate a 15-day growth report.']
+    ]))
+    journey.appendChild(el('p', 'genesis-callout', t('每天只需要完成一个 5—10 分钟的真实训练任务。允许最多 2 次补做，不要求机械连续签到。', 'Complete one real 5–10 minute training task each day. Up to two make-up days are allowed; mechanical streaks are not required.')))
+    page.appendChild(journey)
+
+    const outcomes = section('OUTCOMES · VERIFIED', '你最终会获得什么', 'What you will receive')
+    outcomes.appendChild(cards([
+      ['个人认知成长报告', 'Personal cognitive growth report', '记录 15 天内的认知欠条、掌握度变化、最容易被 AI 跳过的能力和下一阶段建议。', 'A record of your debts, mastery changes, abilities AI most often bypasses, and next-step recommendations.'],
+      ['Genesis 001 首发体验者身份', 'Genesis 001 identity', '获得唯一编号，例如 MIOU-001-0027，并永久保留在账户和官方验证档案中。', 'Receive a unique ID such as MIOU-001-0027, retained in your account and official verification archive.'],
+      ['Founding Lite 初级永久权益', 'Founding Lite permanent tier', '计划包含每月基础分析与训练额度、基础记录保存、新功能优先体验和高级套餐长期折扣。永久权益指保留 Founding Lite 版本，不代表所有高级功能永久免费。', 'Planned benefits include monthly basic analysis and training allowances, basic record retention, early feature access, and a lasting advanced-plan discount. This preserves the Founding Lite tier—not every future premium feature for free.'],
+      ['最高 30 美元 AI 实验经费', 'Up to US$30 in AI experiment credit', '通过完整结业审核后，可获得 AI 实验经费或等值 MindIOU 模型额度；具体额度按有效训练、结业反馈和共创贡献确定，不提供共享 API Key。', 'After passing the completion review, you may receive AI experiment credit or equivalent MindIOU model usage. The amount depends on valid training, feedback, and contribution; no shared API key is provided.']
+    ]))
+    page.appendChild(outcomes)
+
+    const qualify = section('IDENTITY · EARNED', '如何成为首发体验者', 'How to earn Genesis status', 'Genesis 001 首发体验者不是报名称号，而是一项经过真实行动获得的身份。', 'Genesis 001 is not a sign-up label. It is earned through verified action.')
+    const conditions = el('ul', 'genesis-check-list')
+    ;[
+      t('完成至少 13 个有效训练日', 'Complete at least 13 valid training days'),
+      t('完成第 3 天、第 7 天和第 15 天关键任务', 'Complete the Day 3, 7, and 15 milestones'),
+      t('至少完成 10 笔真实认知欠条训练', 'Complete at least 10 real cognitive-debt exercises'),
+      t('提交一次结业反馈', 'Submit completion feedback'),
+      t('通过活动有效性审核', 'Pass the activity validity review')
+    ].forEach(item => conditions.appendChild(el('li', '', item)))
+    qualify.appendChild(conditions)
+    const cocreator = el('div', 'genesis-callout')
+    cocreator.appendChild(el('strong', '', t('产品共创者', 'Product co-creator')))
+    cocreator.appendChild(el('p', '', t('建议被采用、发现重要问题、参加深度访谈或提供高质量案例后，可以从“首发体验者”升级为“产品共创者”。首发体验者代表早期使用；产品共创者代表真正帮助产品发生了改变。', 'Participants whose suggestions ship, who uncover important issues, join in-depth interviews, or contribute high-quality cases can advance to Product Co-creator. Genesis marks early use; Co-creator marks real product change.')))
+    qualify.appendChild(cocreator); page.appendChild(qualify)
+
     const history = el('section', 'genesis-history'); history.appendChild(el('h2', undefined, t('正在共同书写的产品历史', 'Product history in the making')))
     const stage = isEnglish() ? (genesis.stageEn || genesis.stage) : genesis.stage
-    history.appendChild(el('p', undefined, `${t('产品阶段', 'Product stage')}: ${stage}`)); history.appendChild(el('p', undefined, t('活动日期：待正式公布', 'Dates: to be announced')))
-    history.appendChild(el('p', undefined, t('被采纳的建议和产品改进将在确认并上线后记录于此，不提前虚构。', 'Adopted suggestions and product improvements will be recorded here only after they are verified and shipped.'))); page.appendChild(history)
+    const states = el('div', 'genesis-status-row')
+    ;[t('候选体验者招募中', 'Candidate recruitment'), t('系统压力测试中', 'System stress testing'), t('正式挑战未开始', 'Formal challenge not started')].forEach((label, index) => states.appendChild(el('span', `genesis-status ${index < 2 ? 'is-active' : ''}`, label)))
+    history.appendChild(states)
+    history.appendChild(el('p', undefined, `${t('产品阶段', 'Product stage')}: ${stage}`))
+    history.appendChild(el('p', undefined, t('001 期正在招募候选体验者，正式开始时间将在人数和系统测试达到要求后公布。日期确定前不会启动连续 15 天计时。', 'Cohort 001 is recruiting candidates. The start date will be announced when participation and system testing are ready. The 15-day clock will not start before dates are confirmed.')))
+    history.appendChild(el('p', undefined, t('被采纳的建议和产品改进将在确认并上线后记录于此，不提前虚构。', 'Adopted suggestions and product improvements will be recorded here only after they are verified and shipped.')))
+    const unlocks = el('div', 'genesis-unlocks')
+    ;[
+      t('活动开始与结束日期', 'Start and end dates'), t('正式参与人数', 'Official participants'), t('完成挑战人数', 'Challenge finishers'),
+      t('产生的认知欠条数量', 'Cognitive debts created'), t('完成的清偿数量', 'Repayments completed'), t('授权公开的昵称和编号', 'Authorized public names and IDs'),
+      t('被采纳的产品建议', 'Adopted product suggestions'), t('产品发生的真实变化', 'Verified product changes'), t('001 期结业报告', 'Cohort 001 final report')
+    ].forEach(label => { const row = el('div', 'genesis-unlock'); row.append(el('span', '', label), el('small', '', t('待解锁', 'Pending'))); unlocks.appendChild(row) })
+    history.appendChild(unlocks); page.appendChild(history)
+
     const wall = el('section', 'genesis-wall'); wall.appendChild(el('h2', undefined, t('首发体验者名录', 'Genesis participants')))
     if (!genesis.members.length) wall.appendChild(el('p', 'genesis-empty', t('等待第一位主动选择公开的完成者。', 'Waiting for the first finisher who chooses to be listed.')))
-    genesis.members.forEach(member => { const card = el('article', 'genesis-member'); card.appendChild(el('strong', undefined, member.nickname || t('匿名首发体验者', 'Anonymous genesis participant'))); card.appendChild(el('span', undefined, member.number)); wall.appendChild(card) }); page.appendChild(wall)
+    wall.appendChild(el('p', 'genesis-section-copy', t('完成者可以选择公开头像、昵称和编号；只公开昵称或匿名编号；或完全不公开展示、仅在个人账户中永久保留身份。公开档案不会展示导入的 AI 对话、原始代码或私密训练内容。', 'Finishers may publish an avatar, name, and ID; publish only a name or anonymous ID; or remain entirely private while retaining the identity in their account. Imported AI conversations, source code, and private training content are never shown here.')))
+    genesis.members.forEach(member => {
+      const card = el('article', 'genesis-member')
+      const identity = el('div', '')
+      identity.appendChild(el('strong', undefined, member.nickname || t('匿名首发体验者', 'Anonymous genesis participant')))
+      identity.appendChild(el('small', undefined, t('001 期 · 身份有效', 'Cohort 001 · Valid identity')))
+      card.append(identity, el('span', undefined, member.number)); wall.appendChild(card)
+    }); page.appendChild(wall)
+
+    const compare = section('METHOD · NOT A STREAK', '这不是普通签到活动', 'This is not a check-in streak')
+    compare.appendChild(cards([
+      ['普通打卡', 'Ordinary check-in', '每天打开页面、点击签到、为了奖励完成动作，活动结束后没有留下任何能力。', 'Open a page, click check-in, act for the reward, and retain no ability when the event ends.'],
+      ['MindIOU 认知清债挑战', 'MindIOU cognitive-debt challenge', '使用自己的真实 AI 协作内容，每天完成理解训练，保存回答和掌握度变化，最终形成个人 AI 协作方法。', 'Use real AI-assisted work, train understanding daily, preserve answers and mastery changes, and form a personal AI collaboration method.']
+    ], 'genesis-card-grid-two'))
+    compare.appendChild(el('p', 'genesis-quote', t('我们记录的不是你登录了多少天，而是有多少原本属于 AI 的答案，最后真正变成了你的能力。', 'We do not record how many days you logged in. We record how many answers that once belonged to AI truly became your ability.')))
+    page.appendChild(compare)
+
+    const fit = section('PARTICIPATION · FIT', '这项挑战适合你吗', 'Is this challenge a fit?')
+    fit.appendChild(cards([
+      ['适合参加', 'A good fit', '经常用 AI 写代码、做产品或研究；能使用输出但无法完整解释；希望提升协作能力；愿意每天投入 5—10 分钟并提供坦诚反馈。', 'You often use AI for code, products, or research; can use outputs but cannot fully explain them; want better collaboration; and can invest 5–10 minutes daily with honest feedback.'],
+      ['暂时不适合', 'Probably not yet', '只希望领取奖励；不愿使用任何真实任务；希望 AI 代写训练答案；只想学习提示词技巧；或暂时无法保持基本参与。', 'You only want the reward, will not use any real task, want AI to write the training answers, only seek prompt tricks, or cannot maintain basic participation right now.']
+    ], 'genesis-card-grid-two')); page.appendChild(fit)
+
+    const privacy = section('PRIVACY · CURRENT CAPABILITY', '隐私与数据说明', 'Privacy and data', '你的真实项目内容不会自动出现在公开档案中。', 'Your real project content will never automatically appear in the public archive.')
+    const privacyGrid = el('div', 'genesis-privacy-grid')
+    ;[
+      [t('当前已支持', 'Available now'), [t('公开展示完全由用户主动选择', 'Public display is always opt-in'), t('活动页面只展示匿名汇总统计', 'Activity statistics are anonymous aggregates'), t('公开名录不展示原始对话、代码或私密训练内容', 'The public directory excludes original chats, code, and private training content')]],
+      [t('上线前需补齐', 'Required before launch'), [t('自助删除导入内容和账户数据', 'Self-service deletion of imports and account data'), t('只保留结构化欠条、不长期保留完整原文的模式', 'A structured-debt-only mode without long-term source retention'), t('分享卡片生成前的逐次确认', 'Per-share confirmation before generating public cards')]]
+    ].forEach(([title, items]) => { const card = el('article', 'genesis-privacy-card'); card.appendChild(el('h3', '', title as string)); const list = el('ul'); (items as string[]).forEach(item => list.appendChild(el('li', '', item))); card.appendChild(list); privacyGrid.appendChild(card) })
+    privacy.appendChild(privacyGrid); page.appendChild(privacy)
+
+    const finalCta = el('section', 'genesis-final-cta')
+    finalCta.appendChild(el('p', 'genesis-section-index', 'NEXT · JOIN THE RECORD'))
+    finalCta.appendChild(el('h2', '', t('AI 完成得越来越快，你对它的理解也应该同步增长。', 'As AI gets faster, your understanding should grow with it.')))
+    finalCta.appendChild(el('p', '', t('加入 MindIOU 001 期，用 15 天建立一套更专业、更可控的 AI 协作方法，并成为这款产品第一段历史的一部分。', 'Join MindIOU Cohort 001, build a more professional and controllable AI collaboration method in 15 days, and become part of the product’s first chapter.')))
+    const finalActions = el('div', 'genesis-actions')
+    const finalJoin = el('a', 'btn btn-primary', ctaLabel) as HTMLAnchorElement; finalJoin.href = ctaHref
+    const finalTest = el('a', 'btn btn-secondary', t('先完成认知债务测试', 'Take the cognitive-debt scan first')) as HTMLAnchorElement; finalTest.href = '#/app'
+    finalActions.append(finalJoin, finalTest); finalCta.appendChild(finalActions)
+    finalCta.appendChild(el('small', '', t('报名不等于获得身份。完成真实训练和结业审核后，才会获得 Genesis 001 首发体验者编号。', 'Registration does not grant the identity. A Genesis 001 number is earned only after real training and completion review.')))
+    page.appendChild(finalCta)
   } catch (error) { page.querySelector('.loading')?.remove(); page.appendChild(errorBox(error instanceof Error ? error.message : t('档案加载失败', 'Could not load archive'))) }
 }
 

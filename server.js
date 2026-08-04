@@ -53,6 +53,7 @@ import {
   createAttemptFromClearanceSession
 } from "./review-generator.js";
 import { createCognitiveRepaymentStore } from "./cognitive-repayment-store.js";
+import { createUsageLedger } from "./sqlite-state-store.js";
 import {
   EVALUATOR_VERSION,
   PROMPT_SCHEMA_VERSION,
@@ -83,6 +84,11 @@ const sessionTtlSeconds = Number.isFinite(configuredSessionTtl)
   ? Math.min(60 * 60 * 24 * 30, Math.max(300, configuredSessionTtl))
   : 60 * 60 * 24 * 7;
 const secureSessionCookie = process.env.MINDIOU_COOKIE_SECURE === "1";
+const maxArtifactChars = Math.max(1000, Number(process.env.MAX_ARTIFACT_CHARS || 30000));
+const maxRequestBodyBytes = Math.max(1024, Number(process.env.MAX_REQUEST_BODY_BYTES || 10 * 1024 * 1024));
+const dailyAnalysisLimit = Math.max(1, Number(process.env.DAILY_ANALYSIS_LIMIT || 3));
+const dailyAiTokenBudget = Math.max(1000, Number(process.env.USER_DAILY_AI_TOKEN_BUDGET || 200000));
+const aiOutputTokenReserve = Math.max(1000, Number(process.env.AI_OUTPUT_TOKEN_RESERVE || 10000));
 const configuredEnv = (name, fallback = "") => Object.hasOwn(process.env, name)
   ? process.env[name] || ""
   : fallback;
@@ -106,27 +112,28 @@ const sttPrompt = process.env.OPENAI_STT_PROMPT || [
   "Likely commands: 下一张, 下一个, 重复, 再说一遍, 提问, 问我, 会了, next, repeat, ask me, got it.",
   "Preserve English vocabulary terms exactly when possible."
 ].join(" ");
+const dataDbPath = process.env.DATA_DB_PATH || process.env.AUTH_STORE_PATH || "tmp/mindiou.sqlite";
 const learningStorePath = process.env.LEARNING_STORE_PATH || "tmp/spiral-store.json";
 const mvp0StorePath = process.env.MVP0_STORE_PATH || "tmp/mvp0-store.json";
 const mvp1StorePath = process.env.MVP1_STORE_PATH || "tmp/mvp1-store.json";
-const authStorePath = process.env.AUTH_STORE_PATH || "tmp/auth-store.sqlite";
 const eventLog = [];
-const spiralStore = createSpiralStore(learningStorePath);
+const spiralStore = createSpiralStore(dataDbPath, { legacyJsonPath: learningStorePath });
 await spiralStore.load();
-const mvp0Store = createMvp0Store(mvp0StorePath);
+const mvp0Store = createMvp0Store(dataDbPath, { legacyJsonPath: mvp0StorePath });
 await mvp0Store.load();
-const mvp1Store = createMvp1Store(mvp1StorePath);
+const mvp1Store = createMvp1Store(dataDbPath, { legacyJsonPath: mvp1StorePath });
 await mvp1Store.load();
 // 兼容 admin 补丁的只读视图：账户体系分支以 mvp1Store 持久化替代原内存 Map
 const mvp1Sessions = { values: () => mvp1Store.listSessions() };
 const trainingStorePath = process.env.TRAINING_STORE_PATH || "tmp/training-store.json";
-const trainingStore = createTrainingStore(trainingStorePath);
+const trainingStore = createTrainingStore(dataDbPath, { legacyJsonPath: trainingStorePath });
 await trainingStore.load();
 const cognitiveRepaymentV1 = process.env.COGNITIVE_REPAYMENT_V1 === "1";
 const repaymentStorePath = process.env.COGNITIVE_REPAYMENT_STORE_PATH || "tmp/cognitive-repayment-store.json";
-const repaymentStore = createCognitiveRepaymentStore(repaymentStorePath);
+const repaymentStore = createCognitiveRepaymentStore(dataDbPath, { legacyJsonPath: repaymentStorePath });
 await repaymentStore.load();
-const authStore = createAuthStore(authStorePath);
+const authStore = createAuthStore(dataDbPath);
+const usageLedger = createUsageLedger(dataDbPath);
 const rawWebResearch = researchProvider === "public_web"
   ? createPublicWebResearch({ timeoutMs: openAiResearchTimeoutMs })
   : createOpenAiWebResearch({
@@ -320,16 +327,97 @@ function authorizeRequest(req) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
+    let bytes = 0;
+    let settled = false;
     req.on("data", chunk => {
-      body += chunk;
-      if (body.length > 1024 * 1024 * 8) {
-        req.destroy();
-        reject(new Error("Request body too large"));
+      bytes += chunk.length;
+      if (bytes > maxRequestBodyBytes) {
+        if (settled) return;
+        settled = true;
+        const error = new Error(`Request body exceeds ${Math.round(maxRequestBodyBytes / 1024 / 1024)} MB`);
+        error.statusCode = 413;
+        error.code = "REQUEST_BODY_TOO_LARGE";
+        reject(error);
+        return;
       }
+      if (settled) return;
+      body += chunk;
     });
-    req.on("end", () => resolve(body));
-    req.on("error", reject);
+    req.on("end", () => {
+      if (!settled) resolve(body);
+    });
+    req.on("error", error => {
+      if (!settled) reject(error);
+    });
   });
+}
+
+function requireJsonRequest(req) {
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  if (!contentType.startsWith("application/json")) {
+    const error = new Error("This endpoint accepts pasted plain text in JSON only. File upload is not supported yet.");
+    error.statusCode = 415;
+    error.code = "UNSUPPORTED_INPUT_FORMAT";
+    throw error;
+  }
+}
+
+function localizedLimitMessage(error, req) {
+  const english = String(req.headers["x-mindiou-locale"] || "").toLowerCase().startsWith("en");
+  const messages = {
+    REQUEST_BODY_TOO_LARGE: english
+      ? `The request exceeds ${Math.round(maxRequestBodyBytes / 1024 / 1024)} MB. Split or summarize the content before importing it.`
+      : `请求内容超过 ${Math.round(maxRequestBodyBytes / 1024 / 1024)} MB，请先分段或摘要后再导入。`,
+    ARTIFACT_TEXT_TOO_LONG: english
+      ? `Text exceeds ${maxArtifactChars.toLocaleString()} characters. Split it into sections or summarize it first.`
+      : `文本超过 ${maxArtifactChars.toLocaleString()} 字符，请分段导入或先摘要后再分析。`,
+    DAILY_ANALYSIS_LIMIT: english
+      ? `You have used today's ${dailyAnalysisLimit} analyses. Please try again tomorrow.`
+      : `你今天的 ${dailyAnalysisLimit} 次分析额度已用完，请明天再试。`,
+    DAILY_AI_TOKEN_BUDGET: english
+      ? "You have reached today's AI usage budget. Shorten the content or try again tomorrow."
+      : "你今天的 AI 使用预算已用完，请缩短内容或明天再试。",
+    UNSUPPORTED_INPUT_FORMAT: english
+      ? "Only pasted plain text is supported right now. File upload is not available yet."
+      : "当前仅支持粘贴纯文本，暂不支持文件上传。"
+  };
+  return messages[error.code] || error.message;
+}
+
+function usageDateInShanghai(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit"
+  }).format(now);
+}
+
+function validateArtifactText(value) {
+  const artifactText = String(value || "").trim();
+  if (!artifactText) {
+    const error = new Error("Missing artifactText");
+    error.statusCode = 400;
+    error.code = "MISSING_ARTIFACT_TEXT";
+    throw error;
+  }
+  if (artifactText.length > maxArtifactChars) {
+    const error = new Error(`Text exceeds ${maxArtifactChars.toLocaleString()} characters. Split it into sections or summarize it first.`);
+    error.statusCode = 413;
+    error.code = "ARTIFACT_TEXT_TOO_LONG";
+    throw error;
+  }
+  return artifactText;
+}
+
+function estimateAnalysisTokens(artifactText) {
+  return Math.ceil(String(artifactText).length / 2) + aiOutputTokenReserve;
+}
+
+function consumeAnalysisQuota(userId, artifactText) {
+  return usageLedger.consumeAnalysis(
+    userId,
+    usageDateInShanghai(),
+    estimateAnalysisTokens(artifactText),
+    { analysisLimit: dailyAnalysisLimit, tokenBudget: dailyAiTokenBudget }
+  );
 }
 
 // Admin channel: LEARNING_API_TOKEN authorizes service-to-service calls and
@@ -1513,19 +1601,45 @@ const server = createServer(async (req, res) => {
     }
     if (url.pathname === "/api/genesis" && req.method === "GET") {
       const archive = authStore.getGenesisArchive();
+      const reports = mvp0Store.listReports();
+      const sessions = mvp1Store.listSessions();
+      const joinedUserIds = new Set(reports.map(report => report.userId).filter(Boolean));
+      const clearedUserIds = new Set(sessions
+        .filter(session => session.state === "ended" && session.attempts?.length > 0)
+        .map(session => session.userId)
+        .filter(Boolean));
+      const currentUser = getOptionalUser(req);
+      const userReports = currentUser ? reports.filter(report => report.userId === currentUser.id) : [];
+      const userSessions = currentUser ? sessions.filter(session => session.userId === currentUser.id) : [];
+      const completedSessions = userSessions.filter(session => session.state === "ended" && session.attempts?.length > 0);
+      const activeSession = userSessions.find(session => session.state !== "ended") || null;
       jsonResponse(res, 200, {
         ok: true,
         genesis: {
           cohort: "001",
-          status: "in_progress",
+          status: "recruiting",
           stage: "MVP-1.x 首发体验阶段",
           stageEn: "MVP-1.x genesis experience stage",
           dates: { start: null, end: null },
-          goals: { joined: 300, completed: 87, adoptedSuggestions: 19 },
-          actual: { joined: archive.joined, completed: archive.completed },
+          capacity: 300,
+          estimates: { completed: 87 },
+          actual: {
+            registered: archive.joined,
+            joined: joinedUserIds.size,
+            completedFirstClearance: clearedUserIds.size,
+            adoptedSuggestions: 0
+          },
           adoptedSuggestions: [],
           productImprovements: [],
-          members: archive.members
+          members: archive.members,
+          participant: currentUser ? {
+            registered: true,
+            officiallyJoined: userReports.length > 0,
+            reportCount: userReports.length,
+            completedClearanceCount: completedSessions.length,
+            activeSessionId: activeSession?.id || null,
+            identity: authStore.getUserById(currentUser.id)?.genesisIdentity || null
+          } : null
         }
       });
       return;
@@ -1710,6 +1824,7 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      if (url.pathname === "/api/mvp0/report") requireJsonRequest(req);
       const payload = parseJson(await readBody(req));
 
       // ── MVP-1: source-grounded debt clearance ──
@@ -1770,9 +1885,9 @@ const server = createServer(async (req, res) => {
           return;
         }
         const result = endClearanceSession(session);
-        const genesisIdentity = session.attempts?.length > 0
-          ? authStore.activateGenesisIdentity(user.id, session.endedAt)
-          : authStore.getUserById(user.id)?.genesisIdentity || null;
+        // The first repayment counts toward cohort progress, but the permanent
+        // Genesis identity is awarded only after the full challenge review.
+        const genesisIdentity = authStore.getUserById(user.id)?.genesisIdentity || null;
         try {
           await mvp0Store.updateCardClearance(session.reportId, session.cardId, {
             sessionId: session.id,
@@ -1875,12 +1990,9 @@ const server = createServer(async (req, res) => {
             return;
           }
         }
-        const artifactText = String(draft ? draft.input.artifactText : payload.artifactText || "").trim();
+        const artifactText = validateArtifactText(draft ? draft.input.artifactText : payload.artifactText);
         let artifactType = clean(draft ? draft.input.artifactType : payload.artifactType || "");
-        if (!artifactText) {
-          jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
-          return;
-        }
+        if (!draft) consumeAnalysisQuota(user.id, artifactText);
         // Auto-detect type if not provided or empty
         if (!artifactType) {
           artifactType = detectArtifactType(artifactText);
@@ -2483,6 +2595,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/api/mvp0/timelines") requireJsonRequest(req);
     const payload = parseJson(await readBody(req));
 
     // ── Training system: review start and submit ──
@@ -2623,12 +2736,9 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/mvp0/timelines") {
       const user = requireAuth(req, res);
       if (!user) return;
-      const artifactText = String(payload.artifactText || "").trim();
+      const artifactText = validateArtifactText(payload.artifactText);
       let artifactType = clean(payload.artifactType || "");
-      if (!artifactText) {
-        jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
-        return;
-      }
+      const usage = consumeAnalysisQuota(user.id, artifactText);
       if (!artifactType) {
         artifactType = detectArtifactType(artifactText);
       }
@@ -2639,7 +2749,7 @@ const server = createServer(async (req, res) => {
         userId: user.id,
         locale,
         input: {
-          artifactText: artifactText.slice(0, 30000),
+          artifactText,
           artifactType,
           charCount: clean(artifactText).length
         },
@@ -2654,7 +2764,8 @@ const server = createServer(async (req, res) => {
         timeline: { steps: draft.timeline.steps, ...(timeline.note ? { note: timeline.note } : {}) },
         fallback: isFallback,
         ...(isFallback && timeline.generation?.error ? { error: timeline.generation.error } : {}),
-        detectedType: artifactType
+        detectedType: artifactType,
+        usage
       });
       return;
     }
@@ -2766,7 +2877,12 @@ const server = createServer(async (req, res) => {
 
     jsonResponse(res, 404, { ok: false, error: "Not found" });
   } catch (error) {
-    jsonResponse(res, 500, { ok: false, error: error.message });
+    const status = Number(error.statusCode) || 500;
+    jsonResponse(res, status, {
+      ok: false,
+      error: localizedLimitMessage(error, req),
+      ...(error.code ? { code: error.code } : {})
+    });
   }
 });
 

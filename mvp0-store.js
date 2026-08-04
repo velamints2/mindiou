@@ -1,6 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
 import crypto from "node:crypto";
+import { createSqliteStateNamespace } from "./sqlite-state-store.js";
 
 function emptyState() {
   return {
@@ -88,16 +87,16 @@ function normalizeConfusionResolutions(raw) {
 /**
  * MVP-0 store for cognitive-debt clearance reports.
  * Completely independent from spiral-store.js.
- * Uses atomic JSON file persistence.
+ * Uses the shared SQLite WAL database; legacy JSON is import-only.
  */
-export function createMvp0Store(filePath) {
-  const resolvedPath = path.resolve(filePath);
+export function createMvp0Store(dbPath, options = {}) {
+  const persistence = createSqliteStateNamespace(dbPath, "mvp0", options);
   let state = emptyState();
   let writeQueue = Promise.resolve();
 
   async function load() {
     try {
-      const parsed = JSON.parse(await readFile(resolvedPath, "utf8"));
+      const parsed = await persistence.load(emptyState());
       state = {
         ...emptyState(),
         ...parsed,
@@ -106,20 +105,15 @@ export function createMvp0Store(filePath) {
         drafts: Array.isArray(parsed.drafts) ? parsed.drafts : []
       };
     } catch (error) {
-      if (error.code !== "ENOENT") {
-        console.warn(`MVP-0 store could not be loaded: ${error.message}`);
-      }
+      console.warn(`MVP-0 store could not be loaded: ${error.message}`);
     }
     return state;
   }
 
   function persist() {
-    const snapshot = JSON.stringify(state, null, 2);
+    const snapshot = structuredClone(state);
     writeQueue = writeQueue.then(async () => {
-      await mkdir(path.dirname(resolvedPath), { recursive: true });
-      const temporaryPath = `${resolvedPath}.tmp`;
-      await writeFile(temporaryPath, snapshot);
-      await rename(temporaryPath, resolvedPath);
+      persistence.save(snapshot);
     });
     return writeQueue;
   }

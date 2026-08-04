@@ -131,6 +131,45 @@ afterAll(async () => {
 });
 
 describe("auth API", () => {
+  it("rejects unsupported imports and text over 30,000 characters with clear errors", async () => {
+    const { cookie } = await registerUser("input-limits@example.com");
+    const unsupported = await fetch(`${BASE}/api/mvp0/timelines`, {
+      method: "POST",
+      headers: { cookie, "content-type": "text/plain", "x-mindiou-locale": "zh-CN" },
+      body: "plain file-like payload"
+    });
+    expect(unsupported.status).toBe(415);
+    expect(await unsupported.json()).toMatchObject({ code: "UNSUPPORTED_INPUT_FORMAT" });
+
+    const oversized = await fetch(`${BASE}/api/mvp0/timelines`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json", "x-mindiou-locale": "en" },
+      body: JSON.stringify({ artifactText: "x".repeat(30_001), locale: "en" })
+    });
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toMatchObject({ code: "ARTIFACT_TEXT_TOO_LONG" });
+  });
+
+  it("allows three new analyses per day and rejects the fourth", async () => {
+    const { cookie } = await registerUser("daily-limit@example.com");
+    for (let index = 1; index <= 3; index += 1) {
+      const response = await fetch(`${BASE}/api/mvp0/timelines`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", "x-mindiou-locale": "en" },
+        body: JSON.stringify({ artifactText: `${SAMPLE_ARTIFACT}\nAttempt ${index}`, locale: "en" })
+      });
+      expect(response.status).toBe(200);
+      expect((await response.json()).usage.analysisCount).toBe(index);
+    }
+    const rejected = await fetch(`${BASE}/api/mvp0/timelines`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json", "x-mindiou-locale": "en" },
+      body: JSON.stringify({ artifactText: `${SAMPLE_ARTIFACT}\nAttempt 4`, locale: "en" })
+    });
+    expect(rejected.status).toBe(429);
+    expect(await rejected.json()).toMatchObject({ code: "DAILY_ANALYSIS_LIMIT" });
+  });
+
   it("registers a user and sets a session cookie", async () => {
     const { response, data, cookie } = await registerUser("Alice@Example.com");
     expect(response.status).toBe(201);
@@ -206,13 +245,16 @@ describe("auth API", () => {
     expect((await response.json()).error).toBe("Authentication required");
   });
 
-  it("exposes targets separately from actual genesis participation", async () => {
+  it("separates cohort capacity and estimates from real genesis participation", async () => {
     const response = await fetch(`${BASE}/api/genesis`);
     expect(response.status).toBe(200);
     const { genesis } = await response.json();
-    expect(genesis.goals).toEqual({ joined: 300, completed: 87, adoptedSuggestions: 19 });
-    expect(genesis.actual.joined).toBeGreaterThanOrEqual(1);
-    expect(genesis.actual.completed).toBe(0);
+    expect(genesis.capacity).toBe(300);
+    expect(genesis.estimates).toEqual({ completed: 87 });
+    expect(genesis.actual.registered).toBeGreaterThanOrEqual(1);
+    expect(genesis.actual.joined).toBe(0);
+    expect(genesis.actual.completedFirstClearance).toBe(0);
+    expect(genesis.actual.adoptedSuggestions).toBe(0);
     expect(genesis.members).toEqual([]);
   });
 
@@ -431,18 +473,17 @@ describe("MVP-0/MVP-1 route protection and isolation", () => {
       number: alice.data.user.genesisIdentity.number,
       visibility: "private"
     });
-    expect(ended.genesisIdentity.activatedAt).toBeTruthy();
+    expect(ended.genesisIdentity.activatedAt).toBeNull();
 
     const publish = await fetch(`${BASE}/api/genesis/identity`, {
       method: "PATCH",
       headers: { "content-type": "application/json", cookie: alice.cookie },
       body: JSON.stringify({ visibility: "anonymous" })
     });
-    expect(publish.status).toBe(200);
+    expect(publish.status).toBe(400);
     const archive = (await (await fetch(`${BASE}/api/genesis`)).json()).genesis;
-    expect(archive.members).toContainEqual(expect.objectContaining({
-      number: alice.data.user.genesisIdentity.number,
-      visibility: "anonymous"
-    }));
+    expect(archive.actual.joined).toBeGreaterThanOrEqual(1);
+    expect(archive.actual.completedFirstClearance).toBeGreaterThanOrEqual(1);
+    expect(archive.members).not.toContainEqual(expect.objectContaining({ number: alice.data.user.genesisIdentity.number }));
   });
 });

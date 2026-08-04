@@ -22,6 +22,7 @@ import { renderRepaymentDetailPage, renderRepaymentPage } from './repayment'
 import { clear, el, navigate, parseRoute, type Route } from './router'
 import { initTracker, trackRoute } from './tracker'
 import { getLocale, observeTranslations, setLocale } from './i18n'
+import { renderPersistentNavigation } from './navigation'
 
 const app = document.getElementById('app') as HTMLElement
 observeTranslations(app)
@@ -50,6 +51,7 @@ function renderLanguageSwitch(route: Route): void {
 async function render(route: Route): Promise<void> {
   clear(app)
   renderLanguageSwitch(route)
+  renderPersistentNavigation(route)
 
   // 运营后台：独立鉴权，不走邀请码
   if (route.name === 'admin') {

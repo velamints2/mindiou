@@ -1,5 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { createSqliteStateNamespace } from "./sqlite-state-store.js";
 
 function emptyState() {
   return {
@@ -20,16 +19,16 @@ function clean(value) {
  * 训练记录持久化 store
  *
  * 保存 TrainingAttempt、MasteryProfile、ReviewTask、CognitiveDebt 和 CapabilityNode
- * 使用原子 JSON 文件写入，与 mvp1-store.js / mvp0-store.js 保持一致的模式
+ * 使用共享 SQLite WAL 数据库；旧 JSON 仅作为一次性迁移源
  */
-export function createTrainingStore(filePath) {
-  const resolvedPath = path.resolve(filePath);
+export function createTrainingStore(dbPath, options = {}) {
+  const persistence = createSqliteStateNamespace(dbPath, "training", options);
   let state = emptyState();
   let writeQueue = Promise.resolve();
 
   async function load() {
     try {
-      const parsed = JSON.parse(await readFile(resolvedPath, "utf8"));
+      const parsed = await persistence.load(emptyState());
       state = {
         ...emptyState(),
         ...parsed,
@@ -41,20 +40,15 @@ export function createTrainingStore(filePath) {
         capabilities: Array.isArray(parsed.capabilities) ? parsed.capabilities : []
       };
     } catch (error) {
-      if (error.code !== "ENOENT") {
-        console.warn(`Training store could not be loaded: ${error.message}`);
-      }
+      console.warn(`Training store could not be loaded: ${error.message}`);
     }
     return state;
   }
 
   function persist() {
-    const snapshot = JSON.stringify(state, null, 2);
+    const snapshot = structuredClone(state);
     writeQueue = writeQueue.then(async () => {
-      await mkdir(path.dirname(resolvedPath), { recursive: true });
-      const temporaryPath = `${resolvedPath}.tmp`;
-      await writeFile(temporaryPath, snapshot);
-      await rename(temporaryPath, resolvedPath);
+      persistence.save(snapshot);
     });
     return writeQueue;
   }

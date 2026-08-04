@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { createSession, fetchDashboard, fetchReport, fetchSession } from "./api";
-import { renderAppPage, renderReportPage, renderSessionPage } from "./pages";
+import { renderAppPage, renderGenesisPage, renderReportPage, renderSessionPage } from "./pages";
 import { el } from "./router";
 
 // Mock API module to avoid network calls
@@ -22,6 +22,22 @@ vi.mock("./api", () => ({
   validateAccessToken: vi.fn().mockResolvedValue(true),
   checkAccessSession: vi.fn().mockResolvedValue(true),
   fetchCurrentUser: vi.fn().mockResolvedValue(null),
+  fetchGenesis: vi.fn().mockResolvedValue({
+    ok: true,
+    genesis: {
+      cohort: "001",
+      status: "recruiting",
+      stage: "MVP-1.x 首发体验阶段",
+      dates: { start: null, end: null },
+      capacity: 300,
+      estimates: { completed: 87 },
+      actual: { registered: 12, joined: 3, completedFirstClearance: 1, adoptedSuggestions: 0 },
+      adoptedSuggestions: [],
+      productImprovements: [],
+      members: [],
+      participant: null
+    }
+  }),
   fetchDashboard: vi.fn().mockResolvedValue({
     ok: true,
     dashboard: {
@@ -59,7 +75,9 @@ describe("renderAppPage", () => {
     const textarea = root.querySelector("textarea");
     expect(textarea).not.toBeNull();
     expect(textarea?.placeholder).toContain("粘贴");
-    expect(textarea?.maxLength).toBe(30000);
+    expect(textarea?.maxLength).toBe(-1);
+    expect(root.querySelector(".input-limits")?.textContent).toContain("30,000");
+    expect(root.querySelector(".input-limits")?.textContent).toContain("每天最多进行 3 次");
   });
 
   it("renders demo sample button", async () => {
@@ -94,6 +112,18 @@ describe("renderAppPage", () => {
     expect(submit.disabled).toBe(false);
   });
 
+  it("keeps overlong text visible but blocks submission with a clear message", async () => {
+    await renderAppPage(root);
+    const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
+    const submit = root.querySelector(".btn-primary") as HTMLButtonElement;
+    textarea.value = "长".repeat(30_001);
+    textarea.dispatchEvent(new Event("input"));
+    expect(textarea.value).toHaveLength(30_001);
+    expect(submit.disabled).toBe(true);
+    expect(root.querySelector(".form-status")?.textContent).toContain("超过 30,000 字符");
+    expect(root.querySelector(".input-counter")?.classList.contains("is-error")).toBe(true);
+  });
+
   it("shows step indicator at step 1", async () => {
     await renderAppPage(root);
     const steps = root.querySelectorAll(".step-dot");
@@ -123,6 +153,22 @@ describe("renderAppPage", () => {
     expect(root.querySelector(".dashboard-metric-value")?.textContent).toBe("3");
     expect(root.textContent).toContain("API incident review");
     expect(root.textContent).toContain("Explain the retry strategy");
+  });
+});
+
+describe("renderGenesisPage", () => {
+  it("renders the archive, honest metrics, program explanation, privacy status, and two CTAs", async () => {
+    const root = el("div");
+    document.body.appendChild(root);
+    await renderGenesisPage(root);
+    expect(root.textContent).toContain("连续 15 天");
+    expect(root.textContent).toContain("已正式加入");
+    expect(root.textContent).toContain("预期完成者：约 87 人（预估）");
+    expect(root.textContent).toContain("这 15 天会发生什么");
+    expect(root.textContent).toContain("报名不等于获得身份");
+    expect(root.textContent).toContain("上线前需补齐");
+    expect(root.querySelectorAll('a[href="#/register"]').length).toBeGreaterThanOrEqual(2);
+    expect(root.querySelectorAll('a[href="#/app"]').length).toBeGreaterThanOrEqual(2);
   });
 });
 

@@ -21,7 +21,9 @@ export function createAuthStore(dbPath) {
   mkdirSync(path.dirname(resolvedPath), { recursive: true });
   const db = new Database(resolvedPath);
   db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
+  db.pragma("busy_timeout = 5000");
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
