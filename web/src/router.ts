@@ -12,6 +12,9 @@ export type Route =
   | { name: 'report'; reportId: string }
   | { name: 'session'; sessionId: string }
   | { name: 'devices' }             // 产品区：设备 Token 管理
+  | { name: 'projects' }            // 产品区：项目列表
+  | { name: 'project-ownership'; projectId: string }  // 产品区：项目所有权地图
+  | { name: 'project-ownership-module'; projectId: string; moduleId: string }  // 产品区：模块详情
   | { name: 'admin' }               // 运营后台
   | { name: 'not-found' }
 
@@ -22,7 +25,9 @@ export function isPublicRoute(route: Route): boolean {
 
 export function parseRoute(): Route {
   const hash = location.hash.replace(/^#\/?/, '')
-  const [path, ...rest] = hash.split('/')
+  const parts = hash.split('/').filter(Boolean)
+  const path = parts[0] || ''
+  const rest = parts.slice(1)
 
   switch (path) {
     case '':
@@ -46,6 +51,23 @@ export function parseRoute(): Route {
       return rest[0] ? { name: 'report', reportId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     case 'session':
       return rest[0] ? { name: 'session', sessionId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
+    case 'projects':
+      return { name: 'projects' }
+    case 'project-ownership': {
+      const projectId = rest[0]
+      if (!projectId) return { name: 'not-found' }
+      return { name: 'project-ownership', projectId: decodeURIComponent(projectId) }
+    }
+    case 'project-ownership-module': {
+      const projectId = rest[0]
+      const moduleId = rest[1]
+      if (!projectId || !moduleId) return { name: 'not-found' }
+      return {
+        name: 'project-ownership-module',
+        projectId: decodeURIComponent(projectId),
+        moduleId: decodeURIComponent(moduleId)
+      }
+    }
     default:
       return { name: 'not-found' }
   }
@@ -64,6 +86,11 @@ export function navigate(route: Route): void {
     case 'admin': path = '/admin'; break
     case 'report': path = `/report/${encodeURIComponent(route.reportId)}`; break
     case 'session': path = `/session/${encodeURIComponent(route.sessionId)}`; break
+    case 'projects': path = '/projects'; break
+    case 'project-ownership': path = `/project-ownership/${encodeURIComponent(route.projectId)}`; break
+    case 'project-ownership-module':
+      path = `/project-ownership-module/${encodeURIComponent(route.projectId)}/${encodeURIComponent(route.moduleId)}`
+      break
     case 'not-found': path = '/not-found'; break
   }
   location.hash = path

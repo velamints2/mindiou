@@ -305,3 +305,272 @@ export async function endSession(sessionId: string): Promise<EndSessionResponse>
     { method: 'POST', body: JSON.stringify({}) }
   )
 }
+
+// ── 项目认知所有权地图 ──
+// 与 server.js 中 /api/projects/* 路由对应。
+// 所有权状态由后端确定性代码计算，前端只负责展示。
+
+export type EvidenceLevel = 0 | 1 | 2 | 3 | 4 | 5
+
+export type ModuleOwnershipStatus =
+  | 'high_risk_unowned'
+  | 'needs_initial_understanding'
+  | 'needs_error_boundary_validation'
+  | 'needs_transfer_validation'
+  | 'needs_real_work_validation'
+  | 'owned'
+
+export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
+
+export type OwnershipGapType =
+  | 'needs_initial_understanding'
+  | 'needs_error_boundary_validation'
+  | 'needs_transfer_validation'
+  | 'needs_real_work_validation'
+  | null
+
+export type TrainingStage =
+  | 'initial_compensation'
+  | 'delayed_recall'
+  | 'misconception_check'
+  | 'scenario_transfer'
+  | 'error_detection'
+  | 'real_work_validation'
+
+export type ProjectSummary = {
+  projectId: string
+  importantDecisionCount: number
+  ownedDecisionCount: number
+  initialUnderstandingCount: number
+  missingVerificationCount: number
+  highRiskUnownedCount: number
+  moduleCount: number
+  ownedModuleCount: number
+  highRiskModuleCount: number
+  needsRealWorkModuleCount: number
+  ownershipCoverage: number
+  calculatedAt: string
+  calculationVersion: string
+}
+
+export type ProjectInfo = {
+  id: string
+  name: string
+  description?: string
+  repositoryUrl?: string
+  createdAt: string
+  updatedAt?: string
+}
+
+export type ModuleOwnershipView = {
+  workItemId: string
+  title: string
+  status: ModuleOwnershipStatus
+  statusLabel: string
+  riskLevel: RiskLevel
+  importantDecisionCount: number
+  highestEvidenceLevel: EvidenceLevel
+  highestEvidenceLevelLabel: string
+  relatedSessionCount: number
+  relatedArtifactCount: number
+  openDebtCount: number
+  highRiskDebtCount: number
+  missingEvidenceTypes: string[]
+  ownershipGapType: OwnershipGapType
+  latestActivityAt?: string
+}
+
+export type ProjectOwnershipView = {
+  ok: boolean
+  project: ProjectInfo
+  summary: ProjectSummary
+  modules: ModuleOwnershipView[]
+  decisions: Array<{
+    decisionId: string
+    workItemId?: string
+    title: string
+    importance: string
+    decisionMaker: string
+    isImportant: boolean
+    status: string
+    evidenceLevel: EvidenceLevel
+    evidenceLevelLabel: string
+  }>
+}
+
+export type AgentSessionView = {
+  id: string
+  source: string
+  title: string
+  implementationSummary?: string
+}
+
+export type ArtifactView = {
+  id: string
+  artifactType: string
+  path?: string
+  functionName?: string
+  commitSha?: string
+  prUrl?: string
+  diffSummary?: string
+}
+
+export type DecisionView = {
+  decisionId: string
+  title: string
+  decision: string
+  rationale?: string
+  decisionType: string
+  importance: string
+  decisionMaker: string
+  userParticipation: string
+  isImportant: boolean
+  status: string
+  evidenceLevel: EvidenceLevel
+  evidenceLevelLabel: string
+  linkedArtifacts: ArtifactView[]
+  linkedDebts: Array<{
+    id: string
+    gapText: string
+    status: string
+    riskType?: string
+  }>
+}
+
+export type UserEvidenceItem = {
+  id: string
+  description?: string
+  source?: string
+  sourceId?: string
+  evidenceLevel?: EvidenceLevel
+  evidenceLevelLabel?: string
+  trainingStage?: TrainingStage
+  hintDependency?: number
+  overallScore?: number
+  artifactType?: string
+  createdAt?: string
+}
+
+export type UserEvidenceGroup = {
+  independentExplanation: UserEvidenceItem[]
+  delayedRecall: UserEvidenceItem[]
+  errorDetection: UserEvidenceItem[]
+  misconceptionCheck: UserEvidenceItem[]
+  scenarioTransfer: UserEvidenceItem[]
+  realWorkModification: UserEvidenceItem[]
+  testPassed: UserEvidenceItem[]
+  manualReview: UserEvidenceItem[]
+}
+
+export type ModuleDetailView = {
+  workItemId: string
+  title: string
+  status: ModuleOwnershipStatus
+  statusLabel: string
+  riskLevel: RiskLevel
+  importantDecisionCount: number
+  highestEvidenceLevel: EvidenceLevel
+  highestEvidenceLevelLabel: string
+  relatedSessionCount: number
+  relatedArtifactCount: number
+  openDebtCount: number
+  highRiskDebtCount: number
+  missingEvidenceTypes: string[]
+  nextRecommendedStage?: TrainingStage
+  ownershipGapType: OwnershipGapType
+  latestActivityAt?: string
+  aiWork: {
+    agentSessions: AgentSessionView[]
+    decisions: DecisionView[]
+    artifacts: ArtifactView[]
+  }
+  userEvidence: UserEvidenceGroup
+  remainingDebts: {
+    openDebts: Array<{ id: string; gapText: string; status: string; riskType?: string }>
+    relapsedDebts: Array<{ id: string; gapText: string; riskType?: string }>
+    highRiskDebts: Array<{ id: string; gapText: string; status: string; riskType?: string }>
+  }
+}
+
+export type ModuleDetailResponse = {
+  ok: boolean
+  module: ModuleDetailView
+  recommendation: {
+    projectId: string
+    workItemId: string
+    decisionId?: string
+    artifactId?: string
+    ownershipGapType: OwnershipGapType
+    recommendedStage: TrainingStage
+    currentEvidenceLevel: EvidenceLevel
+    currentEvidenceLevelLabel: string
+    missingEvidenceTypes: string[]
+    description: string
+    createdAt: string
+  } | null
+}
+
+/** 列出当前用户的项目 */
+export async function listProjects(): Promise<ProjectInfo[]> {
+  const res = await apiFetch<{ ok: boolean; projects: ProjectInfo[] }>('/api/projects')
+  return res.projects
+}
+
+/** 获取项目详情 */
+export async function fetchProject(projectId: string): Promise<{
+  project: ProjectInfo
+  workItems: Array<{ id: string; projectId: string; title: string; description?: string; moduleType?: string }>
+}> {
+  const res = await apiFetch<{ ok: boolean; project: ProjectInfo; workItems: Array<{ id: string; projectId: string; title: string; description?: string; moduleType?: string }> }>(`/api/projects/${encodeURIComponent(projectId)}`)
+  return { project: res.project, workItems: res.workItems }
+}
+
+/** 获取项目所有权地图视图（摘要 + 模块列表 + 决策列表） */
+export async function fetchProjectOwnership(projectId: string): Promise<ProjectOwnershipView> {
+  return apiFetch<ProjectOwnershipView>(`/api/projects/${encodeURIComponent(projectId)}/ownership`)
+}
+
+/** 获取模块详情 */
+export async function fetchModuleDetail(projectId: string, moduleId: string): Promise<ModuleDetailResponse> {
+  return apiFetch<ModuleDetailResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/ownership/modules/${encodeURIComponent(moduleId)}`
+  )
+}
+
+/** 获取高风险模块列表 */
+export async function fetchHighRiskModules(projectId: string): Promise<ModuleOwnershipView[]> {
+  const res = await apiFetch<{ ok: boolean; highRiskModules: ModuleOwnershipView[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/ownership/high-risk`
+  )
+  return res.highRiskModules
+}
+
+/** 获取所有权快照历史 */
+export async function fetchOwnershipHistory(projectId: string): Promise<Array<{
+  id: string
+  projectId: string
+  summary: ProjectSummary
+  moduleSummary: Array<{
+    workItemId: string
+    title: string
+    status: ModuleOwnershipStatus
+    riskLevel: RiskLevel
+    importantDecisionCount: number
+    highestEvidenceLevel: EvidenceLevel
+  }>
+  calculationVersion: string
+  createdAt: string
+}>> {
+  const res = await apiFetch<{ ok: boolean; snapshots: Array<any> }>(
+    `/api/projects/${encodeURIComponent(projectId)}/ownership/history`
+  )
+  return res.snapshots
+}
+
+/** 触发重新计算并保存快照 */
+export async function recalculateOwnership(projectId: string): Promise<ProjectOwnershipView & { snapshotSaved: boolean }> {
+  return apiFetch<ProjectOwnershipView & { snapshotSaved: boolean }>(
+    `/api/projects/${encodeURIComponent(projectId)}/ownership/recalculate`,
+    { method: 'POST', body: JSON.stringify({}) }
+  )
+}

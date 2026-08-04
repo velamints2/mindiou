@@ -6,6 +6,7 @@
 import { checkAuthSession, getAccessToken, setAccessToken } from './api'
 import { renderHowItWorksPage, renderLandingPage } from './marketing'
 import { renderAppPage, renderDevicesPage, renderLoginPage, renderRegisterPage, renderReportPage, renderSessionPage, renderTimelinePage } from './pages'
+import { renderModuleDetailPage, renderOwnershipMapPage, renderProjectListPage } from './ownershipApp'
 import { clear, el, navigate, parseRoute, type Route } from './router'
 import { initTracker, trackRoute } from './tracker'
 
@@ -73,6 +74,18 @@ async function render(route: Route): Promise<void> {
     case 'app':
       renderAppPage(app)
       trackRoute('app')
+      return
+    case 'projects':
+      await renderProjectListPage(app)
+      trackRoute('projects')
+      return
+    case 'project-ownership':
+      await renderOwnershipMapPage(app, route.projectId)
+      trackRoute('project-ownership')
+      return
+    case 'project-ownership-module':
+      await renderModuleDetailPage(app, route.projectId, route.moduleId)
+      trackRoute('project-ownership-module')
       return
     case 'timeline':
       await renderTimelinePage(app, route.draftId)

@@ -50,6 +50,25 @@ import {
   generateRuleBasedReviewTask,
   createAttemptFromClearanceSession
 } from "./review-generator.js";
+import { createOwnershipStore } from "./project-ownership-store.js";
+import {
+  calculateDecisionOwnershipStatus,
+  aggregateModuleStatus,
+  calculateModuleRiskLevel,
+  calculateProjectSummary,
+  deriveEvidenceLevel,
+  determineMissingEvidenceTypes,
+  ownershipGapFromModuleStatus,
+  buildModuleDetailView,
+  isImportantAIDecision,
+  levelToString,
+  EVIDENCE_LEVEL,
+  MODULE_OWNERSHIP_STATUS,
+  DECISION_OWNERSHIP_STATUS,
+  OWNERSHIP_CALCULATION_VERSION,
+} from "./project-ownership.js";
+import { generateModuleRecommendation, generateProjectRecommendations } from "./learning-orchestrator.js";
+import { seedOwnershipData } from "./ownership-seed.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -100,6 +119,16 @@ await mvp1Store.load();
 const trainingStorePath = process.env.TRAINING_STORE_PATH || "tmp/training-store.json";
 const trainingStore = createTrainingStore(trainingStorePath);
 await trainingStore.load();
+const ownershipStorePath = process.env.OWNERSHIP_STORE_PATH || "tmp/ownership-store.json";
+const ownershipStore = createOwnershipStore(ownershipStorePath);
+await ownershipStore.load();
+
+// 初始化种子数据（幂等）
+try {
+  await seedOwnershipData(ownershipStore, trainingStore);
+} catch (seedError) {
+  console.warn(`Ownership seed failed (non-blocking): ${seedError.message}`);
+}
 const authStore = createAuthStore(authStorePath);
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: researchApiKey,
@@ -422,6 +451,142 @@ function loadOwnedMvp1Session(id, userId) {
     return null;
   }
 }
+
+/**
+ * 计算项目所有权视图（实时计算，非缓存）
+ *
+ * 读取项目所有数据 + trainingStore 中的认知欠条和训练记录，
+ * 构建决策视图和模块视图，返回摘要和模块列表。
+ */
+function computeProjectOwnershipView(ownershipStore, trainingStore, projectId, userId) {
+  const projectData = ownershipStore.getProjectData(projectId);
+  const allDebts = trainingStore.listCognitiveDebts(userId);
+  const allAttempts = trainingStore.listAttempts(userId);
+
+  // 为每个决策构建视图
+  const decisionViews = projectData.decisionRecords.map((decision) => {
+    const linkedDebtIds = projectData.decisionDebtLinks
+      .filter((l) => l.decisionId === decision.id)
+      .map((l) => l.cognitiveDebtId);
+    const linkedDebts = allDebts
+      .filter((d) => linkedDebtIds.includes(d.id))
+      .map((d) => {
+        const link = projectData.decisionDebtLinks.find(
+          (l) => l.decisionId === decision.id && l.cognitiveDebtId === d.id
+        );
+        return { ...d, riskType: link?.riskType };
+      });
+
+    const linkedArtifactIds = projectData.decisionArtifactLinks
+      .filter((l) => l.decisionId === decision.id)
+      .map((l) => l.artifactId);
+    const linkedArtifacts = projectData.artifacts.filter((a) => linkedArtifactIds.includes(a.id));
+
+    const decisionEvidence = projectData.evidenceRecords.filter(
+      (e) => e.decisionId === decision.id || (e.workItemId === decision.workItemId)
+    );
+
+    const decisionAttempts = allAttempts.filter(
+      (a) => linkedDebtIds.includes(a.cognitiveDebtId) || a.workItemId === decision.workItemId
+    );
+
+    const evidenceLevel = deriveEvidenceLevel({
+      evidenceRecords: decisionEvidence,
+      trainingAttempts: decisionAttempts,
+      artifacts: linkedArtifacts,
+    });
+
+    const status = calculateDecisionOwnershipStatus({
+      decision,
+      evidenceLevel,
+      linkedDebts,
+    });
+
+    return {
+      decisionId: decision.id,
+      workItemId: decision.workItemId,
+      title: decision.title,
+      importance: decision.importance,
+      decisionMaker: decision.decisionMaker,
+      isImportant: isImportantAIDecision(decision),
+      status,
+      evidenceLevel,
+      evidenceLevelLabel: levelToString(evidenceLevel),
+    };
+  });
+
+  // 为每个模块（WorkItem）构建视图
+  const moduleViews = projectData.workItems.map((workItem) => {
+    const moduleDecisionViews = decisionViews.filter((d) => d.workItemId === workItem.id);
+    const moduleStatus = aggregateModuleStatus(moduleDecisionViews);
+    const moduleRisk = calculateModuleRiskLevel(moduleDecisionViews, allDebts);
+    const maxLevel = moduleDecisionViews.reduce(
+      (max, d) => Math.max(max, d.evidenceLevel ?? EVIDENCE_LEVEL.E0),
+      EVIDENCE_LEVEL.E0
+    );
+    const missingTypes = determineMissingEvidenceTypes(maxLevel);
+    const ownershipGap = ownershipGapFromModuleStatus(moduleStatus);
+
+    // 模块关联数据计数
+    const moduleAgentSessions = projectData.agentSessions.filter((s) => s.workItemId === workItem.id);
+    const moduleArtifacts = projectData.artifacts.filter((a) => a.workItemId === workItem.id);
+    const moduleDebtIds = projectData.decisionDebtLinks
+      .filter((l) => {
+        const dec = projectData.decisionRecords.find((d) => d.id === l.decisionId);
+        return dec && dec.workItemId === workItem.id;
+      })
+      .map((l) => l.cognitiveDebtId);
+    const moduleDebts = allDebts.filter((d) => moduleDebtIds.includes(d.id));
+    const highRiskDebts = moduleDebts.filter((d) => {
+      const link = projectData.decisionDebtLinks.find(
+        (l) => l.cognitiveDebtId === d.id && moduleDebtIds.includes(l.cognitiveDebtId)
+      );
+      return link?.riskType;
+    });
+
+    // 最近活动
+    const timestamps = [
+      ...moduleAgentSessions.map((s) => s.importedAt),
+      ...moduleDecisionViews.map((d) => d.createdAt),
+      ...projectData.evidenceRecords.filter((e) => e.workItemId === workItem.id).map((e) => e.createdAt),
+    ].filter(Boolean);
+
+    return {
+      workItemId: workItem.id,
+      title: workItem.title,
+      status: moduleStatus,
+      statusLabel: MODULE_STATUS_LABELS_TEXT[moduleStatus] || moduleStatus,
+      riskLevel: moduleRisk,
+      importantDecisionCount: moduleDecisionViews.filter((d) => d.isImportant).length,
+      highestEvidenceLevel: maxLevel,
+      highestEvidenceLevelLabel: levelToString(maxLevel),
+      relatedSessionCount: moduleAgentSessions.length,
+      relatedArtifactCount: moduleArtifacts.length,
+      openDebtCount: moduleDebts.filter((d) => d.status !== "mastered" && d.status !== "ignored").length,
+      highRiskDebtCount: highRiskDebts.length,
+      missingEvidenceTypes: missingTypes,
+      ownershipGapType: ownershipGap,
+      latestActivityAt: timestamps.length > 0 ? timestamps.sort().reverse()[0] : undefined,
+    };
+  });
+
+  const summary = calculateProjectSummary({
+    projectId,
+    decisionViews,
+    moduleViews,
+  });
+
+  return { project: projectData.project, summary, modules: moduleViews, decisions: decisionViews };
+}
+
+const MODULE_STATUS_LABELS_TEXT = {
+  high_risk_unowned: "高风险无人负责",
+  needs_initial_understanding: "缺少初步理解",
+  needs_error_boundary_validation: "缺少错误与边界验证",
+  needs_transfer_validation: "缺少迁移验证",
+  needs_real_work_validation: "缺少独立修改证据",
+  owned: "已具备人类所有权",
+};
 
 function detectArtifactType(text) {
   const lower = text.toLowerCase();
@@ -2077,12 +2242,14 @@ const server = createServer(async (req, res) => {
       }
     } // close isDraftOrTimelineRoute
 
-    if (req.method !== "POST" && req.method !== "PATCH") {
+    // 所有权地图的 GET 路由需要绕过 405 门禁
+    const isOwnershipRoute = url.pathname.startsWith("/api/projects");
+    if (!isOwnershipRoute && req.method !== "POST" && req.method !== "PATCH") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
       return;
     }
 
-    const payload = parseJson(await readBody(req));
+    const payload = (req.method === "POST" || req.method === "PATCH") ? parseJson(await readBody(req)) : {};
 
     // ── Training system: review start and submit ──
     if (trainingReviewStartMatch && req.method === "POST") {
@@ -2358,6 +2525,171 @@ const server = createServer(async (req, res) => {
         source: payload.source || "g2"
       });
       jsonResponse(res, 200, { ok: true, ...result, today: spiralStore.dashboard() });
+      return;
+    }
+
+    // ── 项目认知所有权地图 ──
+
+    const ownershipMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership$/);
+    const ownershipModuleMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership\/modules\/([^/]+)$/);
+    const ownershipHighRiskMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership\/high-risk$/);
+    const ownershipHistoryMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership\/history$/);
+    const ownershipRecalculateMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership\/recalculate$/);
+    const projectDetailMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+
+    // GET /api/projects — 列出当前用户的项目
+    if (req.method === "GET" && url.pathname === "/api/projects") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projects = ownershipStore.listProjects(user.id);
+      jsonResponse(res, 200, { ok: true, projects });
+      return;
+    }
+
+    // GET /api/projects/:projectId — 项目详情
+    if (req.method === "GET" && projectDetailMatch && !ownershipMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(projectDetailMatch[1]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const workItems = ownershipStore.listWorkItems(projectId);
+      jsonResponse(res, 200, { ok: true, project, workItems });
+      return;
+    }
+
+    // GET /api/projects/:projectId/ownership — 所有权摘要 + 模块列表
+    if (req.method === "GET" && ownershipMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(ownershipMatch[1]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const view = computeProjectOwnershipView(ownershipStore, trainingStore, projectId, user.id);
+      jsonResponse(res, 200, { ok: true, ...view });
+      return;
+    }
+
+    // GET /api/projects/:projectId/ownership/modules/:workItemId — 模块详情
+    if (req.method === "GET" && ownershipModuleMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(ownershipModuleMatch[1]);
+      const workItemId = decodeURIComponent(ownershipModuleMatch[2]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const workItem = ownershipStore.getWorkItem(workItemId);
+      if (!workItem || workItem.projectId !== projectId) {
+        jsonResponse(res, 404, { ok: false, error: "Work item not found" });
+        return;
+      }
+      const projectData = ownershipStore.getProjectData(projectId);
+      const moduleAgentSessions = projectData.agentSessions.filter((s) => s.workItemId === workItemId);
+      const moduleArtifacts = projectData.artifacts.filter((a) => a.workItemId === workItemId);
+      const moduleEvidence = projectData.evidenceRecords.filter((e) => e.workItemId === workItemId);
+
+      // 从 trainingStore 获取关联认知欠条和训练记录
+      const allDebts = trainingStore.listCognitiveDebts(user.id);
+      const linkedDebtIds = projectData.decisionDebtLinks
+        .filter((l) => {
+          const decision = projectData.decisionRecords.find((d) => d.id === l.decisionId);
+          return decision && decision.workItemId === workItemId;
+        })
+        .map((l) => l.cognitiveDebtId);
+      const moduleDebts = allDebts.filter((d) => linkedDebtIds.includes(d.id));
+      const moduleAttempts = trainingStore.listAttempts(user.id)
+        .filter((a) => linkedDebtIds.includes(a.cognitiveDebtId) || a.workItemId === workItemId);
+
+      const detailView = buildModuleDetailView({
+        workItem,
+        agentSessions: moduleAgentSessions,
+        decisions: projectData.decisionRecords.filter((d) => d.workItemId === workItemId),
+        artifacts: moduleArtifacts,
+        evidenceRecords: moduleEvidence,
+        cognitiveDebts: moduleDebts,
+        decisionDebtLinks: projectData.decisionDebtLinks,
+        decisionArtifactLinks: projectData.decisionArtifactLinks,
+        trainingAttempts: moduleAttempts,
+      });
+
+      const recommendation = generateModuleRecommendation({
+        ...detailView,
+        projectId,
+      });
+
+      jsonResponse(res, 200, { ok: true, module: detailView, recommendation });
+      return;
+    }
+
+    // GET /api/projects/:projectId/ownership/high-risk — 高风险模块
+    if (req.method === "GET" && ownershipHighRiskMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(ownershipHighRiskMatch[1]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const view = computeProjectOwnershipView(ownershipStore, trainingStore, projectId, user.id);
+      const highRiskModules = view.modules.filter(
+        (m) => m.status === MODULE_OWNERSHIP_STATUS.high_risk_unowned
+      );
+      jsonResponse(res, 200, { ok: true, highRiskModules });
+      return;
+    }
+
+    // GET /api/projects/:projectId/ownership/history — 快照历史
+    if (req.method === "GET" && ownershipHistoryMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(ownershipHistoryMatch[1]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const snapshots = ownershipStore.listSnapshots(projectId);
+      jsonResponse(res, 200, { ok: true, snapshots });
+      return;
+    }
+
+    // POST /api/projects/:projectId/ownership/recalculate — 重新计算并保存快照
+    if (req.method === "POST" && ownershipRecalculateMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(ownershipRecalculateMatch[1]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const view = computeProjectOwnershipView(ownershipStore, trainingStore, projectId, user.id);
+      // 保存快照
+      const snapshot = {
+        projectId,
+        summary: view.summary,
+        moduleSummary: view.modules.map((m) => ({
+          workItemId: m.workItemId,
+          title: m.title,
+          status: m.status,
+          riskLevel: m.riskLevel,
+          importantDecisionCount: m.importantDecisionCount,
+          highestEvidenceLevel: m.highestEvidenceLevel,
+        })),
+      };
+      const { createOwnershipSnapshot } = await import("./project-ownership.js");
+      await ownershipStore.saveSnapshot(createOwnershipSnapshot(snapshot));
+      jsonResponse(res, 200, { ok: true, ...view, snapshotSaved: true });
       return;
     }
 

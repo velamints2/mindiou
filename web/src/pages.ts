@@ -298,6 +298,9 @@ export function renderAppPage(root: HTMLElement): void {
   const devicesBtn = el('button', 'btn btn-ghost btn-sm', '设备Token')
   devicesBtn.onclick = () => navigate({ name: 'devices' })
   headerActions.appendChild(devicesBtn)
+  const ownershipBtn = el('button', 'btn btn-ghost btn-sm', '项目所有权')
+  ownershipBtn.onclick = () => navigate({ name: 'projects' })
+  headerActions.appendChild(ownershipBtn)
   const logout = el('button', 'btn btn-ghost btn-sm', '退出登录')
   logout.onclick = async () => {
     await logoutAuth()
