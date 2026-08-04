@@ -170,18 +170,17 @@ describe("renderAppPage", () => {
 });
 
 describe("renderGenesisPage", () => {
-  it("renders the archive, honest metrics, program explanation, privacy status, and two CTAs", async () => {
+  it("renders the founder archive, honest metrics, member wall, and privacy status", async () => {
     const root = el("div");
     document.body.appendChild(root);
     await renderGenesisPage(root);
-    expect(root.textContent).toContain("连续 15 天");
     expect(root.textContent).toContain("已正式加入");
-    expect(root.textContent).toContain("预期完成者：约 87 人（预估）");
-    expect(root.textContent).toContain("这 15 天会发生什么");
-    expect(root.textContent).toContain("报名不等于获得身份");
+    expect(root.textContent).toContain("已完成首次清偿");
+    expect(root.textContent).toContain("首发体验者名录");
+    expect(root.textContent).toContain("当前已支持");
     expect(root.textContent).toContain("上线前需补齐");
-    expect(root.querySelectorAll('a[href="#/register"]').length).toBeGreaterThanOrEqual(2);
-    expect(root.querySelectorAll('a[href="#/assessment"]').length).toBeGreaterThanOrEqual(2);
+    expect(root.textContent).not.toContain("预期完成者");
+    expect(root.textContent).not.toContain("这 15 天会发生什么");
   });
 });
 
