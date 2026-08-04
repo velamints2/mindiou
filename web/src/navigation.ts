@@ -2,7 +2,7 @@ import { getAccessToken } from './api'
 import { t } from './i18n'
 import { el, navigate, type Route } from './router'
 
-const publicHeaderRoutes = new Set<Route['name']>(['landing', 'how-it-works'])
+const publicHeaderRoutes = new Set<Route['name']>(['landing', 'how-it-works', 'challenge'])
 
 export function renderPersistentNavigation(route: Route): void {
   document.querySelector('.persistent-site-navigation')?.remove()
@@ -47,6 +47,7 @@ export function renderSiteFooter(): HTMLElement {
     ['#/how-it-works', t('原理', 'How it works')],
     ['#/genesis', t('创始档案', 'Genesis archive')],
     ['#/assessment', t('认知债务测试', 'AI collaboration test')],
+    ['#/challenge/001', t('001 期挑战', 'Cohort 001 challenge')],
     ['#/app', getAccessToken() ? t('进入工作区', 'Open dashboard') : t('开始体验', 'Get started')]
   ].forEach(([href, label]) => {
     const link = el('a', 'footer-link', label) as HTMLAnchorElement
