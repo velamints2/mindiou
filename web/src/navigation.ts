@@ -46,6 +46,7 @@ export function renderSiteFooter(): HTMLElement {
     ['#/', t('首页', 'Home')],
     ['#/how-it-works', t('原理', 'How it works')],
     ['#/genesis', t('创始档案', 'Genesis archive')],
+    ['#/assessment', t('认知债务测试', 'AI collaboration test')],
     ['#/app', getAccessToken() ? t('进入工作区', 'Open dashboard') : t('开始体验', 'Get started')]
   ].forEach(([href, label]) => {
     const link = el('a', 'footer-link', label) as HTMLAnchorElement

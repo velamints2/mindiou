@@ -1542,6 +1542,55 @@ function recordEvent(payload) {
   return event;
 }
 
+function fallbackAssessmentReview(answers) {
+  const reviews = Object.entries(answers || {}).slice(0, 12).map(([questionId, raw]) => {
+    const answer = clean(raw).slice(0, 3000);
+    const substantive = answer.length >= 40;
+    const causal = /(因为|所以|导致|避免|恢复|关系|cause|because|so that|avoid|recover)/i.test(answer);
+    const risk = /(风险|验证|证据|来源|权限|隐私|样本|对照|risk|verify|evidence|source|privacy|sample|control)/i.test(answer);
+    const uncertainty = /(不确定|无法确认|需要核实|尚未|unknown|uncertain|cannot confirm|not yet)/i.test(answer);
+    const transfer = /(幂等|唯一约束|试点|灰度|原始来源|第三个因素|idempoten|unique constraint|pilot|staged|original source|third factor)/i.test(answer);
+    return {
+      questionId,
+      causal_explanation: causal ? (substantive ? 2 : 1) : 0,
+      independent_judgment: substantive ? 2 : 1,
+      risk_identification: risk ? 2 : 0,
+      uncertainty_awareness: uncertainty ? 2 : 0,
+      transfer: transfer ? 2 : 0,
+      evidence: answer.slice(0, 120),
+      reason: "Rule-based provisional review; model review was unavailable."
+    };
+  });
+  return { reviews };
+}
+
+async function reviewAssessmentAnswers(payload) {
+  const answers = payload?.answers && typeof payload.answers === "object" ? payload.answers : {};
+  const limited = Object.fromEntries(Object.entries(answers).slice(0, 12).map(([id, value]) => [clean(id).slice(0, 40), clean(value).slice(0, 3000)]).filter(([, value]) => value));
+  const fallback = () => fallbackAssessmentReview(limited);
+  const result = await chatJson([
+    { role: "system", content: [
+      "Evaluate constructed responses in MindIOU's AI collaboration behavior test.",
+      "Do not infer personality, occupation, intelligence, or long-term mastery.",
+      "Score only the evidence in each answer. Each field is an integer 0-3.",
+      "Quote a short exact excerpt from the answer in evidence.",
+      "Return JSON only: {reviews:[{questionId,causal_explanation,independent_judgment,risk_identification,uncertainty_awareness,transfer,evidence,reason}]}"
+    ].join("\n") },
+    { role: "user", content: JSON.stringify({ version: clean(payload?.version), role: clean(payload?.role), answers: limited }) }
+  ], fallback);
+  const reviews = Array.isArray(result?.reviews) ? result.reviews.slice(0, 12).map(item => ({
+    questionId: clean(item?.questionId).slice(0, 40),
+    causal_explanation: Math.max(0, Math.min(3, Number(item?.causal_explanation) || 0)),
+    independent_judgment: Math.max(0, Math.min(3, Number(item?.independent_judgment) || 0)),
+    risk_identification: Math.max(0, Math.min(3, Number(item?.risk_identification) || 0)),
+    uncertainty_awareness: Math.max(0, Math.min(3, Number(item?.uncertainty_awareness) || 0)),
+    transfer: Math.max(0, Math.min(3, Number(item?.transfer) || 0)),
+    evidence: clean(item?.evidence).slice(0, 160),
+    reason: clean(item?.reason).slice(0, 300)
+  })).filter(item => item.questionId) : fallback().reviews;
+  return { reviews, mode: result?.__fallback ? "rule_fallback" : "model_structured" };
+}
+
 const server = createServer(async (req, res) => {
   try {
     if (req.method === "OPTIONS") {
@@ -1562,6 +1611,17 @@ const server = createServer(async (req, res) => {
         cognitiveRepaymentV1: cognitiveRepaymentV1,
         ...(live ? { providerStatus: await checkAiConnectivity() } : {})
       });
+      return;
+    }
+
+    if (url.pathname === "/api/assessment/review" && req.method === "POST") {
+      try {
+        const payload = parseJson(await readBody(req));
+        const result = await reviewAssessmentAnswers(payload);
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        jsonResponse(res, 400, { ok: false, error: clean(error?.message || "Assessment review failed") });
+      }
       return;
     }
 

@@ -8,6 +8,7 @@ export type Route =
   | { name: 'login' }                // 产品区：登录
   | { name: 'register' }             // 公开：注册
   | { name: 'genesis' }              // 公开：001 期永久档案
+  | { name: 'assessment' }           // 公开：AI 协作类型测试
   | { name: 'app' }                  // 产品区：输入材料（三段式·第一段）
   | { name: 'timeline'; draftId: string }  // 产品区：时间线与困惑标注（三段式·第二段）
   | { name: 'report'; reportId: string }
@@ -22,7 +23,7 @@ export type Route =
 
 // 判断是否为公开路由（无需登录）
 export function isPublicRoute(route: Route): boolean {
-  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register' || route.name === 'genesis'
+  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register' || route.name === 'genesis' || route.name === 'assessment'
 }
 
 export function parseRoute(): Route {
@@ -40,6 +41,8 @@ export function parseRoute(): Route {
       return { name: 'register' }
     case 'genesis':
       return { name: 'genesis' }
+    case 'assessment':
+      return { name: 'assessment' }
     case 'app':
     case 'home':   // 兼容旧路径
       return { name: 'app' }
@@ -72,6 +75,7 @@ export function navigate(route: Route): void {
     case 'login': path = '/login'; break
     case 'register': path = '/register'; break
     case 'genesis': path = '/genesis'; break
+    case 'assessment': path = '/assessment'; break
     case 'app': path = '/app'; break
     case 'timeline': path = `/timeline/${encodeURIComponent(route.draftId)}`; break
     case 'devices': path = '/devices'; break

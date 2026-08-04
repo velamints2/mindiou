@@ -466,6 +466,20 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
     'Paste a ChatGPT/Claude conversation, AI-generated plan, hackathon log, or meeting notes…'
   )
   form.appendChild(textarea)
+  const assessmentMaterial = sessionStorage.getItem('mindiou_assessment_activation')
+  if (assessmentMaterial) {
+    try {
+      const activation = JSON.parse(assessmentMaterial) as { material?: string; selectedText?: string; understanding?: string }
+      textarea.value = activation.material || ''
+      if (activation.selectedText || activation.understanding) {
+        textarea.dataset.assessmentSelectedText = activation.selectedText || ''
+        textarea.dataset.assessmentUnderstanding = activation.understanding || ''
+      }
+    } catch {
+      textarea.value = assessmentMaterial
+    }
+    sessionStorage.removeItem('mindiou_assessment_activation')
+  }
 
   // 字数计数
   const counter = el('p', 'input-counter', '0 / 30,000')
@@ -513,6 +527,7 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
     }
     submit.disabled = textarea.value.trim().length < 10 || len > 30000
   }
+  if (assessmentMaterial) textarea.dispatchEvent(new Event('input'))
 
   const rejectFiles = (event: DragEvent | ClipboardEvent) => {
     const files = event instanceof DragEvent ? event.dataTransfer?.files : event.clipboardData?.files
@@ -1073,7 +1088,7 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
   )))
   const heroActions = el('div', 'genesis-actions')
   const join = el('a', 'btn btn-primary', t('加入 001 期挑战', 'Join Cohort 001')) as HTMLAnchorElement; join.href = '#/register'
-  const test = el('a', 'btn btn-secondary', t('先测测我的认知债务', 'Take the 3-minute debt scan')) as HTMLAnchorElement; test.href = '#/app'
+  const test = el('a', 'btn btn-secondary', t('先测测我的认知债务', 'Take the AI collaboration test')) as HTMLAnchorElement; test.href = '#/assessment'
   heroActions.append(join, test); page.appendChild(heroActions)
   page.appendChild(el('p', 'genesis-action-note', t(
     '首期限量 300 人。完成首次真实认知欠条分析后，才视为正式加入。',
@@ -1230,7 +1245,7 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
     finalCta.appendChild(el('p', '', t('加入 MindIOU 001 期，用 15 天建立一套更专业、更可控的 AI 协作方法，并成为这款产品第一段历史的一部分。', 'Join MindIOU Cohort 001, build a more professional and controllable AI collaboration method in 15 days, and become part of the product’s first chapter.')))
     const finalActions = el('div', 'genesis-actions')
     const finalJoin = el('a', 'btn btn-primary', ctaLabel) as HTMLAnchorElement; finalJoin.href = ctaHref
-    const finalTest = el('a', 'btn btn-secondary', t('先完成认知债务测试', 'Take the cognitive-debt scan first')) as HTMLAnchorElement; finalTest.href = '#/app'
+    const finalTest = el('a', 'btn btn-secondary', t('先完成认知债务测试', 'Take the AI collaboration test first')) as HTMLAnchorElement; finalTest.href = '#/assessment'
     finalActions.append(finalJoin, finalTest); finalCta.appendChild(finalActions)
     finalCta.appendChild(el('small', '', t('报名不等于获得身份。完成真实训练和结业审核后，才会获得 Genesis 001 首发体验者编号。', 'Registration does not grant the identity. A Genesis 001 number is earned only after real training and completion review.')))
     page.appendChild(finalCta)

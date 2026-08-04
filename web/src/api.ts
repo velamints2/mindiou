@@ -515,6 +515,21 @@ export async function fetchGenesisIdentity(): Promise<ApiResult<{ identity: Gene
   return apiFetch<ApiResult<{ identity: GenesisIdentity | null }>>('/api/genesis/identity')
 }
 
+export type AssessmentOpenReview = {
+  questionId: string
+  causal_explanation: number
+  independent_judgment: number
+  risk_identification: number
+  uncertainty_awareness: number
+  transfer: number
+  evidence: string
+  reason: string
+}
+
+export async function reviewAssessment(payload: { version: string; role: string; answers: Record<string,string> }): Promise<ApiResult<{ reviews: AssessmentOpenReview[]; mode: 'model_structured'|'rule_fallback' }>> {
+  return apiFetch('/api/assessment/review', { method: 'POST', body: JSON.stringify(payload) })
+}
+
 export async function updateGenesisIdentity(payload: {
   visibility: GenesisIdentity['visibility']; displayName?: string; avatarUrl?: string
 }): Promise<ApiResult<{ identity: GenesisIdentity }>> {

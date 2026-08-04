@@ -27,6 +27,11 @@ describe("parseRoute", () => {
     expect(parseRoute()).toEqual({ name: "genesis" });
   });
 
+  it("parses the public assessment", () => {
+    location.hash = "#/assessment";
+    expect(parseRoute()).toEqual({ name: "assessment" });
+  });
+
   it("parses login route", () => {
     location.hash = "#/login";
     expect(parseRoute().name).toBe("login");
@@ -80,6 +85,7 @@ describe("isPublicRoute", () => {
     expect(isPublicRoute({ name: "landing" })).toBe(true);
     expect(isPublicRoute({ name: "how-it-works" })).toBe(true);
     expect(isPublicRoute({ name: "genesis" })).toBe(true);
+    expect(isPublicRoute({ name: "assessment" })).toBe(true);
   });
 
   it("product routes are not public", () => {
@@ -109,6 +115,11 @@ describe("navigate", () => {
   it("sets hash for genesis", () => {
     navigate({ name: "genesis" });
     expect(location.hash).toBe("#/genesis");
+  });
+
+  it("sets hash for assessment", () => {
+    navigate({ name: "assessment" });
+    expect(location.hash).toBe("#/assessment");
   });
 
   it("sets hash with encoded param", () => {

@@ -23,6 +23,7 @@ import { clear, el, navigate, parseRoute, type Route } from './router'
 import { initTracker, trackRoute } from './tracker'
 import { getLocale, observeTranslations, setLocale } from './i18n'
 import { renderPersistentNavigation } from './navigation'
+import { renderAssessmentPage } from './assessment'
 
 const app = document.getElementById('app') as HTMLElement
 observeTranslations(app)
@@ -78,6 +79,11 @@ async function render(route: Route): Promise<void> {
   if (route.name === 'genesis') {
     await renderGenesisPage(app)
     trackRoute('genesis')
+    return
+  }
+  if (route.name === 'assessment') {
+    renderAssessmentPage(app)
+    trackRoute('assessment')
     return
   }
 

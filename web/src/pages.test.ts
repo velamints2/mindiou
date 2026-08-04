@@ -181,7 +181,7 @@ describe("renderGenesisPage", () => {
     expect(root.textContent).toContain("报名不等于获得身份");
     expect(root.textContent).toContain("上线前需补齐");
     expect(root.querySelectorAll('a[href="#/register"]').length).toBeGreaterThanOrEqual(2);
-    expect(root.querySelectorAll('a[href="#/app"]').length).toBeGreaterThanOrEqual(2);
+    expect(root.querySelectorAll('a[href="#/assessment"]').length).toBeGreaterThanOrEqual(2);
   });
 });
 

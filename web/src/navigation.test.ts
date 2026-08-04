@@ -37,6 +37,7 @@ describe('persistent site navigation', () => {
     expect(footer.querySelector('a[href="#/"]')).not.toBeNull()
     expect(footer.querySelector('a[href="#/how-it-works"]')).not.toBeNull()
     expect(footer.querySelector('a[href="#/genesis"]')).not.toBeNull()
+    expect(footer.querySelector('a[href="#/assessment"]')).not.toBeNull()
     expect(footer.querySelector('a[href="#/app"]')?.textContent).toContain('进入工作区')
   })
 })

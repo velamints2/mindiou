@@ -56,6 +56,23 @@ afterAll(async () => {
 });
 
 describe("early-access authentication", () => {
+  it("reviews public assessment answers with a transparent structured fallback", async () => {
+    const response = await fetch(`${BASE}/api/assessment/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        version: "MIOU-ACT-V1.0",
+        role: "developer",
+        answers: { "core-7": "等待给系统恢复时间，随机等待避免所有请求同时冲击。" }
+      })
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.mode).toBe("rule_fallback");
+    expect(payload.reviews[0]).toMatchObject({ questionId: "core-7" });
+    expect(payload.reviews[0].causal_explanation).toBeGreaterThan(0);
+  });
+
   it("keeps health public while protecting product APIs", async () => {
     expect((await fetch(`${BASE}/health`)).status).toBe(200);
     expect((await fetch(`${BASE}/api/access/session`)).status).toBe(401);
