@@ -432,17 +432,21 @@ function renderWeeklyProgress(progress: ProgressSection, section: HTMLElement): 
   }
 }
 
-// ─── 下周重点 ───
+// ─── 下周重点 / 下月重点 ───
 
-function renderNextFocus(focus: NextFocusSection, section: HTMLElement): void {
-  section.appendChild(el('h2', '', '下周重点'))
+function renderNextFocus(focus: NextFocusSection, section: HTMLElement, reportType: 'weekly' | 'monthly'): void {
+  const isMonthly = reportType === 'monthly'
+  const focusTitle = isMonthly ? '下月重点' : '下周重点'
+  const insufficientText = isMonthly ? '下月重点数据不足，完成更多训练后会出现。' : '下周重点数据不足，完成更多训练后会出现。'
+  section.appendChild(el('h2', '', focusTitle))
   if (focus.insufficientData || !focus.theme) {
-    section.appendChild(insufficientNote('下周重点数据不足，完成更多训练后会出现。'))
+    section.appendChild(insufficientNote(insufficientText))
     return
   }
   const card = el('div', 'report-focus-card')
   card.appendChild(el('div', 'report-focus-theme', focus.theme.displayName))
-  if (focus.reason) card.appendChild(el('p', 'profile-insight-desc', focus.reason))
+  const focusReason = focus.reason ? (isMonthly ? focus.reason.replace(/本周/g, '本月') : focus.reason) : null
+  if (focusReason) card.appendChild(el('p', 'profile-insight-desc', focusReason))
   const list = el('div', 'task-list')
   for (const task of focus.tasks) {
     const item = el('div', 'task-item')
@@ -564,7 +568,7 @@ function renderMonthly(report: CognitiveReport, root: HTMLElement): void {
   root.appendChild(progressSection)
 
   const focusSection = el('section', 'profile-section')
-  renderNextFocus(report.nextFocusJson, focusSection)
+  renderNextFocus(report.nextFocusJson, focusSection, report.reportType)
   root.appendChild(focusSection)
 }
 
@@ -588,7 +592,7 @@ function renderWeekly(report: CognitiveReport, root: HTMLElement): void {
   root.appendChild(progressSection)
 
   const focusSection = el('section', 'profile-section')
-  renderNextFocus(report.nextFocusJson, focusSection)
+  renderNextFocus(report.nextFocusJson, focusSection, report.reportType)
   root.appendChild(focusSection)
 }
 
