@@ -23,6 +23,12 @@ import {
   ensureLearnerFacingLanguage
 } from "./mvp1-demo-fallback.js";
 import { createTrainingStore } from "./training-store.js";
+import { createDebtIntelligenceStore } from "./debt-intelligence-store.js";
+import {
+  classifyAndSave,
+  applyUserCorrection,
+  backfillDebtIntelligence
+} from "./debt-intelligence.js";
 import {
   createCognitiveDebt,
   updateMasteryProfile,
@@ -108,6 +114,10 @@ await mvp1Store.load();
 const trainingStorePath = process.env.TRAINING_STORE_PATH || "tmp/training-store.json";
 const trainingStore = createTrainingStore(trainingStorePath);
 await trainingStore.load();
+const debtIntelligenceDisabled = process.env.DEBT_INTELLIGENCE_DISABLED === "1";
+const debtIntelligenceStorePath = process.env.DEBT_INTELLIGENCE_STORE_PATH || "tmp/debt-intelligence-store.json";
+const debtIntelligenceStore = createDebtIntelligenceStore(debtIntelligenceStorePath);
+await debtIntelligenceStore.load();
 const authStore = createAuthStore(authStorePath);
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: researchApiKey,
@@ -699,6 +709,74 @@ async function chatJson(messages, fallback, maxTokens = 4096) {
   if (!response.ok) throw new Error(payload.error?.message || `OpenAI HTTP ${response.status}`);
   const content = payload.choices?.[0]?.message?.content || "{}";
   return parseJsonObject(content);
+}
+
+// ── 认知欠条智能分类（Phase 1）：异步触发，绝不阻塞主流程 ──
+
+function buildDebtReportContext(debt, reportId) {
+  const rid = reportId || debt.reportId
+    || (Array.isArray(debt.sourceReports) ? debt.sourceReports[debt.sourceReports.length - 1] : null);
+  if (!rid) return null;
+  try {
+    const report = mvp0Store.getReport(rid, debt.userId);
+    if (!report) return null;
+    const gaps = Array.isArray(report.sections?.dangerousGaps) ? report.sections.dangerousGaps : [];
+    const gapText = clean(debt.gapText || "").toLowerCase();
+    const gap = gaps.find(item => clean(item?.gap || "").toLowerCase() === gapText) || gaps[0] || null;
+    const cards = Array.isArray(report.sections?.feynmanCards) ? report.sections.feynmanCards : [];
+    const card = cards.find(item => item?.id && item.id === debt.cardId) || null;
+    return {
+      artifactType: clean(report.input?.artifactType || report.analysis?.artifactKind || ""),
+      reportGap: gap ? {
+        title: clean(gap.title || "").slice(0, 200),
+        gap: clean(gap.gap || "").slice(0, 500),
+        underlyingCapability: clean(gap.underlyingCapability || "").slice(0, 200),
+        evidence: clean(gap.evidence || "").slice(0, 500)
+      } : null,
+      reportCard: card ? {
+        target: clean(card.target || "").slice(0, 200),
+        prompt: clean(card.prompt || "").slice(0, 300)
+      } : null
+    };
+  } catch {
+    return null;
+  }
+}
+
+function scheduleDebtIntelligence(debt, { reportId, trigger = "auto" } = {}) {
+  if (debtIntelligenceDisabled || !debt?.id) return;
+  setImmediate(() => {
+    (async () => {
+      if (!aiApiKey || disableAi) {
+        const now = new Date().toISOString();
+        await debtIntelligenceStore.saveAnalysisRun({
+          id: crypto.randomUUID(),
+          cognitiveDebtId: debt.id,
+          userId: debt.userId || "demo-user",
+          trigger,
+          status: "skipped",
+          attemptCount: 0,
+          errorMessage: disableAi ? "SPIRAL_DISABLE_AI=1" : "AI_API_KEY is not set",
+          startedAt: now,
+          finishedAt: now
+        });
+        return;
+      }
+      const result = await classifyAndSave({
+        store: debtIntelligenceStore,
+        debt,
+        reportContext: buildDebtReportContext(debt, reportId),
+        chatFn: chatJson,
+        modelName: chatModel,
+        trigger
+      });
+      if (!result.ok && !result.skipped) {
+        console.warn(`Debt intelligence classification failed for ${debt.id}: ${result.error}`);
+      }
+    })().catch(error => {
+      console.warn(`Debt intelligence task failed for ${debt.id}: ${error.message}`);
+    });
+  });
 }
 
 async function analyzeClearanceAnswer(input) {
@@ -1655,6 +1733,8 @@ const server = createServer(async (req, res) => {
     const mvp0CardAnswerMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)\/cards\/([^/]+)\/answer$/);
     const mvp0CorrectionMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)\/corrections$/);
     const trainingDebtMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)$/);
+    const trainingDebtIntelligenceMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/intelligence$/);
+    const trainingDebtReanalyzeMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/intelligence\/reanalyze$/);
     const trainingReviewStartMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/start$/);
     const trainingReviewSubmitMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/submit$/);
     const isWebMvpRoute =
@@ -1825,6 +1905,8 @@ const server = createServer(async (req, res) => {
             userId: user.id
           });
           await trainingStore.saveReviewTask(reviewTask);
+          // 异步触发智能分类，不阻塞会话结束响应
+          scheduleDebtIntelligence(debt, { reportId: session.reportId });
         } catch (trainingError) {
           console.warn(`Training system integration failed for session ${session.id}: ${trainingError.message}`);
         }
@@ -1911,6 +1993,8 @@ const server = createServer(async (req, res) => {
                 gapEvidence: String(gap.evidence || "").slice(0, 1000)
               });
               await trainingStore.saveCognitiveDebt(newDebt);
+              // 异步触发智能分类，不阻塞报告响应
+              scheduleDebtIntelligence(newDebt, { reportId: saved.id });
             }
           }
         } catch (debtError) {
@@ -2161,6 +2245,25 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── 认知欠条智能分类：查询当前生效版本 ──
+    if (req.method === "GET" && trainingDebtIntelligenceMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtIntelligenceMatch[1]);
+      try {
+        trainingStore.getCognitiveDebt(debtId, userId);
+        const analysis = debtIntelligenceStore.getCurrentAnalysis(debtId);
+        jsonResponse(res, 200, {
+          ok: true,
+          analysis,
+          versionCount: debtIntelligenceStore.countAnalyses(debtId)
+        });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
     const mvp0DraftMatch = url.pathname.match(/^\/api\/mvp0\/drafts\/([^/]+)$/);
     const isDraftOrTimelineRoute =
       url.pathname === "/api/mvp0/drafts" ||
@@ -2191,6 +2294,89 @@ const server = createServer(async (req, res) => {
     }
 
     const payload = parseJson(await readBody(req));
+
+    // ── 认知欠条智能分类：回填 / 重新分类 / 人工纠正 ──
+
+    if (req.method === "POST" && url.pathname === "/api/training/intelligence/backfill") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      if (debtIntelligenceDisabled) {
+        jsonResponse(res, 503, { ok: false, error: "Debt intelligence is disabled (DEBT_INTELLIGENCE_DISABLED=1)" });
+        return;
+      }
+      if (!aiApiKey || disableAi) {
+        jsonResponse(res, 503, { ok: false, error: "Debt intelligence requires an active AI configuration" });
+        return;
+      }
+      const debts = trainingStore.listCognitiveDebts(user.id);
+      const result = await backfillDebtIntelligence({
+        store: debtIntelligenceStore,
+        debts,
+        chatFn: chatJson,
+        modelName: chatModel,
+        batchSize: payload.batchSize,
+        offset: payload.offset ?? payload.cursor,
+        reportContextFor: debt => buildDebtReportContext(debt)
+      });
+      jsonResponse(res, 200, { ok: true, ...result });
+      return;
+    }
+
+    if (req.method === "POST" && trainingDebtReanalyzeMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtReanalyzeMatch[1]);
+      let debt;
+      try {
+        debt = trainingStore.getCognitiveDebt(debtId, userId);
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+        return;
+      }
+      const current = debtIntelligenceStore.getCurrentAnalysis(debtId);
+      if (current?.isUserCorrected) {
+        jsonResponse(res, 409, {
+          ok: false,
+          error: "该欠条分类已被人工纠正，自动重新分类已锁定；如需更新请直接修改纠正内容"
+        });
+        return;
+      }
+      if (debtIntelligenceDisabled) {
+        jsonResponse(res, 503, { ok: false, error: "Debt intelligence is disabled (DEBT_INTELLIGENCE_DISABLED=1)" });
+        return;
+      }
+      if (!aiApiKey || disableAi) {
+        jsonResponse(res, 503, { ok: false, error: "Debt intelligence requires an active AI configuration" });
+        return;
+      }
+      scheduleDebtIntelligence(debt, { trigger: "reanalyze" });
+      jsonResponse(res, 202, { ok: true, scheduled: true });
+      return;
+    }
+
+    if (req.method === "PATCH" && trainingDebtIntelligenceMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtIntelligenceMatch[1]);
+      try {
+        const debt = trainingStore.getCognitiveDebt(debtId, userId);
+        const analysis = await applyUserCorrection({
+          store: debtIntelligenceStore,
+          debt,
+          patch: payload,
+          modelName: chatModel
+        });
+        jsonResponse(res, 200, {
+          ok: true,
+          analysis,
+          versionCount: debtIntelligenceStore.countAnalyses(debtId)
+        });
+      } catch (error) {
+        const status = /not found/i.test(String(error.message)) ? 404 : 400;
+        jsonResponse(res, status, { ok: false, error: error.message });
+      }
+      return;
+    }
 
     // ── Training system: review start and submit ──
     if (trainingReviewStartMatch && req.method === "POST") {

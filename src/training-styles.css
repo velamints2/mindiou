@@ -219,6 +219,36 @@ body {
 .debt-mastery { font-size: 13px; color: var(--color-primary); }
 .debt-recurrence { font-size: 12px; color: var(--color-danger); }
 
+/* Debt intelligence (智能分类) */
+.intelligence-panel {
+  background: white;
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  margin-bottom: var(--spacing);
+}
+.intelligence-panel h2 { font-size: 16px; margin-bottom: 12px; }
+.intel-grid { display: flex; flex-direction: column; gap: 8px; }
+.intel-row { display: flex; gap: 8px; align-items: baseline; }
+.intel-label { width: 80px; font-size: 13px; color: var(--color-text-light); flex-shrink: 0; }
+.intel-value { font-size: 14px; color: var(--color-text); }
+.intel-empty { font-size: 13px; color: var(--color-text-light); }
+.intel-meta { font-size: 12px; color: var(--color-text-light); margin-top: 12px; }
+.intel-form { margin-top: 12px; border-top: 1px solid var(--color-border); padding-top: 12px; }
+.intel-form-label { font-size: 13px; color: var(--color-text-light); margin: 10px 0 6px; }
+.intel-select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  background: white;
+}
+.intel-risk-options { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.intel-risk-option { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.intel-form-error { font-size: 13px; color: var(--color-danger); margin: 8px 0; min-height: 1em; }
+.intel-form .btn { margin-top: 4px; }
+
 @media (max-width: 640px) {
   #app { padding: 12px; }
   .training-nav { padding: 8px 12px; overflow-x: auto; }

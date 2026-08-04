@@ -89,6 +89,44 @@ interface ReviewSubmitResponse {
   nextReviewAt: string
 }
 
+interface DebtIntelligenceAnalysisDTO {
+  id: string
+  cognitiveDebtId: string
+  domainPath: string[]
+  primaryGapMechanism: string
+  secondaryGapMechanisms: string[]
+  taskStage: string
+  rootCauses: string[]
+  riskTypes: string[]
+  transferValue: number
+  concepts: Array<{ key: string; displayName: string }>
+  prerequisiteConcepts: Array<{ key: string; displayName: string }>
+  classificationConfidence: number
+  evidence: Array<{ note: string; source: string }>
+  isUserCorrected: boolean
+  version: number
+  updatedAt: string
+}
+
+interface DebtIntelligenceResponse {
+  ok: boolean
+  analysis: DebtIntelligenceAnalysisDTO | null
+  versionCount: number
+}
+
+const GAP_MECHANISM_OPTIONS = [
+  'concept_gap', 'mechanism_gap', 'rationale_gap', 'prerequisite_gap',
+  'verification_gap', 'boundary_gap', 'tradeoff_gap', 'dependency_gap',
+  'transfer_gap', 'implementation_gap', 'decision_gap', 'terminology_gap',
+  'process_gap'
+]
+
+const RISK_TYPE_OPTIONS = [
+  'no_material_risk', 'quality_risk', 'security_risk', 'privacy_risk',
+  'financial_risk', 'compliance_risk', 'reliability_risk', 'decision_risk',
+  'maintainability_risk', 'communication_risk'
+]
+
 const API_BASE = typeof location !== 'undefined'
   ? (location.pathname.startsWith('/mindiou/') ? '/mindiou-api' : (new URLSearchParams(location.search).get('api') || ''))
   : ''
@@ -192,6 +230,94 @@ function understandingLabel(level: string): string {
     stable_mastery: '已形成稳定掌握'
   }
   return labels[level] || '正在补偿'
+}
+
+function domainRootLabel(root: string): string {
+  const labels: Record<string, string> = {
+    software_engineering: '软件工程',
+    product_management: '产品管理',
+    business_strategy: '商业战略',
+    marketing: '市场营销',
+    hardware_engineering: '硬件工程',
+    electronics: '电子',
+    mechanical_design: '机械设计',
+    artificial_intelligence: '人工智能',
+    data_analysis: '数据分析',
+    academic_research: '学术研究',
+    communication: '沟通表达',
+    project_management: '项目管理',
+    finance: '金融财务',
+    legal: '法律合规'
+  }
+  return labels[root] || root
+}
+
+function gapMechanismLabel(mechanism: string): string {
+  const labels: Record<string, string> = {
+    concept_gap: '概念缺口',
+    mechanism_gap: '机制缺口',
+    rationale_gap: '原理缺口',
+    prerequisite_gap: '前置知识缺口',
+    verification_gap: '验证缺口',
+    boundary_gap: '边界条件缺口',
+    tradeoff_gap: '权衡缺口',
+    dependency_gap: '依赖关系缺口',
+    transfer_gap: '迁移缺口',
+    implementation_gap: '实现细节缺口',
+    decision_gap: '决策依据缺口',
+    terminology_gap: '术语缺口',
+    process_gap: '流程缺口'
+  }
+  return labels[mechanism] || mechanism
+}
+
+function intelTaskStageLabel(stage: string): string {
+  const labels: Record<string, string> = {
+    problem_definition: '问题定义',
+    information_collection: '信息收集',
+    planning: '规划',
+    solution_selection: '方案选择',
+    execution: '执行',
+    debugging: '调试排错',
+    evaluation: '评估',
+    decision_making: '决策',
+    communication: '沟通',
+    reflection: '复盘'
+  }
+  return labels[stage] || stage
+}
+
+function rootCauseLabel(cause: string): string {
+  const labels: Record<string, string> = {
+    missing_prerequisite: '缺少前置知识',
+    accepted_ai_output_directly: '直接接受了 AI 输出',
+    time_pressure: '时间压力',
+    tool_opacity: '工具黑盒',
+    insufficient_domain_experience: '领域经验不足',
+    skipped_validation: '跳过了验证',
+    unclear_goal: '目标不清',
+    over_complexity: '复杂度过高',
+    fragmented_knowledge: '知识碎片化',
+    false_familiarity: '似懂非懂',
+    unknown: '原因未知'
+  }
+  return labels[cause] || cause
+}
+
+function riskTypeLabel(risk: string): string {
+  const labels: Record<string, string> = {
+    no_material_risk: '无实质风险',
+    quality_risk: '质量风险',
+    security_risk: '安全风险',
+    privacy_risk: '隐私风险',
+    financial_risk: '财务风险',
+    compliance_risk: '合规风险',
+    reliability_risk: '可靠性风险',
+    decision_risk: '决策风险',
+    maintainability_risk: '可维护性风险',
+    communication_risk: '沟通风险'
+  }
+  return labels[risk] || risk
 }
 
 function estimatedMinutes(taskType: string): number {
@@ -424,6 +550,9 @@ export async function renderDebtDetail(container: HTMLElement, debtId: string): 
       container.appendChild(evBox)
     }
 
+    // 智能分类独立加载，失败不影响详情页其余区块
+    renderIntelligencePanel(container, debtId)
+
     if (data.attempts.length > 0 || data.reviews.length > 0) {
       const timeline = el('div', 'timeline-panel')
       timeline.appendChild(el('h2', undefined, '训练历史'))
@@ -472,6 +601,136 @@ export async function renderDebtDetail(container: HTMLElement, debtId: string): 
     retryBtn.onclick = () => renderDebtDetail(container, debtId)
     errBox.appendChild(retryBtn)
     container.appendChild(errBox)
+  }
+}
+
+async function renderIntelligencePanel(container: HTMLElement, debtId: string): Promise<void> {
+  const panel = el('div', 'intelligence-panel')
+  panel.appendChild(el('h2', undefined, '智能分类'))
+  container.appendChild(panel)
+
+  let data: DebtIntelligenceResponse
+  try {
+    const res = await apiFetch(`/api/training/debts/${encodeURIComponent(debtId)}/intelligence`)
+    if (!res.ok) throw await readError(res)
+    data = await res.json()
+  } catch {
+    panel.appendChild(el('p', 'intel-empty', '分类进行中或暂不可用'))
+    return
+  }
+  const analysis = data.analysis
+  if (!analysis) {
+    panel.appendChild(el('p', 'intel-empty', '分类进行中或暂不可用'))
+    return
+  }
+
+  const grid = el('div', 'intel-grid')
+  const addRow = (label: string, value: string) => {
+    const row = el('div', 'intel-row')
+    row.appendChild(el('span', 'intel-label', label))
+    row.appendChild(el('span', 'intel-value', value))
+    grid.appendChild(row)
+  }
+  addRow('知识领域', analysis.domainPath.map((seg, i) => i === 0 ? domainRootLabel(seg) : seg).join(' / '))
+  addRow('欠条机制', [analysis.primaryGapMechanism, ...analysis.secondaryGapMechanisms].map(gapMechanismLabel).join('、'))
+  addRow('任务阶段', intelTaskStageLabel(analysis.taskStage))
+  addRow('根因', analysis.rootCauses.map(rootCauseLabel).join('、'))
+  addRow('风险', analysis.riskTypes.map(riskTypeLabel).join('、'))
+  addRow('迁移价值', `${analysis.transferValue} / 5`)
+  if (analysis.concepts.length > 0) {
+    addRow('关键概念', analysis.concepts.map(c => c.displayName).join('、'))
+  }
+  if (analysis.prerequisiteConcepts.length > 0) {
+    addRow('前置概念', analysis.prerequisiteConcepts.map(c => c.displayName).join('、'))
+  }
+  addRow('置信度', `${Math.round(analysis.classificationConfidence * 100)}%`)
+  panel.appendChild(grid)
+  panel.appendChild(el('p', 'intel-meta',
+    `版本 v${analysis.version}${data.versionCount > 1 ? `（共 ${data.versionCount} 个版本）` : ''} · ${analysis.isUserCorrected ? '经人工纠正' : 'AI 自动生成'} · 更新于 ${formatDate(analysis.updatedAt)}`))
+
+  renderCorrectionForm(panel, container, debtId, analysis)
+}
+
+function renderCorrectionForm(
+  panel: HTMLElement,
+  container: HTMLElement,
+  debtId: string,
+  analysis: DebtIntelligenceAnalysisDTO
+): void {
+  const toggleBtn = el('button', 'btn btn-small btn-secondary', '纠正分类')
+  panel.appendChild(toggleBtn)
+  const form = el('div', 'intel-form')
+  form.style.display = 'none'
+  panel.appendChild(form)
+  toggleBtn.onclick = () => {
+    form.style.display = form.style.display === 'none' ? 'block' : 'none'
+  }
+
+  const mechLabel = el('p', 'intel-form-label', '欠条机制')
+  const mechSelect = el('select', 'intel-select') as HTMLSelectElement
+  for (const option of GAP_MECHANISM_OPTIONS) {
+    const opt = el('option', undefined, gapMechanismLabel(option)) as HTMLOptionElement
+    opt.value = option
+    if (option === analysis.primaryGapMechanism) opt.selected = true
+    mechSelect.appendChild(opt)
+  }
+  form.appendChild(mechLabel)
+  form.appendChild(mechSelect)
+
+  form.appendChild(el('p', 'intel-form-label', '风险（可多选）'))
+  const riskBoxes: HTMLInputElement[] = []
+  const riskWrap = el('div', 'intel-risk-options')
+  for (const option of RISK_TYPE_OPTIONS) {
+    const item = el('label', 'intel-risk-option')
+    const checkbox = el('input') as HTMLInputElement
+    checkbox.type = 'checkbox'
+    checkbox.value = option
+    checkbox.checked = analysis.riskTypes.includes(option)
+    item.appendChild(checkbox)
+    item.appendChild(el('span', undefined, riskTypeLabel(option)))
+    riskWrap.appendChild(item)
+    riskBoxes.push(checkbox)
+  }
+  form.appendChild(riskWrap)
+
+  form.appendChild(el('p', 'intel-form-label', '迁移价值（1 = 仅当前任务，5 = 可广泛迁移）'))
+  const transferSelect = el('select', 'intel-select') as HTMLSelectElement
+  for (let value = 1; value <= 5; value++) {
+    const opt = el('option', undefined, String(value)) as HTMLOptionElement
+    opt.value = String(value)
+    if (value === analysis.transferValue) opt.selected = true
+    transferSelect.appendChild(opt)
+  }
+  form.appendChild(transferSelect)
+
+  const formError = el('p', 'intel-form-error')
+  form.appendChild(formError)
+  const submitBtn = el('button', 'btn btn-primary btn-small', '保存纠正')
+  form.appendChild(submitBtn)
+
+  submitBtn.onclick = async () => {
+    const riskTypes = riskBoxes.filter(box => box.checked).map(box => box.value)
+    if (riskTypes.length === 0) {
+      formError.textContent = '请至少选择一种风险（无实质风险时选“无实质风险”）'
+      return
+    }
+    submitBtn.disabled = true
+    formError.textContent = ''
+    try {
+      const res = await apiFetch(`/api/training/debts/${encodeURIComponent(debtId)}/intelligence`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          primaryGapMechanism: mechSelect.value,
+          riskTypes,
+          transferValue: Number(transferSelect.value)
+        })
+      })
+      if (!res.ok) throw await readError(res)
+      await renderDebtDetail(container, debtId)
+    } catch (error) {
+      submitBtn.disabled = false
+      formError.textContent = `保存失败：${(error as Error).message}`
+    }
   }
 }
 
