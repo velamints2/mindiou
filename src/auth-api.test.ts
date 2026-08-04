@@ -431,6 +431,14 @@ describe("MVP-0/MVP-1 route protection and isolation", () => {
     const session = (await createSession.json()).session;
     expect(session.userId).toBe(alice.data.user.id);
 
+    const dashboardResponse = await fetch(`${BASE}/api/dashboard`, { headers: { cookie: alice.cookie } });
+    expect(dashboardResponse.status).toBe(200);
+    const dashboard = (await dashboardResponse.json()).dashboard;
+    expect(dashboard.latestSession.id).toBe(session.id);
+    expect(dashboard.latestSession.reportDisplay.title).toBe(report.display.title);
+    expect(dashboard.latestSession.cardTitle).toBeTruthy();
+    expect(dashboard.latestSession.lastActivityAt).toBeTruthy();
+
     const bobCreate = await fetch(`${BASE}/api/mvp1/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie: bob.cookie },

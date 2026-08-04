@@ -11,6 +11,7 @@ export type EvidenceItem = {
 
 export type DangerousGap = {
   rank: number
+  title?: string
   gap: string
   whyDangerous: string
   evidence: string
@@ -61,6 +62,7 @@ export type ClearanceReport = {
   id: string
   locale?: 'zh-CN' | 'en'
   createdAt: string
+  display?: { title: string; domain: string }
   input: {
     artifactText: string
     artifactType: string
@@ -68,6 +70,7 @@ export type ClearanceReport = {
     confusions?: { stepId: string; text: string }[]
   }
   analysis?: {
+    artifactTitle?: string
     artifactKind: string
     userCapability: UserCapability
   }
@@ -195,6 +198,7 @@ export type ClearanceSession = {
   reportId: string
   cardId: string
   createdAt: string
+  updatedAt?: string
   endedAt: string | null
   state: 'awaiting_answer' | 'teaching' | 'ready_to_end' | 'ended'
   originalCard: {

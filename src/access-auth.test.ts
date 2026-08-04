@@ -1,9 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
+import { mkdir, rm } from "node:fs/promises";
+import path from "node:path";
 
 const TEST_PORT = 8811;
 const BASE = `http://127.0.0.1:${TEST_PORT}`;
 let serverProcess: ChildProcess | null = null;
+const TEST_DB = path.resolve("tmp/access-auth-test.sqlite");
+
+async function removeTestDb(): Promise<void> {
+  await rm(TEST_DB, { force: true });
+  await rm(`${TEST_DB}-wal`, { force: true });
+  await rm(`${TEST_DB}-shm`, { force: true });
+}
 
 async function waitForServer(maxAttempts = 30): Promise<void> {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -18,11 +27,14 @@ async function waitForServer(maxAttempts = 30): Promise<void> {
 }
 
 beforeAll(async () => {
+  await mkdir(path.dirname(TEST_DB), { recursive: true });
+  await removeTestDb();
   serverProcess = spawn("node", ["server.js"], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       PORT: String(TEST_PORT),
+      DATA_DB_PATH: TEST_DB,
       SPIRAL_DISABLE_AI: "1",
       LEARNING_API_TOKEN: "device-token",
       MINDIOU_EARLY_ACCESS_CODES: "alice:invite-alice,bob:invite-bob",
@@ -40,6 +52,7 @@ afterAll(async () => {
     serverProcess?.kill("SIGTERM");
     await new Promise(resolve => setTimeout(resolve, 150));
   }
+  await removeTestDb();
 });
 
 describe("early-access authentication", () => {

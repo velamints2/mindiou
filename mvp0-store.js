@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createSqliteStateNamespace } from "./sqlite-state-store.js";
+import { deriveReportDisplay } from "./report-display.js";
 
 function emptyState() {
   return {
@@ -171,6 +172,7 @@ export function createMvp0Store(dbPath, options = {}) {
       corrections: Array.isArray(report.corrections) ? report.corrections : [],
       status: clean(report.status || "generated").slice(0, 20)
     };
+    record.display = deriveReportDisplay({ ...record, display: report.display });
     const existingIndex = state.clearanceReports.findIndex(item => item.id === id);
     if (existingIndex >= 0) {
       state.clearanceReports[existingIndex] = record;

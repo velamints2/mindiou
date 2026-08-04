@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createMvp1Store } from "../mvp1-store.js";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -38,6 +38,7 @@ describe("MVP-1 store", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     try {
       await rm(storePath, { force: true });
       await rm(`${storePath}.tmp`, { force: true });
@@ -79,11 +80,15 @@ describe("MVP-1 store", () => {
   });
 
   describe("listSessions", () => {
-    it("returns sessions sorted by createdAt descending", async () => {
+    it("returns sessions sorted by last activity descending", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-27T00:00:00.000Z"));
       await store.saveSession(makeSession({ id: "old", createdAt: "2026-07-20T00:00:00.000Z" }));
+      vi.setSystemTime(new Date("2026-07-27T00:01:00.000Z"));
       await store.saveSession(makeSession({ id: "new", createdAt: "2026-07-26T00:00:00.000Z" }));
+      vi.setSystemTime(new Date("2026-07-27T00:02:00.000Z"));
       await store.saveSession(makeSession({ id: "mid", createdAt: "2026-07-23T00:00:00.000Z" }));
-      expect(store.listSessions().map(item => item.id)).toEqual(["new", "mid", "old"]);
+      expect(store.listSessions().map(item => item.id)).toEqual(["mid", "new", "old"]);
     });
   });
 

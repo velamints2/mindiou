@@ -139,11 +139,19 @@ describe("renderAppPage", () => {
         latestReport: {
           id: "r-3",
           createdAt: "2026-08-03T00:00:00.000Z",
+          display: { title: "Nginx 磁盘 I/O 故障排查", domain: "系统运维" },
           analysis: { artifactKind: "API incident review" },
-          sections: { dangerousGaps: [], feynmanCards: [] }
+          sections: { dangerousGaps: [{ title: "解释 iowait 与磁盘饱和的关系", gap: "能力缺口" }], feynmanCards: [] }
         },
         outstandingDebts: [{ reportId: "r-3", cardId: "c-1", title: "Explain the retry strategy", status: "outstanding" }],
-        latestSession: { id: "s-1", reportId: "r-3", cardId: "c-1", state: "awaiting_answer", endedAt: null },
+        latestSession: {
+          id: "s-1", reportId: "r-3", cardId: "c-1", state: "awaiting_answer", endedAt: null,
+          createdAt: "2026-08-03T01:00:00.000Z", lastActivityAt: "2026-08-03T02:00:00.000Z",
+          reportDisplay: { title: "Nginx 磁盘 I/O 故障排查", domain: "系统运维" },
+          cardTitle: "解释重试策略的取舍",
+          originalCard: { id: "c-1", target: "解释重试策略的取舍", prompt: "为什么这样重试" },
+          clearanceQuestion: "为什么这样重试", attempts: [], finalResult: null
+        },
         continuable: { sessionId: "s-1", reportId: "r-3", cardId: "c-1", title: "Explain the retry strategy", state: "awaiting_answer" }
       }
     } as never);
@@ -151,7 +159,12 @@ describe("renderAppPage", () => {
     await renderAppPage(root);
 
     expect(root.querySelector(".dashboard-metric-value")?.textContent).toBe("3");
-    expect(root.textContent).toContain("API incident review");
+    expect(root.textContent).toContain("Nginx 磁盘 I/O 故障排查");
+    expect(root.textContent).toContain("系统运维");
+    expect(root.textContent).toContain("主要欠条: 解释 iowait 与磁盘饱和的关系");
+    expect(root.textContent).toContain("最近一次清偿");
+    expect(root.textContent).toContain("解释重试策略的取舍");
+    expect(root.textContent).toContain("继续清偿");
     expect(root.textContent).toContain("Explain the retry strategy");
   });
 });

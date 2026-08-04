@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { createSpiralStore } from "./spiral-store.js";
 import { createMvp0Store } from "./mvp0-store.js";
 import { createMvp1Store } from "./mvp1-store.js";
+import { deriveReportDisplay, sessionLastActivityAt } from "./report-display.js";
 import { createAuthStore } from "./auth-store.js";
 import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport } from "./mvp0-report.js";
@@ -1773,6 +1774,10 @@ const server = createServer(async (req, res) => {
         const sessions = mvp1Store.listSessions(user.id);
         const latestReport = reports[0] || null;
         const latestSession = sessions[0] || null;
+        const latestSessionReport = latestSession
+          ? reports.find(report => report.id === latestSession.reportId) || null
+          : null;
+        const latestSessionCard = latestSessionReport?.sections?.feynmanCards?.find(card => card.id === latestSession.cardId) || null;
         const outstandingDebts = reports.flatMap(report =>
           (report.sections?.feynmanCards || [])
             .filter(card => !["provisionally_cleared"].includes(card.clearance?.status))
@@ -1792,9 +1797,14 @@ const server = createServer(async (req, res) => {
           ok: true,
           dashboard: {
             reportCount: reports.length,
-            latestReport,
+            latestReport: latestReport ? { ...latestReport, display: deriveReportDisplay(latestReport) } : null,
             outstandingDebts,
-            latestSession: latestSession ? publicSession(latestSession, { revealScaffold: latestSession.attempts?.length > 0 }) : null,
+            latestSession: latestSession ? {
+              ...publicSession(latestSession, { revealScaffold: latestSession.attempts?.length > 0 }),
+              reportDisplay: latestSessionReport ? deriveReportDisplay(latestSessionReport) : null,
+              cardTitle: latestSessionCard?.target || latestSession.originalCard?.target || latestSession.clearanceQuestion || "Cognitive debt",
+              lastActivityAt: sessionLastActivityAt(latestSession)
+            } : null,
             continuable: activeSession ? {
               sessionId: activeSession.id,
               reportId: activeSession.reportId,

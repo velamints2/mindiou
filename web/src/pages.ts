@@ -369,9 +369,12 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
     const latestReport = el('article', 'dashboard-card')
     latestReport.appendChild(el('p', 'dashboard-card-label', t('最近一份报告', 'Latest report')))
     if (data.latestReport) {
-      const reportTitle = data.latestReport.sections.dangerousGaps?.[0]?.gap || data.latestReport.analysis?.artifactKind || t('认知债务报告', 'Cognitive debt report')
+      const reportTitle = data.latestReport.display?.title || data.latestReport.analysis?.artifactTitle || t('认知债务报告', 'Cognitive debt report')
       latestReport.appendChild(el('h3', 'dashboard-card-title', reportTitle))
-      latestReport.appendChild(el('p', 'dashboard-card-meta', new Date(data.latestReport.createdAt).toLocaleString(isEnglish() ? 'en' : 'zh-CN')))
+      if (data.latestReport.display?.domain) latestReport.appendChild(el('p', 'dashboard-card-domain', data.latestReport.display.domain))
+      const reportGap = data.latestReport.sections.dangerousGaps?.[0]?.title || data.latestReport.sections.dangerousGaps?.[0]?.gap
+      if (reportGap) latestReport.appendChild(el('p', 'dashboard-card-summary', `${t('主要欠条', 'Key debt')}: ${reportGap}`))
+      latestReport.appendChild(el('p', 'dashboard-card-meta', `${t('生成于', 'Created')} ${new Date(data.latestReport.createdAt).toLocaleString(isEnglish() ? 'en' : 'zh-CN')}`))
       const view = el('button', 'btn btn-ghost btn-sm', t('查看报告', 'View report'))
       view.onclick = () => navigate({ name: 'report', reportId: data.latestReport!.id })
       latestReport.appendChild(view)
@@ -379,10 +382,16 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
     grid.appendChild(latestReport)
 
     const latestSession = el('article', 'dashboard-card')
-    latestSession.appendChild(el('p', 'dashboard-card-label', t('最近一次会话', 'Latest session')))
+    latestSession.appendChild(el('p', 'dashboard-card-label', t('最近一次清偿', 'Latest repayment')))
     if (data.latestSession) {
-      latestSession.appendChild(el('h3', 'dashboard-card-title', data.latestSession.clearanceQuestion || t('认知清偿', 'Cognitive repayment')))
+      if (data.latestSession.reportDisplay?.title) latestSession.appendChild(el('p', 'dashboard-card-parent', `${t('所属报告', 'From report')}: ${data.latestSession.reportDisplay.title}`))
+      latestSession.appendChild(el('h3', 'dashboard-card-title', data.latestSession.cardTitle || data.latestSession.originalCard?.target || data.latestSession.clearanceQuestion || t('认知清偿', 'Cognitive repayment')))
       latestSession.appendChild(el('span', 'dashboard-status', data.latestSession.state === 'ended' ? t('已结束', 'Completed') : t('进行中', 'In progress')))
+      const activityAt = data.latestSession.lastActivityAt || data.latestSession.updatedAt || data.latestSession.endedAt || data.latestSession.createdAt
+      latestSession.appendChild(el('p', 'dashboard-card-meta', `${t('最后活动', 'Last activity')} ${new Date(activityAt).toLocaleString(isEnglish() ? 'en' : 'zh-CN')}`))
+      const sessionAction = el('button', 'btn btn-ghost btn-sm', data.latestSession.state === 'ended' ? t('查看会话记录', 'View session') : t('继续清偿', 'Continue repayment'))
+      sessionAction.onclick = () => navigate({ name: 'session', sessionId: data.latestSession!.id })
+      latestSession.appendChild(sessionAction)
     } else latestSession.appendChild(el('p', 'dashboard-empty', t('暂无清偿会话', 'No clearance sessions yet')))
     grid.appendChild(latestSession)
     dashboardBody.appendChild(grid)

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { deriveReportDisplay } from "./report-display.js";
 
 /**
  * MVP-0 fallback report generator and normalization.
@@ -416,6 +417,7 @@ export function normalizeReport(raw) {
       if (rawDims[dim] !== undefined) mappedDims[dim] = rawDims[dim];
     }
     return {
+      artifactTitle: truncate(rawAnalysis.artifactTitle, 120),
       artifactKind: validKinds.includes(rawAnalysis.artifactKind) ? rawAnalysis.artifactKind : "unknown",
       userCapability: {
         overall: validLevels.includes(rawCap.overall) ? rawCap.overall : "mixed",
@@ -471,6 +473,7 @@ export function normalizeReport(raw) {
 
   const normalized = {
     id: clean(raw.id || uuid()).slice(0, 100),
+    locale: raw.locale === "en" ? "en" : "zh-CN",
     createdAt: raw.createdAt || now,
     input: {
       artifactText: truncate(raw.input?.artifactText, MAX_TEXT),
@@ -506,6 +509,8 @@ export function normalizeReport(raw) {
       : [],
     status: VALID_STATUSES.includes(raw.status) ? raw.status : "generated"
   };
+
+  normalized.display = deriveReportDisplay({ ...normalized, display: raw.display });
 
   return normalized;
 }

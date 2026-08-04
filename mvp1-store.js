@@ -1,4 +1,5 @@
 import { createSqliteStateNamespace } from "./sqlite-state-store.js";
+import { sessionLastActivityAt } from "./report-display.js";
 
 function emptyState() {
   return {
@@ -52,7 +53,8 @@ export function createMvp1Store(dbPath, options = {}) {
     const record = {
       ...session,
       id,
-      userId: clean(session.userId || "demo-user").slice(0, 100)
+      userId: clean(session.userId || "demo-user").slice(0, 100),
+      updatedAt: new Date().toISOString()
     };
     const existingIndex = state.clearanceSessions.findIndex(item => item.id === id);
     if (existingIndex >= 0) {
@@ -79,7 +81,7 @@ export function createMvp1Store(dbPath, options = {}) {
       ? state.clearanceSessions
       : state.clearanceSessions.filter(item => item.userId === userId);
     return [...sessions]
-      .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      .sort((a, b) => sessionLastActivityAt(b).localeCompare(sessionLastActivityAt(a)));
   }
 
   function getState() {

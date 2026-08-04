@@ -1,4 +1,5 @@
 import { normalizeReport, generateFallbackReport } from "./mvp0-fallback.js";
+import { deriveReportDisplay } from "./report-display.js";
 import { prepareArtifactForReport } from "./mvp0-artifact-preprocess.js";
 
 /**
@@ -104,7 +105,8 @@ const stepASystemPrompt = [
   "L0 不了解对象；L1 只提宏观目标、全部委托；L2 能跟随步骤；L3 能在指导下实现；L4 能独立实现与调试；L5 能做架构取舍与评审。",
   "",
   "返回 JSON：",
-  '{"artifactKind":"ai_workflow_transcript|ai_chat|ai_coding_log|ai_generated_document|meeting_notes|unknown",',
+  '{"artifactTitle":"用具体任务或主题概括材料，12-40字，不写用户能力评价",',
+  '"artifactKind":"ai_workflow_transcript|ai_chat|ai_coding_log|ai_generated_document|meeting_notes|unknown",',
   '"aiCompleted":[{"item":"","evidence":"","isInference":false}],',
   '"userContributed":[{"item":"","evidence":"","isInference":false}],',
   '"cognitiveProcessesOutsourced":[{"process":"","surfaceTask":"","whyItMatters":"","evidence":"","isInference":true}],',
@@ -374,6 +376,7 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
   function fallbackReport(error, failedStep) {
     const report = generateFallbackReport(text, type);
     report.locale = options.locale === "en" ? "en" : "zh-CN";
+    report.display = deriveReportDisplay({ ...report, display: null });
     report.input.preprocess = preprocess;
     report.input.confusions = confusions;
     return withGenerationStatus(report, true, error, failedStep);
@@ -443,7 +446,9 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
     }));
 
     const report = normalizeReport({
+      locale: options.locale === "en" ? "en" : "zh-CN",
       analysis: {
+        artifactTitle: stepA.artifactTitle,
         artifactKind: stepA.artifactKind,
         userCapability: stepA.userCapability
       },

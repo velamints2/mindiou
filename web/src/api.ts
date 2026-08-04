@@ -495,7 +495,11 @@ export type DashboardSummary = {
     status: string
     locale?: string
   }>
-  latestSession: ClearanceSession | null
+  latestSession: (ClearanceSession & {
+    reportDisplay?: { title: string; domain: string } | null
+    cardTitle?: string
+    lastActivityAt?: string
+  }) | null
   continuable: { sessionId: string; reportId: string; cardId: string; title: string } | null
 }
 
