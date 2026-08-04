@@ -78,6 +78,12 @@ import {
   acceptRecommendation,
   skipRecommendation
 } from "./learning-orchestrator.js";
+import { createCognitiveReportsStore } from "./cognitive-reports-store.js";
+import {
+  getLatestWeeklyReport,
+  getLatestMonthlyReport,
+  generateWeeklyReport
+} from "./cognitive-reports.js";
 import { reportEnvValidation } from "./env-validation.js";
 import { handleAdminRoute } from "./web/admin-backend-patch.js";
 
@@ -149,6 +155,9 @@ await cognitiveProfileStore.load();
 const learningOrchestratorStorePath = process.env.LEARNING_ORCHESTRATOR_STORE_PATH || "tmp/learning-orchestrator-store.json";
 const learningOrchestratorStore = createLearningOrchestratorStore(learningOrchestratorStorePath);
 await learningOrchestratorStore.load();
+const cognitiveReportsStorePath = process.env.COGNITIVE_REPORTS_STORE_PATH || "tmp/cognitive-reports-store.json";
+const cognitiveReportsStore = createCognitiveReportsStore(cognitiveReportsStorePath);
+await cognitiveReportsStore.load();
 const authStore = createAuthStore(authStorePath);
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: researchApiKey,
@@ -2638,6 +2647,78 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── 周期性认知报告（Phase 5）：周报 / 月报（GET，必须在方法闸门之前） ──
+    // 读时生成、同周期幂等；历史报告只增不改。
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-reports/weekly/latest") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const result = await getLatestWeeklyReport(userId, {
+          store: cognitiveReportsStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          profileStore: cognitiveProfileStore,
+          graphStore: conceptGraphStore,
+          orchestratorStore: learningOrchestratorStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        logEvent("error", "cognitive_reports_weekly_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "认知周报生成失败，请稍后重试" });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-reports/monthly/latest") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const result = await getLatestMonthlyReport(userId, {
+          store: cognitiveReportsStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          profileStore: cognitiveProfileStore,
+          graphStore: conceptGraphStore,
+          orchestratorStore: learningOrchestratorStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        logEvent("error", "cognitive_reports_monthly_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "认知月报生成失败，请稍后重试" });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-reports/history") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const reportType = clean(url.searchParams.get("type") || "");
+      if (!["weekly", "monthly"].includes(reportType)) {
+        jsonResponse(res, 400, { ok: false, error: "type must be weekly or monthly" });
+        return;
+      }
+      // 注意：缺省参数时 Number(null) === 0，会把默认 limit 压成 1，必须先判空
+      const limitParam = url.searchParams.get("limit");
+      const rawLimit = limitParam === null || limitParam === "" ? NaN : Number(limitParam);
+      const limit = Number.isFinite(rawLimit) ? Math.min(52, Math.max(1, Math.round(rawLimit))) : 12;
+      const offsetParam = url.searchParams.get("offset");
+      const rawOffset = offsetParam === null || offsetParam === "" ? NaN : Number(offsetParam);
+      const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.round(rawOffset)) : 0;
+      const all = cognitiveReportsStore.listReports(userId, { reportType });
+      jsonResponse(res, 200, {
+        ok: true,
+        reportType,
+        total: all.length,
+        limit,
+        offset,
+        reports: all.slice(offset, offset + limit)
+      });
+      return;
+    }
+
     if (req.method !== "POST" && req.method !== "PATCH") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed", requestId });
       return;
@@ -2709,6 +2790,29 @@ const server = createServer(async (req, res) => {
         insightCount: insightResult.insights.length,
         aiEnhanced: insightResult.aiEnhanced
       });
+      return;
+    }
+
+    // ── 周期性认知报告（Phase 5）：手动生成本周期周报（幂等重算替换） ──
+
+    if (req.method === "POST" && url.pathname === "/api/cognitive-reports/weekly/generate") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const report = await generateWeeklyReport(user.id, {
+          store: cognitiveReportsStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          profileStore: cognitiveProfileStore,
+          graphStore: conceptGraphStore,
+          orchestratorStore: learningOrchestratorStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, report });
+      } catch (error) {
+        logEvent("error", "cognitive_reports_weekly_generate_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "认知周报生成失败，请稍后重试" });
+      }
       return;
     }
 
