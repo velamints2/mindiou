@@ -14,11 +14,13 @@ describe('001 期挑战活动 Landing 页', () => {
     expect(root.querySelector('.site-footer')).not.toBeNull()
   })
 
-  it('exposes the free assessment entry and mascot placeholder', () => {
+  it('exposes the free assessment entry and mascot image', () => {
     const root = document.createElement('div')
     renderChallengePage(root)
     expect(root.querySelector('.challenge-header-link[href="#/assessment"]')).not.toBeNull()
-    expect(root.querySelector('.challenge-mascot-placeholder')).not.toBeNull()
+    const mascot = root.querySelector('img.challenge-mascot') as HTMLImageElement
+    expect(mascot).not.toBeNull()
+    expect(mascot.getAttribute('src')).toBe('assets/challenge/cloud-mascot-hero.jpg')
   })
 
   it('renders purchase link with configured Afdian URL', () => {

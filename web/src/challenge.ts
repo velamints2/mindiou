@@ -73,10 +73,14 @@ function renderHero(page: HTMLElement): void {
   hero.appendChild(copy)
 
   const visual = el('figure', 'challenge-hero-visual')
-  const placeholder = el('div', 'challenge-mascot-placeholder')
-  placeholder.appendChild(el('p', 'challenge-mascot-placeholder-label', label('黑云 IP 形象', 'MindIOU mascot')))
-  placeholder.appendChild(el('p', 'challenge-mascot-placeholder-hint', label('请替换为一张 1024×1024 的插画：黑云在纸上写认知欠条', 'Replace with a 1024×1024 illustration: the cloud writing a cognitive-debt note on paper')))
-  visual.appendChild(placeholder)
+  const img = el('img', 'challenge-mascot') as HTMLImageElement
+  img.src = 'assets/challenge/cloud-mascot-hero.jpg'
+  img.alt = label('黑云正在纸上写下一张认知欠条', 'The MindIOU cloud writing a cognitive-debt note on paper')
+  img.width = 1024
+  img.height = 1024
+  img.loading = 'lazy'
+  visual.appendChild(img)
+  visual.appendChild(el('figcaption', 'challenge-mascot-caption', label('AI 可以替你完成工作，但理解不能永远外包。', 'AI can do the work for you, but understanding cannot be outsourced forever.')))
   hero.appendChild(visual)
   page.appendChild(hero)
 }

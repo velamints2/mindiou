@@ -6541,33 +6541,21 @@ body.has-persistent-navigation #app {
   text-align: center;
 }
 
-.page-challenge .challenge-mascot-placeholder {
+.page-challenge .challenge-mascot {
   width: min(100%, 420px);
-  min-height: 340px;
-  border: 2.5px dashed var(--pencil-line);
+  height: auto;
+  border: 2px solid var(--pencil-line);
   border-radius: 22px 26px 20px 28px / 26px 20px 28px 22px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 2.5rem 1.5rem;
-  margin: 0 auto;
-  text-align: center;
+  box-shadow: 4px 5px 0 var(--pencil-line);
+  transform: rotate(1.1deg);
+  background: var(--paper-deep);
 }
 
-.page-challenge .challenge-mascot-placeholder-label {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--ink-soft);
-  margin: 0;
-}
-
-.page-challenge .challenge-mascot-placeholder-hint {
+.page-challenge .challenge-mascot-caption {
+  margin-top: 0.9rem;
   font-size: 0.85rem;
-  color: var(--pencil);
-  margin: 0;
-  line-height: 1.6;
+  color: var(--ink-soft);
+  font-style: italic;
 }
 
 .page-challenge .challenge-section {
@@ -7000,7 +6988,7 @@ body.has-persistent-navigation #app {
 
 @media (prefers-reduced-motion: reduce) {
   .page-challenge .challenge-btn,
-  .page-challenge .challenge-mascot-placeholder {
+  .page-challenge .challenge-mascot {
     transition: none;
     transform: none;
   }
