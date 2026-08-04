@@ -28,7 +28,9 @@ function renderInput(q:AssessmentQuestion,state:State,onChange:()=>void,onRerend
   if(q.context) box.appendChild(el('blockquote','assessment-context',label(q.context,q.contextEn||q.context)))
   if(q.type==='text') {
     const input=el('textarea','assessment-text') as HTMLTextAreaElement; input.maxLength=3000; input.placeholder=label(q.placeholder||'',q.placeholderEn||''); input.value=String(state.answers[q.id]||'')
-    input.oninput=()=>{state.answers[q.id]=input.value;save(state);onChange()}; box.appendChild(input); return box
+    input.oninput=()=>{state.answers[q.id]=input.value;save(state);onChange()}; box.appendChild(input)
+    if(q.id==='core-8') {const confidenceKey='core-8-confidence';const value=typeof state.answers[confidenceKey]==='number'?Number(state.answers[confidenceKey]):50;state.answers[confidenceKey]=value;const caption=el('label','assessment-confidence-label',label('你对这次修改的把握有多大？','How confident are you in this rewrite?'));const output=el('strong','assessment-confidence-value',String(value));const range=el('input','assessment-range') as HTMLInputElement;range.type='range';range.min='0';range.max='100';range.value=String(value);range.oninput=()=>{state.answers[confidenceKey]=Number(range.value);output.textContent=range.value;save(state)};caption.append(output,range);box.appendChild(caption)}
+    return box
   }
   if(q.type==='confidence') {
     const value=typeof state.answers[q.id]==='number'?Number(state.answers[q.id]):50; state.answers[q.id]=value

@@ -78,6 +78,9 @@ export function scoreAssessment(role: AssessmentRole, questions: AssessmentQuest
   const q8 = answers['core-8']
   const edit = hits(q8,[/试点|灰度|小范围|pilot|staged|limited rollout/,/观察|指标|monitor|metric/,/尚未|无法保证|cannot guarantee|not yet/,/风险|risk/,/测试范围|tested scope/])
   d.ownership += edit*7; d.alertness += edit*5
+  const editConfidence = Number(answers['core-8-confidence']) || 0
+  const editPerformance = Math.min(100, edit * 20)
+  d.calibration -= Math.abs(editConfidence-editPerformance)*0.18
 
   const moduleText = questions.slice(8).map(q=>txt(answers[q.id])).join(' ')
   const riskSignals = hits(moduleText,[/样本|sample/,/对照|control/,/权限|authoriz/,/隐私|privacy/,/原始来源|doi|source/,/幂等|idempoten/,/唯一约束|unique/,/人工|human/,/审核|review/,/风险|risk/])

@@ -32,6 +32,7 @@ describe('AI collaboration assessment V1', () => {
       'core-6': 85,
       'core-7': '等待给系统恢复时间，随机变化避免所有请求同时再次冲击。',
       'core-8': '当前只验证了有限范围，建议灰度上线并观察数据丢失指标后再扩大。',
+      'core-8-confidence': 80,
       'dev-1': ['input','auth','fields','errors'],
       'dev-2': ['logs','locate','concurrency','test','fix','rewrite'],
       'dev-3': '先确认根因、幂等键或唯一约束是否足够，以及锁失败和过期如何处理。',
