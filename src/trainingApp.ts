@@ -114,6 +114,45 @@ interface DebtIntelligenceResponse {
   versionCount: number
 }
 
+interface DebtRelationDTO {
+  id: string
+  sourceDebtId: string
+  targetDebtId: string
+  relationType: string
+  similarityScore: number
+  confidence: number
+  reason: string
+  status: string
+  direction: 'outgoing' | 'incoming'
+  otherDebt: { id: string; gapText: string; status: string; recurrenceCount: number } | null
+  createdAt: string
+}
+
+interface DebtRelationsResponse {
+  ok: boolean
+  relations: DebtRelationDTO[]
+}
+
+interface DebtClusterDTO {
+  id: string
+  title: string
+  description: string
+  clusterType: string
+  members: Array<{ cognitiveDebtId: string; gapText: string; status: string; recurrenceCount: number }>
+  masterySummary: {
+    memberCount: number
+    withProfileCount: number
+    statusCounts: Record<string, number>
+    averageMastery: { overallMastery: number }
+    totalRelapseCount: number
+  }
+}
+
+interface DebtClusterResponse {
+  ok: boolean
+  cluster: DebtClusterDTO | null
+}
+
 const GAP_MECHANISM_OPTIONS = [
   'concept_gap', 'mechanism_gap', 'rationale_gap', 'prerequisite_gap',
   'verification_gap', 'boundary_gap', 'tradeoff_gap', 'dependency_gap',
@@ -553,6 +592,9 @@ export async function renderDebtDetail(container: HTMLElement, debtId: string): 
     // 智能分类独立加载，失败不影响详情页其余区块
     renderIntelligencePanel(container, debtId)
 
+    // 关联欠条与所属簇独立加载，失败不影响其余区块
+    renderRelationsPanel(container, debtId)
+
     if (data.attempts.length > 0 || data.reviews.length > 0) {
       const timeline = el('div', 'timeline-panel')
       timeline.appendChild(el('h2', undefined, '训练历史'))
@@ -731,6 +773,126 @@ function renderCorrectionForm(
       submitBtn.disabled = false
       formError.textContent = `保存失败：${(error as Error).message}`
     }
+  }
+}
+
+function relationTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    same_concept: '同一概念',
+    similar_gap: '相似缺口',
+    recurrence: '复发',
+    prerequisite_of: '前置知识',
+    caused_by: '部分导致',
+    blocks: '阻碍清偿',
+    transfer_variant: '迁移变体',
+    same_project: '同项目',
+    same_cognitive_pattern: '同一认知模式'
+  }
+  return labels[type] || type
+}
+
+function relationStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    auto_confirmed: '已自动关联',
+    pending_confirmation: '待你确认',
+    user_confirmed: '已确认'
+  }
+  return labels[status] || status
+}
+
+function clusterTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    same_concept: '同概念簇',
+    recurring_problem: '复发问题簇',
+    cognitive_pattern: '认知模式簇',
+    learning_path: '学习路径簇'
+  }
+  return labels[type] || type
+}
+
+// 关联欠条区块：所属簇行 + 关系列表（含确认/拒绝）。独立加载，失败只在本区块内提示。
+async function renderRelationsPanel(container: HTMLElement, debtId: string): Promise<void> {
+  const panel = el('div', 'evidence-panel')
+  panel.appendChild(el('h2', undefined, '关联欠条'))
+  container.appendChild(panel)
+  try {
+    const [relationsRes, clusterRes] = await Promise.all([
+      apiFetch(`/api/training/debts/${encodeURIComponent(debtId)}/relations`),
+      apiFetch(`/api/training/debts/${encodeURIComponent(debtId)}/cluster`)
+    ])
+    if (!relationsRes.ok) throw await readError(relationsRes)
+    if (!clusterRes.ok) throw await readError(clusterRes)
+    const relationsData: DebtRelationsResponse = await relationsRes.json()
+    const clusterData: DebtClusterResponse = await clusterRes.json()
+
+    if (clusterData.cluster) {
+      const cluster = clusterData.cluster
+      const row = el('div', 'intel-row')
+      row.appendChild(el('span', 'intel-label', '所属欠条簇'))
+      const masteredCount = cluster.masterySummary.statusCounts.mastered || 0
+      row.appendChild(el('span', 'intel-value',
+        `${cluster.title}（${clusterTypeLabel(cluster.clusterType)}，${cluster.masterySummary.memberCount} 张，已掌握 ${masteredCount} 张，平均掌握度 ${cluster.masterySummary.averageMastery.overallMastery}）`
+      ))
+      panel.appendChild(row)
+    }
+
+    if (relationsData.relations.length === 0) {
+      if (!clusterData.cluster) {
+        panel.appendChild(el('p', 'intel-empty', '暂无关联欠条'))
+      }
+      return
+    }
+
+    const list = el('div', 'intel-grid')
+    for (const relation of relationsData.relations) {
+      const item = el('div', 'intel-row')
+      const otherGap = relation.otherDebt?.gapText || '（对方欠条已删除）'
+      const text = el('span', 'intel-value',
+        `${relationTypeLabel(relation.relationType)} · ${otherGap} · 置信度 ${Math.round(relation.confidence * 100)}% · ${relationStatusLabel(relation.status)}`
+      )
+      if (relation.otherDebt) {
+        text.style.cursor = 'pointer'
+        text.style.textDecoration = 'underline'
+        const otherDebtId = relation.otherDebt.id
+        text.onclick = () => renderDebtDetail(container, otherDebtId)
+      }
+      item.appendChild(text)
+
+      if (relation.status === 'pending_confirmation') {
+        const confirmBtn = el('button', 'btn btn-small btn-secondary', '确认')
+        const rejectBtn = el('button', 'btn btn-small btn-secondary', '拒绝')
+        const act = async (action: 'confirm' | 'reject') => {
+          confirmBtn.disabled = true
+          rejectBtn.disabled = true
+          try {
+            const res = await apiFetch(
+              `/api/training/debts/${encodeURIComponent(debtId)}/relations/${encodeURIComponent(relation.id)}/${action}`,
+              { method: 'POST', body: '{}' }
+            )
+            if (!res.ok) throw await readError(res)
+            await renderDebtDetail(container, debtId)
+          } catch (error) {
+            confirmBtn.disabled = false
+            rejectBtn.disabled = false
+            panel.appendChild(el('p', 'intel-form-error', `操作失败：${(error as Error).message}`))
+          }
+        }
+        confirmBtn.onclick = () => act('confirm')
+        rejectBtn.onclick = () => act('reject')
+        item.appendChild(confirmBtn)
+        item.appendChild(rejectBtn)
+      }
+      list.appendChild(item)
+      if (relation.reason) {
+        const reasonRow = el('div', 'intel-row')
+        reasonRow.appendChild(el('span', 'intel-label', ''))
+        reasonRow.appendChild(el('span', 'intel-meta', relation.reason))
+        list.appendChild(reasonRow)
+      }
+    }
+    panel.appendChild(list)
+  } catch (error) {
+    panel.appendChild(el('p', 'intel-empty', `关联信息暂不可用：${(error as Error).message}`))
   }
 }
 

@@ -29,6 +29,14 @@ import {
   applyUserCorrection,
   backfillDebtIntelligence
 } from "./debt-intelligence.js";
+import { createConceptGraphStore } from "./concept-graph-store.js";
+import {
+  detectRelations,
+  confirmRelation,
+  rejectRelation,
+  syncConceptsFromAnalysis,
+  deriveClusterMasterySummary
+} from "./debt-relations.js";
 import {
   createCognitiveDebt,
   updateMasteryProfile,
@@ -118,6 +126,9 @@ const debtIntelligenceDisabled = process.env.DEBT_INTELLIGENCE_DISABLED === "1";
 const debtIntelligenceStorePath = process.env.DEBT_INTELLIGENCE_STORE_PATH || "tmp/debt-intelligence-store.json";
 const debtIntelligenceStore = createDebtIntelligenceStore(debtIntelligenceStorePath);
 await debtIntelligenceStore.load();
+const conceptGraphStorePath = process.env.CONCEPT_GRAPH_STORE_PATH || "tmp/concept-graph-store.json";
+const conceptGraphStore = createConceptGraphStore(conceptGraphStorePath);
+await conceptGraphStore.load();
 const authStore = createAuthStore(authStorePath);
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: researchApiKey,
@@ -773,10 +784,66 @@ function scheduleDebtIntelligence(debt, { reportId, trigger = "auto" } = {}) {
       if (!result.ok && !result.skipped) {
         console.warn(`Debt intelligence classification failed for ${debt.id}: ${result.error}`);
       }
+      if (result.ok && !result.skipped) {
+        await scheduleDebtRelationDetection(debt);
+      }
     })().catch(error => {
       console.warn(`Debt intelligence task failed for ${debt.id}: ${error.message}`);
     });
   });
+}
+
+// 分类成功后：同步概念节点 → 对该欠条做增量关系识别（幂等）。
+// 识别失败只记录日志与 analysisRun，绝不影响欠条主流程。
+async function scheduleDebtRelationDetection(debt) {
+  try {
+    const analysis = debtIntelligenceStore.getCurrentAnalysis(debt.id);
+    if (analysis) {
+      await syncConceptsFromAnalysis({ graphStore: conceptGraphStore, analysis });
+    }
+    await detectRelations({
+      graphStore: conceptGraphStore,
+      intelligenceStore: debtIntelligenceStore,
+      trainingStore,
+      userId: debt.userId || "demo-user",
+      focusDebtId: debt.id,
+      chatFn: chatJson
+    });
+  } catch (error) {
+    console.warn(`Debt relation detection failed for ${debt.id}: ${error.message}`);
+  }
+}
+
+// 簇响应载荷：成员欠条摘要 + 从成员画像派生的掌握度汇总（不存独立六维）。
+function buildClusterDetailPayload(cluster, userId) {
+  const members = conceptGraphStore.listDebtClusterMembers({ clusterId: cluster.id });
+  const debtsById = new Map();
+  const profilesByDebtId = new Map();
+  const memberItems = [];
+  for (const member of members) {
+    let debt = null;
+    try {
+      debt = trainingStore.getCognitiveDebt(member.cognitiveDebtId, userId);
+    } catch {
+      continue;
+    }
+    debtsById.set(debt.id, debt);
+    const profile = trainingStore.getMasteryProfile(debt.id);
+    if (profile) profilesByDebtId.set(debt.id, profile);
+    memberItems.push({
+      cognitiveDebtId: debt.id,
+      gapText: debt.gapText,
+      status: debt.status,
+      recurrenceCount: debt.recurrenceCount,
+      membershipConfidence: member.membershipConfidence
+    });
+  }
+  const masterySummary = deriveClusterMasterySummary({
+    memberDebtIds: [...debtsById.keys()],
+    debtsById,
+    profilesByDebtId
+  });
+  return { ...cluster, members: memberItems, masterySummary };
 }
 
 async function analyzeClearanceAnswer(input) {
@@ -1735,6 +1802,11 @@ const server = createServer(async (req, res) => {
     const trainingDebtMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)$/);
     const trainingDebtIntelligenceMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/intelligence$/);
     const trainingDebtReanalyzeMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/intelligence\/reanalyze$/);
+    const trainingDebtRelationsMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/relations$/);
+    const trainingDebtRelationConfirmMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/relations\/([^/]+)\/confirm$/);
+    const trainingDebtRelationRejectMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/relations\/([^/]+)\/reject$/);
+    const trainingDebtClusterMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/cluster$/);
+    const trainingClusterMatch = url.pathname.match(/^\/api\/training\/clusters\/([^/]+)$/);
     const trainingReviewStartMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/start$/);
     const trainingReviewSubmitMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/submit$/);
     const isWebMvpRoute =
@@ -2264,6 +2336,77 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── 欠条关系与欠条簇（Phase 2）：查询 ──
+
+    if (req.method === "GET" && trainingDebtRelationsMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtRelationsMatch[1]);
+      try {
+        trainingStore.getCognitiveDebt(debtId, userId);
+        const relations = conceptGraphStore.listDebtRelations({ userId, cognitiveDebtId: debtId })
+          .filter(item => item.status !== "user_rejected")
+          .map(item => {
+            const otherDebtId = item.sourceDebtId === debtId ? item.targetDebtId : item.sourceDebtId;
+            let otherDebt = null;
+            try {
+              const debt = trainingStore.getCognitiveDebt(otherDebtId, userId);
+              otherDebt = {
+                id: debt.id,
+                gapText: debt.gapText,
+                status: debt.status,
+                recurrenceCount: debt.recurrenceCount
+              };
+            } catch { /* 对方欠条已删除时保留 null */ }
+            return { ...item, direction: item.sourceDebtId === debtId ? "outgoing" : "incoming", otherDebt };
+          });
+        jsonResponse(res, 200, { ok: true, relations });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && trainingDebtClusterMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtClusterMatch[1]);
+      try {
+        trainingStore.getCognitiveDebt(debtId, userId);
+        const membership = conceptGraphStore.listDebtClusterMembers({ cognitiveDebtId: debtId })[0] || null;
+        const cluster = membership ? conceptGraphStore.getDebtCluster(membership.clusterId) : null;
+        jsonResponse(res, 200, {
+          ok: true,
+          cluster: cluster ? buildClusterDetailPayload(cluster, userId) : null
+        });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/training/clusters") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const clusters = conceptGraphStore.listDebtClusters(userId)
+        .map(cluster => buildClusterDetailPayload(cluster, userId));
+      jsonResponse(res, 200, { ok: true, clusters });
+      return;
+    }
+
+    if (req.method === "GET" && trainingClusterMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const clusterId = decodeURIComponent(trainingClusterMatch[1]);
+      const cluster = conceptGraphStore.getDebtCluster(clusterId);
+      if (!cluster || cluster.userId !== userId) {
+        jsonResponse(res, 404, { ok: false, error: `Debt cluster not found: ${clusterId}` });
+        return;
+      }
+      jsonResponse(res, 200, { ok: true, cluster: buildClusterDetailPayload(cluster, userId) });
+      return;
+    }
+
     const mvp0DraftMatch = url.pathname.match(/^\/api\/mvp0\/drafts\/([^/]+)$/);
     const isDraftOrTimelineRoute =
       url.pathname === "/api/mvp0/drafts" ||
@@ -2373,6 +2516,59 @@ const server = createServer(async (req, res) => {
         });
       } catch (error) {
         const status = /not found/i.test(String(error.message)) ? 404 : 400;
+        jsonResponse(res, status, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    // ── 欠条关系（Phase 2）：用户确认 / 拒绝 ──
+
+    if (req.method === "POST" && trainingDebtRelationConfirmMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtRelationConfirmMatch[1]);
+      const relationId = decodeURIComponent(trainingDebtRelationConfirmMatch[2]);
+      try {
+        const result = await confirmRelation({
+          graphStore: conceptGraphStore,
+          trainingStore,
+          userId,
+          debtId,
+          relationId
+        });
+        jsonResponse(res, 200, {
+          ok: true,
+          relation: result.relation,
+          relapse: result.relapse,
+          alreadyConfirmed: Boolean(result.alreadyConfirmed)
+        });
+      } catch (error) {
+        const status = error.statusCode || (/not found/i.test(String(error.message)) ? 404 : 400);
+        jsonResponse(res, status, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && trainingDebtRelationRejectMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtRelationRejectMatch[1]);
+      const relationId = decodeURIComponent(trainingDebtRelationRejectMatch[2]);
+      try {
+        const result = await rejectRelation({
+          graphStore: conceptGraphStore,
+          trainingStore,
+          userId,
+          debtId,
+          relationId
+        });
+        jsonResponse(res, 200, {
+          ok: true,
+          relation: result.relation,
+          alreadyRejected: Boolean(result.alreadyRejected)
+        });
+      } catch (error) {
+        const status = error.statusCode || (/not found/i.test(String(error.message)) ? 404 : 400);
         jsonResponse(res, status, { ok: false, error: error.message });
       }
       return;
