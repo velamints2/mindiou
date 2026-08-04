@@ -37,6 +37,13 @@ import {
   syncConceptsFromAnalysis,
   deriveClusterMasterySummary
 } from "./debt-relations.js";
+import { createCognitiveProfileStore } from "./cognitive-profile-store.js";
+import {
+  computeProfileAggregates,
+  generateInsights,
+  generatePeriodicSnapshots,
+  buildAndSaveSnapshot
+} from "./cognitive-profile.js";
 import {
   createCognitiveDebt,
   updateMasteryProfile,
@@ -129,6 +136,9 @@ await debtIntelligenceStore.load();
 const conceptGraphStorePath = process.env.CONCEPT_GRAPH_STORE_PATH || "tmp/concept-graph-store.json";
 const conceptGraphStore = createConceptGraphStore(conceptGraphStorePath);
 await conceptGraphStore.load();
+const cognitiveProfileStorePath = process.env.COGNITIVE_PROFILE_STORE_PATH || "tmp/cognitive-profile-store.json";
+const cognitiveProfileStore = createCognitiveProfileStore(cognitiveProfileStorePath);
+await cognitiveProfileStore.load();
 const authStore = createAuthStore(authStorePath);
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: researchApiKey,
@@ -1807,6 +1817,7 @@ const server = createServer(async (req, res) => {
     const trainingDebtRelationRejectMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/relations\/([^/]+)\/reject$/);
     const trainingDebtClusterMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/cluster$/);
     const trainingClusterMatch = url.pathname.match(/^\/api\/training\/clusters\/([^/]+)$/);
+    const profileInsightEvidenceMatch = url.pathname.match(/^\/api\/cognitive-profile\/insights\/([^/]+)\/evidence$/);
     const trainingReviewStartMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/start$/);
     const trainingReviewSubmitMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/submit$/);
     const isWebMvpRoute =
@@ -2407,6 +2418,149 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── 用户长期认知画像（Phase 3）──
+    // 聚合全部读时计算（删除欠条后重算即生效）；结论记录按周期幂等刷新，
+    // 确定性文案直接生成，模型仅在手动快照时对已算好的结论做措辞润色。
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/summary") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const requestedDays = Number(url.searchParams.get("periodDays"));
+      const periodDays = Number.isFinite(requestedDays)
+        ? Math.min(90, Math.max(7, Math.round(requestedDays)))
+        : 30;
+      const aggregates = computeProfileAggregates({
+        userId,
+        trainingStore,
+        intelligenceStore: debtIntelligenceStore,
+        profileStore: cognitiveProfileStore,
+        periodDays
+      });
+      const { insights, aiEnhanced } = await generateInsights({
+        userId,
+        skills: aggregates.skills,
+        gapPatterns: aggregates.patterns,
+        learningBehavior: aggregates.learningBehavior,
+        risks: aggregates.risks,
+        periodStart: aggregates.patterns.periodStart,
+        periodEnd: aggregates.patterns.periodEnd,
+        store: cognitiveProfileStore
+      });
+      jsonResponse(res, 200, {
+        ok: true,
+        periodDays,
+        calculationVersion: insights[0]?.calculationVersion || null,
+        skills: aggregates.skills,
+        patterns: aggregates.patterns,
+        learning: aggregates.learningBehavior,
+        risks: aggregates.risks,
+        insights,
+        aiEnhanced
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/skills") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const aggregates = computeProfileAggregates({
+        userId, trainingStore, intelligenceStore: debtIntelligenceStore, profileStore: cognitiveProfileStore
+      });
+      jsonResponse(res, 200, { ok: true, ...aggregates.skills });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/patterns") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const requestedDays = Number(url.searchParams.get("periodDays"));
+      const periodDays = Number.isFinite(requestedDays)
+        ? Math.min(90, Math.max(7, Math.round(requestedDays)))
+        : 30;
+      const aggregates = computeProfileAggregates({
+        userId, trainingStore, intelligenceStore: debtIntelligenceStore, profileStore: cognitiveProfileStore, periodDays
+      });
+      jsonResponse(res, 200, { ok: true, ...aggregates.patterns });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/learning") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const aggregates = computeProfileAggregates({
+        userId, trainingStore, intelligenceStore: debtIntelligenceStore, profileStore: cognitiveProfileStore
+      });
+      jsonResponse(res, 200, { ok: true, ...aggregates.learning });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/risks") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const aggregates = computeProfileAggregates({
+        userId, trainingStore, intelligenceStore: debtIntelligenceStore, profileStore: cognitiveProfileStore
+      });
+      jsonResponse(res, 200, { ok: true, ...aggregates.risks });
+      return;
+    }
+
+    if (req.method === "GET" && profileInsightEvidenceMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const insightId = decodeURIComponent(profileInsightEvidenceMatch[1]);
+      const insight = cognitiveProfileStore.getInsight(insightId, userId);
+      if (!insight) {
+        jsonResponse(res, 404, { ok: false, error: `Insight not found: ${insightId}` });
+        return;
+      }
+      const debts = [];
+      for (const debtId of insight.evidenceDebtIds) {
+        try {
+          const debt = trainingStore.getCognitiveDebt(debtId, userId);
+          debts.push({
+            id: debt.id,
+            gapText: debt.gapText,
+            status: debt.status,
+            recurrenceCount: debt.recurrenceCount,
+            createdAt: debt.createdAt
+          });
+        } catch { /* 欠条已删除：证据留空但结论仍可追溯 */ }
+      }
+      const attemptIdSet = new Set(insight.evidenceAttemptIds);
+      const attempts = attemptIdSet.size > 0
+        ? trainingStore.listAttempts(userId)
+          .filter(attempt => attemptIdSet.has(attempt.id))
+          .map(attempt => ({
+            id: attempt.id,
+            cognitiveDebtId: attempt.cognitiveDebtId,
+            trainingStage: attempt.trainingStage,
+            passed: Boolean(attempt.evaluation?.passed),
+            overallScore: Number.isFinite(Number(attempt.evaluation?.overallScore))
+              ? Number(attempt.evaluation.overallScore)
+              : null,
+            completedAt: attempt.completedAt || null
+          }))
+        : [];
+      const clusters = insight.evidenceClusterIds
+        .map(clusterId => conceptGraphStore.getDebtCluster(clusterId))
+        .filter(cluster => cluster && cluster.userId === userId)
+        .map(cluster => ({ id: cluster.id, title: cluster.title || cluster.id, clusterType: cluster.clusterType }));
+      jsonResponse(res, 200, { ok: true, insight, evidence: { debts, attempts, clusters } });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/snapshots") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const snapshotType = clean(url.searchParams.get("type") || "");
+      const snapshots = cognitiveProfileStore.listSnapshots(
+        userId,
+        snapshotType ? { snapshotType } : {}
+      );
+      jsonResponse(res, 200, { ok: true, snapshots });
+      return;
+    }
+
     const mvp0DraftMatch = url.pathname.match(/^\/api\/mvp0\/drafts\/([^/]+)$/);
     const isDraftOrTimelineRoute =
       url.pathname === "/api/mvp0/drafts" ||
@@ -2462,6 +2616,46 @@ const server = createServer(async (req, res) => {
         reportContextFor: debt => buildDebtReportContext(debt)
       });
       jsonResponse(res, 200, { ok: true, ...result });
+      return;
+    }
+
+    // ── 认知画像（Phase 3）：手动生成当日快照 + 幂等刷新结论（可经模型润色措辞） ──
+
+    if (req.method === "POST" && url.pathname === "/api/cognitive-profile/snapshots") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const aggregates = computeProfileAggregates({
+        userId,
+        trainingStore,
+        intelligenceStore: debtIntelligenceStore,
+        profileStore: cognitiveProfileStore
+      });
+      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+      const insightResult = await generateInsights({
+        userId,
+        skills: aggregates.skills,
+        gapPatterns: aggregates.patterns,
+        learningBehavior: aggregates.learningBehavior,
+        risks: aggregates.risks,
+        periodStart: aggregates.patterns.periodStart,
+        periodEnd: aggregates.patterns.periodEnd,
+        store: cognitiveProfileStore,
+        chatFn
+      });
+      const snapshotResult = await buildAndSaveSnapshot({
+        profileStore: cognitiveProfileStore,
+        trainingStore,
+        intelligenceStore: debtIntelligenceStore,
+        userId,
+        snapshotType: "manual"
+      });
+      jsonResponse(res, snapshotResult.created ? 201 : 200, {
+        ok: true,
+        created: snapshotResult.created,
+        snapshot: snapshotResult.snapshot,
+        insightCount: insightResult.insights.length,
+        aiEnhanced: insightResult.aiEnhanced
+      });
       return;
     }
 
@@ -2899,6 +3093,39 @@ const server = createServer(async (req, res) => {
     jsonResponse(res, statusCode, { ok: false, error: clientMessage, requestId });
   }
 });
+
+// ── 认知画像周/月定时快照（Phase 3）──
+// 幂等：同一周期已存在则跳过；单用户失败仅记录日志，不影响其他用户。
+// COGNITIVE_PROFILE_SNAPSHOT_INTERVAL_MS 可覆盖检查间隔，设为 0 可完全关闭
+// （测试环境关闭以保证确定性）。
+const profileSnapshotIntervalMs = Number(process.env.COGNITIVE_PROFILE_SNAPSHOT_INTERVAL_MS || 6 * 60 * 60 * 1000);
+async function runPeriodicProfileSnapshots() {
+  try {
+    const result = await generatePeriodicSnapshots({
+      profileStore: cognitiveProfileStore,
+      trainingStore,
+      intelligenceStore: debtIntelligenceStore
+    });
+    if (result.created > 0 || result.errors.length > 0) {
+      logEvent(result.errors.length > 0 ? "warn" : "info", "cognitive_profile_snapshots", {
+        users: result.users,
+        created: result.created,
+        skipped: result.skipped,
+        errors: result.errors.length
+      });
+    }
+  } catch (error) {
+    logEvent("warn", "cognitive_profile_snapshots_failed", {
+      error: String(error?.message || error).slice(0, 300)
+    });
+  }
+}
+if (Number.isFinite(profileSnapshotIntervalMs) && profileSnapshotIntervalMs > 0) {
+  const profileSnapshotTimer = setInterval(runPeriodicProfileSnapshots, profileSnapshotIntervalMs);
+  profileSnapshotTimer.unref();
+  const profileSnapshotBootTimer = setTimeout(runPeriodicProfileSnapshots, 15000);
+  profileSnapshotBootTimer.unref();
+}
 
 server.listen(port, host, () => {
   console.log(`G2 learning API listening on http://${host}:${port} using ${learningStorePath}`);

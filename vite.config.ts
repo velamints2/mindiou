@@ -10,7 +10,8 @@ export default defineConfig({
         desktop: "desktop.html",
         report: "report.html",
         mvp1: "mvp1.html",
-        training: "training.html"
+        training: "training.html",
+        "cognitive-profile": "cognitive-profile.html"
       }
     }
   },
