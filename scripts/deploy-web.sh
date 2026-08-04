@@ -13,7 +13,7 @@
 #   MINDIOU_SSH_HOST    目标服务器地址（默认 156.225.23.88）
 #   MINDIOU_SSH_USER    SSH 用户（默认 root）
 #   MINDIOU_WEB_DIR     服务器静态目录（默认 /var/www/mindiou）
-#   MINDIOU_PUBLIC_ORIGIN 公网验收 origin（默认 http://demo.mindiou.top）
+#   MINDIOU_PUBLIC_ORIGIN 公网验收 origin（默认 https://demo.mindiou.top）
 #
 # 前置条件:
 #   - 本地 web/ 已安装依赖（npm ci）
@@ -23,7 +23,7 @@ set -euo pipefail
 SSH_HOST="${MINDIOU_SSH_HOST:-156.225.23.88}"
 SSH_USER="${MINDIOU_SSH_USER:-root}"
 WEB_DIR="${MINDIOU_WEB_DIR:-/var/www/mindiou}"
-PUBLIC_ORIGIN="${MINDIOU_PUBLIC_ORIGIN:-http://demo.mindiou.top}"
+PUBLIC_ORIGIN="${MINDIOU_PUBLIC_ORIGIN:-https://demo.mindiou.top}"
 SSH_TARGET="${SSH_USER}@${SSH_HOST}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

@@ -2,6 +2,7 @@ import type { AssessmentQuestion, AssessmentRole } from './assessment-bank'
 
 export type AssessmentAnswers = Record<string, string | string[] | number | Record<string, number | string>>
 export type AssessmentResult = {
+  typeKey: keyof typeof TYPES
   type: string
   typeEn: string
   tagline: string
@@ -16,15 +17,15 @@ export type AssessmentResult = {
 }
 
 const TYPES = {
-  autopilot: ['全自动代驾员','Full-autopilot passenger','你不是没有驾驶证，你只是已经很久没碰方向盘了。','You still have a license; you just have not touched the wheel in a while.'],
-  alchemist: ['复制粘贴炼金术士','Copy-paste alchemist','你能把 AI 输出炼成金子，但暂时解释不了炉子为什么会热。','You turn AI output into gold, but cannot yet explain why the furnace is hot.'],
-  blind: ['高自信盲飞员','Overconfident blind flyer','仪表盘已经亮红灯了，你以为那是氛围灯。','The dashboard is flashing red; you thought it was mood lighting.'],
-  loop: ['无限追问永动机','Infinite follow-up engine','你没有停止思考，只是把思考变成了无限续杯的对话框。','You did not stop thinking; you turned it into an endlessly refilled chat box.'],
-  auditor: ['AI 人肉审核器','Human AI auditor','AI 写了五分钟，你审核了两个小时，并开始怀疑键盘也不可信。','AI wrote for five minutes; you audited for two hours and began distrusting the keyboard.'],
-  later: ['先干再懂型','Ship-now-learn-later','你每次都说项目结束以后再补课，项目们已经排到了明年。','You always plan to learn after shipping; the projects are queued into next year.'],
-  supervisor: ['AI 项目监工','AI project supervisor','你很清楚 AI 今天该干什么，但不一定知道它昨晚到底干了什么。','You know what AI should do today, but not always what it did last night.'],
-  codriver: ['人机双驾驶','Human-AI co-driver','方向盘在你手里，AI 负责看地图。','You hold the wheel while AI reads the map.'],
-  quantum: ['量子态协作者','Quantum-state collaborator','打开聊天记录之前，你既理解 AI，也完全不理解 AI。','Until the record is opened, you both understand AI and do not.']
+  autopilot: ['全自动代驾员','Full-Auto Chauffeur','你不是没有驾驶证，你只是已经很久没碰方向盘了。','You name the destination, and AI quietly takes over the wheel and brakes.'],
+  alchemist: ['复制粘贴炼金术士','Copy-Paste AI Alchemist','你能把 AI 输出炼成金子，但暂时解释不了炉子为什么会热。','You can turn AI raw material into deliverables, but the method has not fully become yours yet.'],
+  blind: ['高自信盲飞员','Overconfident Blind Pilot','仪表盘已经亮红灯了，你以为那是氛围灯。','Your confidence has taken off, but the evidence still has not boarded.'],
+  loop: ['无限追问永动机','Infinite Follow-up Machine','你没有停止思考，只是把思考变成了无限续杯的对话框。','You do not fully trust AI, so you ask AI to check AI one more time.'],
+  auditor: ['AI 人肉审核器','AI Human Auditor','AI 写了五分钟，你审核了两个小时，并开始怀疑键盘也不可信。','You are great at spotting risks, but the cost of verification can spiral out of control.'],
+  later: ['先干再懂型','Act First, Understand Later','你每次都说项目结束以后再补课，项目们已经排到了明年。','You can push tasks forward and finish the delivery, but the learning always disappears at the end.'],
+  supervisor: ['AI 项目监工','AI Project Supervisor','你很清楚 AI 今天该干什么，但不一定知道它昨晚到底干了什么。','Good at assigning work and pushing progress, but the core judgment is not always on duty.'],
+  codriver: ['人机双驾驶','Human-AI Co-Driver','方向盘在你手里，AI 负责看地图。','You hold the wheel, AI hits the gas, and both of you judge the key turns together.'],
+  quantum: ['量子态协作者','Quantum State Collaborator','打开聊天记录之前，你既理解 AI，也完全不理解 AI。','Your performance swings wildly, like several collaboration personas stacked together.']
 } as const
 
 const clamp = (n:number) => Math.max(0, Math.min(100, Math.round(n)))
@@ -115,6 +116,7 @@ export function scoreAssessment(role: AssessmentRole, questions: AssessmentQuest
   const strongAlertness = d.alertness >= d.ownership
   const lowLearning = d.learning < 45
   return {
+    typeKey:key,
     type:type[0], typeEn:type[1], tagline:type[2], taglineEn:type[3],
     strength: strongAlertness ? '你会主动寻找风险和证据。' : '你愿意修改并承担最终成果。',
     strengthEn: strongAlertness ? 'You actively look for risk and evidence.' : 'You edit the output and take ownership of the final result.',

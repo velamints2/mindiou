@@ -39,6 +39,7 @@ describe('AI collaboration assessment V1', () => {
       'dev-4': '使用后端幂等键和唯一约束，重复请求返回已有任务。'
     })
     expect(result.evidence.length).toBeGreaterThan(0)
+    expect(result.typeKey).toMatch(/^(autopilot|alchemist|blind|loop|auditor|later|supervisor|codriver|quantum)$/)
     expect(Object.keys(result.dimensions)).toHaveLength(6)
     Object.values(result.dimensions).forEach(value => expect(value).toBeGreaterThanOrEqual(0))
   })

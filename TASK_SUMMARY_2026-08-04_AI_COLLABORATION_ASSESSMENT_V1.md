@@ -48,3 +48,15 @@
 - 后端回滚点：`/opt/mindiou/deploy-backups/assessment-20260804T075138Z`。
 - Nginx 回滚点：`/etc/nginx/snippets/mindiou-locations.conf.backup-20260804T075310Z`。
 - 静态前端回滚点：`/var/www/mindiou-backup-20260804155417`。
+
+## 结果插画与导航避让（已部署）
+
+- 9种结果均增加独立中文和英文结果卡，共18张WebP资源；语言切换后使用对应语言图片。
+- 原始1254px PNG统一输出为900px WebP，18张合计约1.15MB；结果页使用懒加载且只请求命中的一张图。
+- 图片使用结果键映射，不依赖中文标题字符串，覆盖 `autopilot`、`alchemist`、`blind`、`loop`、`auditor`、`later`、`supervisor`、`codriver`、`quantum`。
+- 全站固定导航与产品页粘性页头增加桌面/手机分层距离，覆盖工作区、时间线、报告、清偿会话和设备Token页。
+- 本地浏览器验证：中文和英文结果图均成功加载，900px自然宽度；390×844下无横向溢出，结果图宽354px。
+- Web类型检查、56项测试和生产构建通过；根工程34个测试文件、551项测试及生产构建通过。
+- 2026-08-04 已部署到 `https://demo.mindiou.top/mindiou/`，静态回滚点为 `/var/www/mindiou-backup-20260804200243`。
+- 公网18张图片全部返回200并与本地构建逐字节一致；线上JS/CSS SHA-256与本地构建一致。
+- 部署脚本默认公网验收地址由HTTP改为HTTPS，避免站点301强制跳转被误报为部署失败。
