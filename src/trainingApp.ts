@@ -574,8 +574,12 @@ function buildRecommendationCard(container: HTMLElement, rec: LearningRecommenda
   item.appendChild(el('p', 'rec-meta', metaParts.join(' · ')))
 
   const actions = el('div', 'rec-actions')
-  const acceptBtn = el('button', 'btn btn-primary btn-small', '开始训练')
-  acceptBtn.onclick = () => { void acceptRecommendationAction(container, rec, acceptBtn) }
+  const isAccepted = rec.status === 'accepted'
+  const acceptBtn = el('button', 'btn btn-primary btn-small', isAccepted ? '继续训练' : '开始训练')
+  acceptBtn.onclick = () => {
+    if (isAccepted) void continueRecommendationAction(container, rec, acceptBtn)
+    else void acceptRecommendationAction(container, rec, acceptBtn)
+  }
   const skipBtn = el('button', 'btn btn-secondary btn-small', '跳过')
   skipBtn.onclick = () => { void skipRecommendationAction(container, rec, skipBtn) }
   actions.appendChild(acceptBtn)
@@ -607,6 +611,28 @@ async function acceptRecommendationAction(
     button.disabled = false
     button.textContent = '开始训练'
     alert(`无法开始训练：${(error as Error).message}`)
+  }
+}
+
+// 已接受推荐：直接进入 accept 时创建的复训任务，不重复 accept（避免 409）
+async function continueRecommendationAction(
+  container: HTMLElement,
+  rec: LearningRecommendationDTO,
+  button: HTMLButtonElement
+): Promise<void> {
+  if (!rec.reviewTask) {
+    alert('关联的复训任务不可用，请刷新后重试')
+    await renderTodayReview(container)
+    return
+  }
+  button.disabled = true
+  button.textContent = '正在进入…'
+  try {
+    await startReview(container, [rec.reviewTask])
+  } catch (error) {
+    button.disabled = false
+    button.textContent = '继续训练'
+    alert(`无法继续训练：${(error as Error).message}`)
   }
 }
 

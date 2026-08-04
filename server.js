@@ -2598,6 +2598,46 @@ const server = createServer(async (req, res) => {
       }
     } // close isDraftOrTimelineRoute
 
+    // ── 下一步学习编排（Phase 4）：今日推荐 / 每周重点（GET，必须在方法闸门之前） ──
+
+    if (req.method === "GET" && url.pathname === "/api/learning-recommendations/today") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const result = await getTodayRecommendations(userId, {
+          store: learningOrchestratorStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          graphStore: conceptGraphStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        logEvent("error", "learning_recommendations_today_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "学习推荐生成失败，请稍后重试" });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/learning-recommendations/weekly-focus") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const result = await getWeeklyFocus(userId, {
+          store: learningOrchestratorStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          graphStore: conceptGraphStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        logEvent("error", "learning_weekly_focus_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "每周学习重点生成失败，请稍后重试" });
+      }
+      return;
+    }
+
     if (req.method !== "POST" && req.method !== "PATCH") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed", requestId });
       return;
@@ -2945,45 +2985,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // ── 下一步学习编排（Phase 4）：今日推荐 / 每周重点 / 接受 / 跳过 ──
-
-    if (req.method === "GET" && url.pathname === "/api/learning-recommendations/today") {
-      const user = getOptionalUser(req);
-      const userId = user?.id || "demo-user";
-      try {
-        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-        const result = await getTodayRecommendations(userId, {
-          store: learningOrchestratorStore,
-          trainingStore,
-          intelligenceStore: debtIntelligenceStore,
-          graphStore: conceptGraphStore
-        }, { chatFn });
-        jsonResponse(res, 200, { ok: true, ...result });
-      } catch (error) {
-        logEvent("error", "learning_recommendations_today_failed", { requestId, error: error.message });
-        jsonResponse(res, 500, { ok: false, error: "学习推荐生成失败，请稍后重试" });
-      }
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/learning-recommendations/weekly-focus") {
-      const user = getOptionalUser(req);
-      const userId = user?.id || "demo-user";
-      try {
-        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-        const result = await getWeeklyFocus(userId, {
-          store: learningOrchestratorStore,
-          trainingStore,
-          intelligenceStore: debtIntelligenceStore,
-          graphStore: conceptGraphStore
-        }, { chatFn });
-        jsonResponse(res, 200, { ok: true, ...result });
-      } catch (error) {
-        logEvent("error", "learning_weekly_focus_failed", { requestId, error: error.message });
-        jsonResponse(res, 500, { ok: false, error: "每周学习重点生成失败，请稍后重试" });
-      }
-      return;
-    }
+    // ── 下一步学习编排（Phase 4）：接受 / 跳过 ──
 
     if (req.method === "POST" && learningRecommendationActionMatch) {
       const user = getOptionalUser(req);

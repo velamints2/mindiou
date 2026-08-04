@@ -425,6 +425,32 @@ describe("getTodayRecommendations — 查询载荷与已读标记", () => {
     expect(result.recommendations[0].isWeeklyFocusRelated).toBe(true);
     expect(result.weeklyFocus).toBeTruthy();
   });
+
+  it("accepted 推荐仍在列表中且带已创建的 reviewTaskId（前端据此走继续训练）", async () => {
+    const stores = await freshStores();
+    await stores.trainingStore.saveCognitiveDebt(makeDebt("debt-1"));
+    await stores.trainingStore.saveReviewTask(makeTask("task-1", "debt-1"));
+    await stores.intelligenceStore.saveAnalysis(makeAnalysis("debt-1"));
+    const deps = makeDeps(stores);
+    const first = await getTodayRecommendations("user-1", deps, { now: NOW });
+    const rec = first.recommendations[0];
+
+    await acceptRecommendation({
+      store: stores.orchestratorStore,
+      trainingStore: stores.trainingStore,
+      userId: "user-1",
+      recommendationId: rec.id,
+      now: NOW
+    });
+
+    // accept 后未提交训练再次读取：推荐保留，状态 accepted，reviewTaskId 可用
+    const refreshed = await getTodayRecommendations("user-1", deps, { now: NOW });
+    const stillThere = refreshed.recommendations.find(item => item.id === rec.id);
+    expect(stillThere).toBeDefined();
+    expect(stillThere.status).toBe("accepted");
+    expect(stillThere.existingReviewTaskId).toBe("task-1");
+    expect(stillThere.reviewTask?.id).toBe("task-1");
+  });
 });
 
 // ─── syncRecommendationStatuses：状态懒更新 ───
