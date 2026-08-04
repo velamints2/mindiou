@@ -153,6 +153,38 @@ interface DebtClusterResponse {
   cluster: DebtClusterDTO | null
 }
 
+interface DebtSummaryDTO {
+  id: string
+  gapText: string
+  status: string
+  recurrenceCount: number
+}
+
+interface LearningRecommendationDTO {
+  id: string
+  recommendationType: string
+  primaryDebtId: string | null
+  relatedDebtIds: string[]
+  skillNodeId: string | null
+  recommendedTrainingStage: string | null
+  existingReviewTaskId: string | null
+  title: string
+  reason: string
+  priorityScore: number
+  estimatedMinutes: number
+  status: string
+  debtSummary: DebtSummaryDTO | null
+  reviewTask: ReviewTaskDTO | null
+  relatedDebtSummaries: DebtSummaryDTO[]
+  isWeeklyFocusRelated: boolean
+}
+
+interface TodayRecommendationsResponse {
+  ok: boolean
+  recommendations: LearningRecommendationDTO[]
+  weeklyFocus: LearningRecommendationDTO | null
+}
+
 const GAP_MECHANISM_OPTIONS = [
   'concept_gap', 'mechanism_gap', 'rationale_gap', 'prerequisite_gap',
   'verification_gap', 'boundary_gap', 'tradeoff_gap', 'dependency_gap',
@@ -371,6 +403,26 @@ function estimatedMinutes(taskType: string): number {
   return estimates[taskType] || 3
 }
 
+function recommendationTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    due_review: '到期复训',
+    prerequisite_training: '前置知识',
+    cluster_consolidation: '问题簇巩固',
+    transfer_training: '能力迁移',
+    real_work_validation: '高风险验证',
+    weekly_focus: '本周学习重点'
+  }
+  return labels[type] || type
+}
+
+function skillNodeLabel(skillNodeId?: string | null): string {
+  if (!skillNodeId) return '未分类'
+  const segments = skillNodeId.split('.').filter(Boolean)
+  if (segments.length === 0) return '未分类'
+  const [root, ...rest] = segments
+  return [domainRootLabel(root), ...rest].join(' / ')
+}
+
 export async function renderTodayReview(container: HTMLElement): Promise<void> {
   clear(container)
   const header = el('div', 'training-header')
@@ -381,16 +433,58 @@ export async function renderTodayReview(container: HTMLElement): Promise<void> {
   container.appendChild(loading)
 
   try {
-    const res = await apiFetch('/api/training/today')
-    if (!res.ok) throw await readError(res)
-    const data = await res.json()
+    // 推荐编排与到期复训并行加载；推荐失败只降级提示，不影响复训主流程
+    const [todayRes, recRes] = await Promise.all([
+      apiFetch('/api/training/today'),
+      apiFetch('/api/learning-recommendations/today')
+    ])
+    if (!todayRes.ok) throw await readError(todayRes)
+    const data = await todayRes.json()
+    let recData: TodayRecommendationsResponse | null = null
+    let recLoadError: string | null = null
+    if (recRes.ok) {
+      recData = await recRes.json()
+    } else {
+      recLoadError = (await readError(recRes)).message
+    }
     clear(container)
     container.appendChild(header)
 
+    const recommendations = recData?.recommendations || []
+    const weeklyFocus = recData?.weeklyFocus || null
+
+    if (weeklyFocus) {
+      const banner = el('div', 'weekly-focus-banner')
+      banner.appendChild(el('p', 'weekly-focus-title', weeklyFocus.title))
+      banner.appendChild(el('p', 'weekly-focus-reason', weeklyFocus.reason))
+      const metaParts: string[] = []
+      if (weeklyFocus.relatedDebtSummaries.length > 0) metaParts.push(`${weeklyFocus.relatedDebtSummaries.length} 条相关欠条`)
+      if (weeklyFocus.estimatedMinutes > 0) metaParts.push(`预计 ${weeklyFocus.estimatedMinutes} 分钟`)
+      if (metaParts.length > 0) banner.appendChild(el('p', 'weekly-focus-meta', metaParts.join(' · ')))
+      container.appendChild(banner)
+    }
+
+    if (recommendations.length > 0) {
+      const recSection = el('div', 'rec-section')
+      recSection.appendChild(el('h2', 'rec-heading', '今日推荐'))
+      const recList = el('div', 'rec-list')
+      for (const rec of recommendations) {
+        recList.appendChild(buildRecommendationCard(container, rec))
+      }
+      recSection.appendChild(recList)
+      container.appendChild(recSection)
+    } else if (recLoadError) {
+      container.appendChild(el('div', 'rec-notice', `学习推荐暂不可用：${recLoadError}（复训任务不受影响）`))
+    }
+
     if (data.totalDue === 0) {
       const empty = el('div', 'training-empty')
-      empty.appendChild(el('p', undefined, '今日没有到期的复训任务。'))
-      empty.appendChild(el('p', 'training-hint', '完成新的认知欠条训练后，复训任务会自动出现在这里。'))
+      if (recommendations.length > 0) {
+        empty.appendChild(el('p', 'training-hint', '今日没有到期的复训任务，也可以从上方推荐开始训练。'))
+      } else {
+        empty.appendChild(el('p', undefined, '今日没有到期的复训任务。'))
+        empty.appendChild(el('p', 'training-hint', '完成新的认知欠条训练后，复训任务会自动出现在这里。'))
+      }
       container.appendChild(empty)
       return
     }
@@ -450,6 +544,87 @@ export async function renderTodayReview(container: HTMLElement): Promise<void> {
     retryBtn.onclick = () => renderTodayReview(container)
     errBox.appendChild(retryBtn)
     container.appendChild(errBox)
+  }
+}
+
+function buildRecommendationCard(container: HTMLElement, rec: LearningRecommendationDTO): HTMLElement {
+  const item = el('div', 'rec-item')
+
+  const head = el('div', 'rec-head')
+  head.appendChild(el('span', 'rec-type', recommendationTypeLabel(rec.recommendationType)))
+  if (rec.isWeeklyFocusRelated) head.appendChild(el('span', 'rec-tag rec-tag-focus', '本周学习重点'))
+  if (rec.debtSummary?.status === 'relapsed') {
+    head.appendChild(el('span', 'rec-tag rec-tag-relapse', '复发问题'))
+  } else if ((rec.debtSummary?.recurrenceCount || 0) > 0) {
+    head.appendChild(el('span', 'rec-tag rec-tag-relapse', `重复出现 ${(rec.debtSummary?.recurrenceCount || 0) + 1} 次`))
+  }
+  if (rec.recommendationType === 'prerequisite_training' && rec.relatedDebtIds.length > 0) {
+    head.appendChild(el('span', 'rec-tag rec-tag-blocking', `阻塞 ${rec.relatedDebtIds.length} 条其他欠条`))
+  }
+  item.appendChild(head)
+
+  item.appendChild(el('p', 'rec-title', rec.title))
+  item.appendChild(el('p', 'rec-reason', rec.reason))
+
+  const metaParts = [
+    `能力主题：${skillNodeLabel(rec.skillNodeId)}`,
+    rec.recommendedTrainingStage ? `推荐阶段：${stageLabel(rec.recommendedTrainingStage)}` : '',
+    `预计 ${rec.estimatedMinutes} 分钟`
+  ].filter(Boolean)
+  item.appendChild(el('p', 'rec-meta', metaParts.join(' · ')))
+
+  const actions = el('div', 'rec-actions')
+  const acceptBtn = el('button', 'btn btn-primary btn-small', '开始训练')
+  acceptBtn.onclick = () => { void acceptRecommendationAction(container, rec, acceptBtn) }
+  const skipBtn = el('button', 'btn btn-secondary btn-small', '跳过')
+  skipBtn.onclick = () => { void skipRecommendationAction(container, rec, skipBtn) }
+  actions.appendChild(acceptBtn)
+  actions.appendChild(skipBtn)
+  item.appendChild(actions)
+  return item
+}
+
+// 接受推荐：复用现有 review start/submit 链路，不新建并行流程
+async function acceptRecommendationAction(
+  container: HTMLElement,
+  rec: LearningRecommendationDTO,
+  button: HTMLButtonElement
+): Promise<void> {
+  button.disabled = true
+  button.textContent = '正在进入…'
+  try {
+    const res = await apiFetch(`/api/learning-recommendations/${encodeURIComponent(rec.id)}/accept`, {
+      method: 'POST', body: '{}'
+    })
+    if (!res.ok) throw await readError(res)
+    const data = await res.json()
+    if (data.reviewTask) {
+      await startReview(container, [data.reviewTask as ReviewTaskDTO])
+    } else {
+      await renderTodayReview(container)
+    }
+  } catch (error) {
+    button.disabled = false
+    button.textContent = '开始训练'
+    alert(`无法开始训练：${(error as Error).message}`)
+  }
+}
+
+async function skipRecommendationAction(
+  container: HTMLElement,
+  rec: LearningRecommendationDTO,
+  button: HTMLButtonElement
+): Promise<void> {
+  button.disabled = true
+  try {
+    const res = await apiFetch(`/api/learning-recommendations/${encodeURIComponent(rec.id)}/skip`, {
+      method: 'POST', body: '{}'
+    })
+    if (!res.ok) throw await readError(res)
+    await renderTodayReview(container)
+  } catch (error) {
+    button.disabled = false
+    alert(`操作失败：${(error as Error).message}`)
   }
 }
 

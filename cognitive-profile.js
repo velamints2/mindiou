@@ -40,7 +40,8 @@ const DIMENSION_LABELS = Object.freeze({
   retentionStrength: "延迟保持"
 });
 
-const DOMAIN_ROOT_LABELS = Object.freeze({
+// 导出供学习编排（Phase 4）等领域主题文案复用，避免重复维护标签映射。
+export const DOMAIN_ROOT_LABELS = Object.freeze({
   software_engineering: "软件工程",
   product_management: "产品管理",
   business_strategy: "商业战略",

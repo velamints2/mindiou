@@ -300,6 +300,55 @@ body {
 .profile-stat-value { font-weight: 500; }
 .profile-snapshot-status { font-size: 13px; color: var(--color-text-light); align-self: center; }
 
+/* Learning orchestrator (学习推荐) */
+.weekly-focus-banner {
+  background: linear-gradient(135deg, #eef2ff, #f5f3ff);
+  border: 1px solid #c7d2fe;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: var(--spacing);
+}
+.weekly-focus-title { font-size: 15px; font-weight: 600; color: #3730a3; }
+.weekly-focus-reason { font-size: 13px; color: var(--color-text); margin-top: 4px; }
+.weekly-focus-meta { font-size: 12px; color: var(--color-text-light); margin-top: 6px; }
+
+.rec-section { margin-bottom: var(--spacing); }
+.rec-heading { font-size: 16px; margin-bottom: 10px; }
+.rec-list { display: flex; flex-direction: column; gap: 12px; }
+.rec-item {
+  background: white;
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid var(--color-border);
+}
+.rec-head { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.rec-type {
+  display: inline-block;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-weight: 500;
+}
+.rec-tag { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+.rec-tag-focus { background: #ede9fe; color: #5b21b6; }
+.rec-tag-relapse { background: #fee2e2; color: #991b1b; }
+.rec-tag-blocking { background: #fef3c7; color: #92400e; }
+.rec-title { font-size: 15px; font-weight: 600; margin: 4px 0; }
+.rec-reason { font-size: 14px; color: var(--color-text); }
+.rec-meta { font-size: 12px; color: var(--color-text-light); margin-top: 8px; }
+.rec-actions { display: flex; gap: 8px; margin-top: 12px; }
+.rec-notice {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #92400e;
+  margin-bottom: var(--spacing);
+}
+
 @media (max-width: 640px) {
   #app { padding: 12px; }
   .training-nav { padding: 8px 12px; overflow-x: auto; }

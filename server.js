@@ -71,6 +71,13 @@ import {
   generateRuleBasedReviewTask,
   createAttemptFromClearanceSession
 } from "./review-generator.js";
+import { createLearningOrchestratorStore } from "./learning-orchestrator-store.js";
+import {
+  getTodayRecommendations,
+  getWeeklyFocus,
+  acceptRecommendation,
+  skipRecommendation
+} from "./learning-orchestrator.js";
 import { reportEnvValidation } from "./env-validation.js";
 import { handleAdminRoute } from "./web/admin-backend-patch.js";
 
@@ -139,6 +146,9 @@ await conceptGraphStore.load();
 const cognitiveProfileStorePath = process.env.COGNITIVE_PROFILE_STORE_PATH || "tmp/cognitive-profile-store.json";
 const cognitiveProfileStore = createCognitiveProfileStore(cognitiveProfileStorePath);
 await cognitiveProfileStore.load();
+const learningOrchestratorStorePath = process.env.LEARNING_ORCHESTRATOR_STORE_PATH || "tmp/learning-orchestrator-store.json";
+const learningOrchestratorStore = createLearningOrchestratorStore(learningOrchestratorStorePath);
+await learningOrchestratorStore.load();
 const authStore = createAuthStore(authStorePath);
 const rawWebResearch = createOpenAiWebResearch({
   apiKey: researchApiKey,
@@ -1820,6 +1830,7 @@ const server = createServer(async (req, res) => {
     const profileInsightEvidenceMatch = url.pathname.match(/^\/api\/cognitive-profile\/insights\/([^/]+)\/evidence$/);
     const trainingReviewStartMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/start$/);
     const trainingReviewSubmitMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/submit$/);
+    const learningRecommendationActionMatch = url.pathname.match(/^\/api\/learning-recommendations\/([^/]+)\/(accept|skip)$/);
     const isWebMvpRoute =
       (req.method === "GET" && (url.pathname === "/api/mvp0/reports" || mvp1SessionMatch || mvp0ReportMatch)) ||
       (req.method === "POST" && (
@@ -2930,6 +2941,76 @@ const server = createServer(async (req, res) => {
         });
       } catch (error) {
         jsonResponse(res, 400, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    // ── 下一步学习编排（Phase 4）：今日推荐 / 每周重点 / 接受 / 跳过 ──
+
+    if (req.method === "GET" && url.pathname === "/api/learning-recommendations/today") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const result = await getTodayRecommendations(userId, {
+          store: learningOrchestratorStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          graphStore: conceptGraphStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        logEvent("error", "learning_recommendations_today_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "学习推荐生成失败，请稍后重试" });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/learning-recommendations/weekly-focus") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const result = await getWeeklyFocus(userId, {
+          store: learningOrchestratorStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          graphStore: conceptGraphStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        logEvent("error", "learning_weekly_focus_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "每周学习重点生成失败，请稍后重试" });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && learningRecommendationActionMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const recommendationId = decodeURIComponent(learningRecommendationActionMatch[1]);
+      const action = learningRecommendationActionMatch[2];
+      try {
+        if (action === "accept") {
+          const result = await acceptRecommendation({
+            store: learningOrchestratorStore,
+            trainingStore,
+            userId,
+            recommendationId
+          });
+          jsonResponse(res, 200, { ok: true, ...result });
+        } else {
+          const result = await skipRecommendation({
+            store: learningOrchestratorStore,
+            userId,
+            recommendationId,
+            skipReason: payload.skipReason
+          });
+          jsonResponse(res, 200, { ok: true, ...result });
+        }
+      } catch (error) {
+        const status = error.statusCode || (/not found/i.test(String(error.message)) ? 404 : 400);
+        jsonResponse(res, status, { ok: false, error: error.message });
       }
       return;
     }
