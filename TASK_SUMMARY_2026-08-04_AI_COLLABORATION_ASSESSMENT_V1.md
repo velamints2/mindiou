@@ -38,4 +38,13 @@
 
 ## 生产边界
 
-- 本次未自动部署生产环境。
+- 2026-08-04 已按用户明确指令部署到 `http://demo.mindiou.top/mindiou/`。
+- 后端已部署评估接口及最近报告/清偿会话修复，服务运行目录为 `/opt/mindiou`。
+- Nginx 已增加 `/mindiou-api/api/assessment/review` 精确代理规则，并通过 `nginx -t` 后热重载。
+- 公网开放题评审返回 `200`、`ok: true` 和 `mode: model_structured`；前端题库版本为 `MIOU-ACT-V1.0`。
+- 公网 JS/CSS 与本地生产构建 SHA-256 完全一致；`#/assessment`、`#/genesis`、`#/workspace` 均返回 SPA 入口。
+- 部署后 SQLite 仍为 WAL 模式且 `integrity_check=ok`；`mindiou-db-backup.timer` 保持 active。
+- `mindiou.service` 部署后为 active，`NRestarts=0`。
+- 后端回滚点：`/opt/mindiou/deploy-backups/assessment-20260804T075138Z`。
+- Nginx 回滚点：`/etc/nginx/snippets/mindiou-locations.conf.backup-20260804T075310Z`。
+- 静态前端回滚点：`/var/www/mindiou-backup-20260804155417`。
