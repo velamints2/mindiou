@@ -34,3 +34,25 @@ export function renderPersistentNavigation(route: Route): void {
   document.body.appendChild(shell)
   document.body.classList.add('has-persistent-navigation')
 }
+
+export function renderSiteFooter(): HTMLElement {
+  const footer = el('footer', 'site-footer')
+  footer.appendChild(el('div', 'footer-brand', 'MindIOU'))
+  footer.appendChild(el('p', 'footer-tagline', t('把 AI 代劳转化为真实能力成长', 'Turn delegated AI work into real ability growth')))
+
+  const links = el('nav', 'footer-links')
+  links.setAttribute('aria-label', t('页脚导航', 'Footer navigation'))
+  ;[
+    ['#/', t('首页', 'Home')],
+    ['#/how-it-works', t('原理', 'How it works')],
+    ['#/genesis', t('创始档案', 'Genesis archive')],
+    ['#/app', getAccessToken() ? t('进入工作区', 'Open dashboard') : t('开始体验', 'Get started')]
+  ].forEach(([href, label]) => {
+    const link = el('a', 'footer-link', label) as HTMLAnchorElement
+    link.href = href
+    links.appendChild(link)
+  })
+  footer.appendChild(links)
+  footer.appendChild(el('p', 'footer-copy', '© MindIOU'))
+  return footer
+}

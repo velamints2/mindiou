@@ -4,6 +4,7 @@
 
 import { getAccessToken } from './api'
 import { el, navigate } from './router'
+import { renderSiteFooter } from './navigation'
 
 // ── 公共顶栏 ──
 
@@ -284,7 +285,7 @@ export function renderLandingPage(root: HTMLElement): void {
   page.appendChild(bottomCta)
 
   // 页脚
-  page.appendChild(renderFooter())
+  page.appendChild(renderSiteFooter())
 
   root.appendChild(page)
 }
@@ -389,23 +390,6 @@ export function renderHowItWorksPage(root: HTMLElement): void {
   cta.appendChild(ctaBtn)
   page.appendChild(cta)
 
-  page.appendChild(renderFooter())
+  page.appendChild(renderSiteFooter())
   root.appendChild(page)
-}
-
-// ── 页脚 ──
-
-function renderFooter(): HTMLElement {
-  const footer = el('footer', 'site-footer')
-  footer.appendChild(el('div', 'footer-brand', 'MindIOU'))
-  footer.appendChild(el('p', 'footer-tagline', '把 AI 代劳转化为真实能力成长'))
-  const links = el('div', 'footer-links')
-  const a1 = el('a', 'footer-link', '首页')
-  ;(a1 as HTMLAnchorElement).href = '#'
-  const a2 = el('a', 'footer-link', '原理')
-  ;(a2 as HTMLAnchorElement).href = '#/how-it-works'
-  links.appendChild(a1); links.appendChild(a2)
-  footer.appendChild(links)
-  footer.appendChild(el('p', 'footer-copy', '© MindIOU'))
-  return footer
 }

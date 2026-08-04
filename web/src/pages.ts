@@ -34,6 +34,7 @@ import {
   updateGenesisIdentity
 } from './api'
 import type { DeviceTokenInfo, GenesisIdentity } from './api'
+import { renderSiteFooter } from './navigation'
 import { isEnglish, t } from './i18n'
 import type {
   ClearanceReport,
@@ -1225,6 +1226,7 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
     finalCta.appendChild(el('small', '', t('报名不等于获得身份。完成真实训练和结业审核后，才会获得 Genesis 001 首发体验者编号。', 'Registration does not grant the identity. A Genesis 001 number is earned only after real training and completion review.')))
     page.appendChild(finalCta)
   } catch (error) { page.querySelector('.loading')?.remove(); page.appendChild(errorBox(error instanceof Error ? error.message : t('档案加载失败', 'Could not load archive'))) }
+  page.appendChild(renderSiteFooter())
 }
 
 function renderAttempt(answer: string, feedback: string, teaching?: string, nextQuestion?: string): HTMLElement {

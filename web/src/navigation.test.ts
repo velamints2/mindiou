@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderPersistentNavigation } from './navigation'
+import { renderPersistentNavigation, renderSiteFooter } from './navigation'
 
 vi.mock('./api', () => ({ getAccessToken: vi.fn(() => 'active') }))
 vi.mock('./router', async () => {
@@ -30,5 +30,13 @@ describe('persistent site navigation', () => {
   it('keeps the operational admin surface free of public navigation', () => {
     renderPersistentNavigation({ name: 'admin' })
     expect(document.querySelector('.persistent-site-navigation')).toBeNull()
+  })
+
+  it('renders all public destinations and the workspace in the footer', () => {
+    const footer = renderSiteFooter()
+    expect(footer.querySelector('a[href="#/"]')).not.toBeNull()
+    expect(footer.querySelector('a[href="#/how-it-works"]')).not.toBeNull()
+    expect(footer.querySelector('a[href="#/genesis"]')).not.toBeNull()
+    expect(footer.querySelector('a[href="#/app"]')?.textContent).toContain('进入工作区')
   })
 })
