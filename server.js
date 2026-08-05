@@ -98,6 +98,12 @@ import {
 } from "./project-ownership.js";
 import { generateModuleRecommendation, generateProjectRecommendations } from "./learning-orchestrator.js";
 import { seedOwnershipData } from "./ownership-seed.js";
+import { reportEnvValidation } from "./env-validation.js";
+
+// 启动期环境验证：值非法时打印变量级错误并退出（绝不打印值）。
+if (!reportEnvValidation(process.env)) {
+  process.exit(1);
+}
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -112,7 +118,7 @@ const sessionTtlSeconds = Number.isFinite(configuredSessionTtl)
   : 60 * 60 * 24 * 7;
 const secureSessionCookie = process.env.MINDIOU_COOKIE_SECURE === "1";
 const maxArtifactChars = Math.max(1000, Number(process.env.MAX_ARTIFACT_CHARS || 30000));
-const maxRequestBodyBytes = Math.max(1024, Number(process.env.MAX_REQUEST_BODY_BYTES || 10 * 1024 * 1024));
+const maxRequestBodyBytes = Math.max(1024, Number(process.env.MAX_REQUEST_BODY_BYTES || 8 * 1024 * 1024));
 const dailyAnalysisLimit = Math.max(1, Number(process.env.DAILY_ANALYSIS_LIMIT || 3));
 const dailyAiTokenBudget = Math.max(1000, Number(process.env.USER_DAILY_AI_TOKEN_BUDGET || 200000));
 const aiOutputTokenReserve = Math.max(1000, Number(process.env.AI_OUTPUT_TOKEN_RESERVE || 10000));
@@ -131,6 +137,7 @@ const researchBaseUrl = configuredEnv("RESEARCH_BASE_URL", aiProvider === "opena
 const researchModel = configuredEnv("RESEARCH_MODEL", process.env.OPENAI_RESEARCH_MODEL || chatModel);
 const openAiChatTimeoutMs = Number(process.env.OPENAI_CHAT_TIMEOUT_MS || 30000);
 const openAiResearchTimeoutMs = Number(process.env.OPENAI_RESEARCH_TIMEOUT_MS || 45000);
+const sttTimeoutMs = Number(process.env.STT_TIMEOUT_MS || 30000);
 const sttApiKey = configuredEnv("STT_API_KEY", aiProvider === "openai" ? aiApiKey : "");
 const sttBaseUrl = configuredEnv("STT_BASE_URL", aiProvider === "openai" ? aiBaseUrl : "").replace(/\/+$/, "");
 const sttModel = configuredEnv("STT_MODEL", process.env.OPENAI_STT_MODEL || "gpt-4o-mini-transcribe");
@@ -233,6 +240,40 @@ const rokidDemoCards = [
     repetitions: 0
   }
 ];
+
+// ── 可观察性基础设施 ──
+// 单行 JSON 结构化日志。禁止在 fields 中放入：用户对话原文、AI 输入/输出全文、
+// API 密钥、Cookie、Authorization 头、服务器密码。
+function logEvent(level, message, fields = {}) {
+  const line = JSON.stringify({
+    ts: new Date().toISOString(),
+    level,
+    msg: message,
+    ...fields
+  });
+  if (level === "error") console.error(line);
+  else if (level === "warn") console.warn(line);
+  else console.log(line);
+}
+
+function readRequestId(req) {
+  const incoming = String(req.headers["x-request-id"] || "").trim();
+  return /^[A-Za-z0-9._-]{1,128}$/.test(incoming) ? incoming : crypto.randomUUID();
+}
+
+function logRequestCompletion(req, res, requestId, startedAt) {
+  let pathname = "/";
+  try {
+    pathname = new URL(req.url || "/", "http://localhost").pathname;
+  } catch { /* 保留默认值 */ }
+  logEvent(res.statusCode >= 500 ? "error" : "info", "http_request", {
+    requestId,
+    method: String(req.method || "GET"),
+    path: pathname,
+    status: res.statusCode,
+    durationMs: Date.now() - startedAt
+  });
+}
 
 function jsonResponse(res, statusCode, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
@@ -1233,7 +1274,7 @@ function fallbackPlan(subject, level, maxUnits = 8) {
   }));
 }
 
-async function chatJson(messages, fallback) {
+async function chatJson(messages, fallback, maxTokens = 4096) {
   if (!aiApiKey || disableAi) {
     return {
       ...fallback(),
@@ -1257,6 +1298,7 @@ async function chatJson(messages, fallback) {
         temperature: 0.2,
         response_format: { type: "json_object" },
         ...(aiProvider === "deepseek" ? { thinking: { type: "disabled" } } : {}),
+        max_tokens: maxTokens,
         messages
       }),
       signal: controller.signal
@@ -2020,11 +2062,25 @@ async function transcribe(payload) {
   form.append("prompt", clean(sttPrompt).slice(0, 500));
   form.append("file", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "g2-audio.wav");
 
-  const response = await fetch(`${sttBaseUrl}/audio/transcriptions`, {
-    method: "POST",
-    headers: { "authorization": `Bearer ${sttApiKey}` },
-    body: form
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), sttTimeoutMs);
+  let response;
+  try {
+    response = await fetch(`${sttBaseUrl}/audio/transcriptions`, {
+      method: "POST",
+      headers: { "authorization": `Bearer ${sttApiKey}` },
+      body: form,
+      signal: controller.signal
+    });
+  } catch (error) {
+    const latencyMs = Date.now() - startedAt;
+    if (error?.name === "AbortError") {
+      return { ok: false, error: `STT request timed out after ${sttTimeoutMs}ms`, latencyMs };
+    }
+    return { ok: false, error: error instanceof Error ? error.message : String(error), latencyMs };
+  } finally {
+    clearTimeout(timeout);
+  }
   const result = await response.json();
   const latencyMs = Date.now() - startedAt;
   if (!response.ok) {
@@ -2104,6 +2160,10 @@ async function reviewAssessmentAnswers(payload) {
 }
 
 const server = createServer(async (req, res) => {
+  const requestId = readRequestId(req);
+  const startedAt = Date.now();
+  res.setHeader("x-request-id", requestId);
+  res.on("finish", () => logRequestCompletion(req, res, requestId, startedAt));
   try {
     if (req.method === "OPTIONS") {
       optionsResponse(res);
@@ -2134,6 +2194,41 @@ const server = createServer(async (req, res) => {
       } catch (error) {
         jsonResponse(res, 400, { ok: false, error: clean(error?.message || "Assessment review failed") });
       }
+      return;
+    }
+
+    // Liveness：进程存活即可，不检查任何依赖，不调用模型。
+    if (url.pathname === "/healthz") {
+      jsonResponse(res, 200, {
+        ok: true,
+        status: "alive",
+        uptimeSeconds: Math.round(process.uptime())
+      });
+      return;
+    }
+
+    // Readiness：关键本地依赖可读 + 配置状态分解。不调用昂贵模型探活。
+    if (url.pathname === "/readyz") {
+      const checks = {
+        authStore: { ok: true, error: "" },
+        config: {
+          ai: Boolean(aiApiKey) && !disableAi,
+          research: Boolean(researchApiKey && researchBaseUrl),
+          stt: Boolean(sttApiKey && sttBaseUrl)
+        }
+      };
+      try {
+        // 轻量只读探测：SQLite 可接受查询即视为可读。
+        authStore.getUserById("__readiness_probe__");
+      } catch (error) {
+        checks.authStore = { ok: false, error: fit(String(error?.message || error), 120) };
+      }
+      const ready = checks.authStore.ok;
+      jsonResponse(res, ready ? 200 : 503, {
+        ok: ready,
+        status: ready ? "ready" : "not_ready",
+        checks
+      });
       return;
     }
 
@@ -2290,7 +2385,7 @@ const server = createServer(async (req, res) => {
       const token = signSession({
         label: user.label,
         expiresAt,
-        jti: crypto.randomBytes(9).toString("base64url")
+        jti: crypto.randomBytes(16).toString("base64url")
       });
       res.setHeader("set-cookie", earlyAccessSessionCookie(req, token, sessionTtlSeconds));
       jsonResponse(res, 200, {
@@ -3476,7 +3571,7 @@ const server = createServer(async (req, res) => {
     // 所有权地图的 GET 路由需要绕过 405 门禁
     const isOwnershipRoute = url.pathname.startsWith("/api/projects");
     if (!isOwnershipRoute && req.method !== "POST" && req.method !== "PATCH") {
-      jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
+      jsonResponse(res, 405, { ok: false, error: "Method not allowed", requestId });
       return;
     }
     if (url.pathname === "/api/mvp0/timelines") requireJsonRequest(req);
@@ -4093,12 +4188,24 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    jsonResponse(res, 404, { ok: false, error: "Not found" });
+    jsonResponse(res, 404, { ok: false, error: "Not found", requestId });
   } catch (error) {
-    const status = Number(error.statusCode) || 500;
-    jsonResponse(res, status, {
+    const statusCode = Number(error?.statusCode) || (error instanceof SyntaxError ? 400 : 500);
+    if (statusCode >= 500) {
+      logEvent("error", "unhandled_request_error", {
+        requestId,
+        error: String(error?.message || error).slice(0, 300)
+      });
+      jsonResponse(res, statusCode, { ok: false, error: "Internal server error", requestId });
+      return;
+    }
+    const clientMessage = error instanceof SyntaxError
+      ? "Request body must be valid JSON"
+      : localizedLimitMessage(error, req);
+    jsonResponse(res, statusCode, {
       ok: false,
-      error: localizedLimitMessage(error, req),
+      error: clientMessage,
+      requestId,
       ...(error.code ? { code: error.code } : {})
     });
   }
