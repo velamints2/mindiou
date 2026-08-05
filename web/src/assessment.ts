@@ -1,6 +1,7 @@
 import { reviewAssessment, type AssessmentOpenReview } from './api'
 import { getLocale, t } from './i18n'
 import { el, navigate } from './router'
+import { renderCommunityCta } from './community-cta'
 import { ASSESSMENT_VERSION, questionsFor, roles, type AssessmentQuestion, type AssessmentRole } from './assessment-bank'
 import { scoreAssessment, type AssessmentAnswers } from './assessment-score'
 
@@ -71,6 +72,7 @@ function renderResult(root:HTMLElement,state:State,questions:AssessmentQuestion[
   const dimensionNames:Record<string,[string,string]>={independent:['独立起步','Independent start'],ownership:['解释所有权','Explanatory ownership'],alertness:['错误警觉','Error alertness'],calibration:['信心校准','Confidence calibration'],transfer:['能力迁移','Transfer'],learning:['学习闭环','Learning loop']};const dims=el('section','assessment-dimensions');dims.appendChild(el('h2','',label('六个行为维度','Six behavior dimensions')));Object.entries(result.dimensions).forEach(([key,value])=>{const row=el('div','assessment-dimension');const names=dimensionNames[key]||[key,key];row.append(el('span','',label(names[0],names[1])),el('progress','assessment-progress') as HTMLProgressElement,el('strong','',String(value)));(row.children[1] as HTMLProgressElement).max=100;(row.children[1] as HTMLProgressElement).value=value;dims.appendChild(row)});page.appendChild(dims)
   const activation=el('section','assessment-activation');activation.append(el('h2','',label('下一步：加入首期计划','Next: join Cohort 001')),el('p','',label('7 天认知清债挑战：用一段真实的 AI 协作材料开始，发现欠条、亲自解释、延迟回忆、场景迁移，把被代劳的理解一笔笔清回来。20 天开放期随报随学，个人 7 天周期，不限名额。','The 7-day cognitive-debt challenge: start from one real AI-assisted artifact—find debts, explain them yourself, recall later, transfer to new scenarios. A 20-day open window, a personal 7-day cycle, no seat limit.')));const action=el('button','btn btn-primary',label('加入首期计划','Join Cohort 001'));action.onclick=()=>navigate({name:'challenge',slug:'001'});activation.appendChild(action);page.appendChild(activation)
   page.appendChild(el('p','assessment-disclaimer',label('本测试参考公开 AI 素养、元认知和情境判断测量研究进行设计。它不是临床心理测验，也不能用于招聘、升学或能力资格认定。结果反映当前行为模式，并会随习惯和训练变化。','This research-informed test is not a clinical assessment and must not be used for hiring, admissions, or credentialing. It reflects current behavior and can change with practice.')))
+  page.appendChild(renderCommunityCta('assessment'))
   const retry=el('button','btn btn-ghost',label('重新测试','Retake'));retry.onclick=()=>{localStorage.removeItem(STATE_KEY);renderAssessmentPage(root)};page.appendChild(retry);root.appendChild(page)
 }
 
