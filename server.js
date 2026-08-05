@@ -179,7 +179,11 @@ const rawWebResearch = researchProvider === "public_web"
       model: researchModel,
       timeoutMs: openAiResearchTimeoutMs
     });
-const ownershipStorePath = process.env.OWNERSHIP_STORE_PATH || "tmp/ownership-store.json";
+// 生产环境（systemd ProtectSystem=strict + ReadWritePaths=/var/lib/mindiou）
+// 必须把所有权地图存储放到可写目录，否则会出现 EROFS 只读文件系统错误。
+// 本地开发保持 tmp/ 相对路径，与其它 store 一致。
+const ownershipStorePath = process.env.OWNERSHIP_STORE_PATH
+  || (process.env.NODE_ENV === "production" ? "/var/lib/mindiou/ownership-store.json" : "tmp/ownership-store.json");
 const ownershipStore = createOwnershipStore(ownershipStorePath);
 await ownershipStore.load();
 

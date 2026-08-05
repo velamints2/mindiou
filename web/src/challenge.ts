@@ -275,6 +275,10 @@ function renderJoin(page: HTMLElement): void {
     buy.target = '_blank'
     buy.rel = 'noopener noreferrer'
     actions.appendChild(buy)
+    actions.appendChild(el('p', 'challenge-join-note', label(
+      '点击后将进入爱发电完成支付。首次使用爱发电的用户可能需要先登录或注册；登录后即可看到完整商品介绍和权益。',
+      'You’ll complete payment on Afdian. New users may need to sign in or create an account first; the full product details and benefits will appear after login.'
+    )))
   } else {
     const buy = el('button', 'challenge-btn challenge-btn-primary', label(`支付 ${CHALLENGE.priceDisplay}，获取挑战密钥`, `Pay ${CHALLENGE.priceDisplay} for your challenge key`)) as HTMLButtonElement
     buy.disabled = true

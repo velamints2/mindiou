@@ -126,3 +126,11 @@
 - 当前 9 种结果类型的 18 个 WebP 资源（中文/英文）均返回 200；`/mindiou-api/api/genesis` 返回正常数据；`mindiou.service` active、`NRestarts=0`。
 - 回滚前的后续构建完整保留在 `/var/www/mindiou-before-v11-rollback-20260804T194956Z`，没有删除；当前静态切换不涉及 Node 服务或 SQLite 数据。
 - 本地 Web 59 项测试、TypeScript 检查和 Vite 构建通过；未强制回退并行的 Project Memory 源码改动。
+
+## 开放题模型评审代理修复（2026-08-05）
+
+- 根因：回滚后的 Nginx 配置缺少精确的 `/mindiou-api/api/assessment/review` location，公网请求被 `/mindiou-api/` 404 catch-all 拦截；前端因此总是降级为规则评审。
+- 已在本地部署配置和生产 Nginx 配置中补充精确代理：限制 AI 限流、128KB 请求体、120 秒上游超时，并转发到 `127.0.0.1:8794/api/assessment/review`。
+- `nginx -t` 通过并已热重载；Node 服务未重启，`mindiou.service` active、`NRestarts=0`。
+- 使用最小开放题请求做公网验收：`POST /mindiou-api/api/assessment/review` 返回 HTTP 200，响应 `mode: model_structured`，包含模型生成的 evidence 和 reason；当前生产模型为 DeepSeek `deepseek-v4-flash`。
+- 生产原配置已保留：`/etc/nginx/snippets/mindiou-locations.conf.backup-assessment-proxy-20260805T063137Z`。
