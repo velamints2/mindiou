@@ -1,0 +1,35 @@
+menu "MindIOU Stamp-P4"
+
+    config MINDIOU_DISPLAY_MOCK
+        bool "Mock 显示后端（串口日志）"
+        default y
+
+    config MINDIOU_DISPLAY_MIPI_DSI
+        bool "真实 MIPI DSI 显示后端（需完整资料，暂勿启用）"
+        default n
+
+    config MINDIOU_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+
+    config MINDIOU_WIFI_PASSWORD
+        string "Wi-Fi 密码"
+        default ""
+
+    config MINDIOU_BRIDGE_URI
+        string "Bridge WebSocket URI"
+        default "ws://192.168.1.100:7020"
+
+    config MINDIOU_DEVICE_ID
+        string "设备 ID"
+        default "stamp-p4-001"
+
+    config MINDIOU_RECONNECT_MAX_MS
+        int "重连最大退避（ms）"
+        default 30000
+
+    config MINDIOU_PING_INTERVAL_MS
+        int "心跳间隔（ms）"
+        default 15000
+
+endmenu
