@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MindIOU Stamp-P4 模拟器</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      background: #1a1a1a; color: #e8e8e8; min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; padding: 24px; gap: 18px;
+    }
+    h1 { font-size: 16px; font-weight: 600; margin: 0; color: #9ecbff; }
+    .conn { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+    .conn input {
+      background: #111; color: #e8e8e8; border: 1px solid #3a3a3a; border-radius: 8px;
+      padding: 8px 12px; font: inherit; width: 300px;
+    }
+    .conn button, .pad button {
+      background: #2f6fed; color: #fff; border: 0; border-radius: 8px;
+      padding: 8px 16px; font: inherit; cursor: pointer;
+    }
+    .conn button.off { background: #b3392e; }
+    .status { font-size: 13px; padding: 4px 12px; border-radius: 999px; background: #333; }
+    .status.on { background: #1f7a3d; }
+    .status.off { background: #7a1f1f; }
+    /* 1280×720 物理画布（缩放显示），640×200 逻辑内容区居中，周围黑色 */
+    .canvas {
+      width: 640px; height: 360px; background: #000; border: 2px solid #3a3a3a;
+      border-radius: 8px; position: relative; overflow: hidden;
+    }
+    .logical {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      width: 320px; height: 100px; /* 640×200 等比缩放 0.5 */
+      display: flex; flex-direction: column; justify-content: flex-start; gap: 4px;
+      padding: 6px; overflow: hidden;
+    }
+    .logical .title { font-size: 14px; font-weight: 700; color: #fff; line-height: 1.2; }
+    .logical .body { font-size: 11px; color: #d8d8d8; line-height: 1.35; white-space: pre-wrap; }
+    .logical .meta { font-size: 9px; color: #888; margin-top: auto; }
+    .logical .ctype { font-size: 9px; color: #9ecbff; text-transform: uppercase; letter-spacing: 1px; }
+    .pad { display: flex; gap: 12px; }
+    .pad button { min-width: 110px; background: #2a2a2a; border: 1px solid #444; }
+    .pad button:hover { background: #353535; }
+    .cols { display: flex; gap: 18px; width: 100%; max-width: 900px; }
+    .panel { flex: 1; background: #111; border: 1px solid #2c2c2c; border-radius: 10px; padding: 12px; }
+    .panel h2 { font-size: 12px; margin: 0 0 8px; color: #9ecbff; font-weight: 600; }
+    pre {
+      margin: 0; font-size: 10px; line-height: 1.4; color: #b8d8a8;
+      max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+    }
+    .log pre { color: #8ab4d8; }
+  </style>
+</head>
+<body>
+  <h1>MindIOU Stamp-P4 模拟器（640×200 逻辑区 / 1280×720 物理）</h1>
+
+  <div class="conn">
+    <input id="url" value="ws://127.0.0.1:7020" />
+    <input id="deviceId" value="stamp-p4-sim" style="width:160px" />
+    <button id="connectBtn">连接</button>
+    <button id="disconnectBtn" class="off">断开</button>
+    <span id="status" class="status off">未连接</span>
+  </div>
+
+  <div class="canvas">
+    <div class="logical" id="logical">
+      <div class="ctype" id="ctype">待机</div>
+      <div class="title" id="title">未连接</div>
+      <div class="body" id="body">点击「连接」接入 bridge。</div>
+      <div class="meta" id="meta"></div>
+    </div>
+  </div>
+
+  <div class="pad">
+    <button data-ev="next">下一个 (n)</button>
+    <button data-ev="repeat">重复 (r)</button>
+    <button data-ev="finish">结束 (f)</button>
+  </div>
+
+  <div class="cols">
+    <div class="panel"><h2>收到的原始 JSON</h2><pre id="rawLog"></pre></div>
+    <div class="panel log"><h2>事件日志</h2><pre id="eventLog"></pre></div>
+  </div>
+
+  <script type="module" src="./simulator.js"></script>
+</body>
+</html>
