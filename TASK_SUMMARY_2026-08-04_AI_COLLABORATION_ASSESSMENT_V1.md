@@ -60,3 +60,69 @@
 - 2026-08-04 已部署到 `https://demo.mindiou.top/mindiou/`，静态回滚点为 `/var/www/mindiou-backup-20260804200243`。
 - 公网18张图片全部返回200并与本地构建逐字节一致；线上JS/CSS SHA-256与本地构建一致。
 - 部署脚本默认公网验收地址由HTTP改为HTTPS，避免站点301强制跳转被误报为部署失败。
+
+## V1.1 分类与题库修复（本地完成，尚未部署）
+
+- 根因：V1.0 将“AI 项目监工”作为未命中其他阈值时的默认结果，且部分角色结构题没有进入计分，导致分类明显偏向单一类型。
+- 题库升级为 `MIOU-ACT-V1.1`，本地答题状态使用新存储键，避免旧答案污染新版结果。
+- 九种结果改为九套正向匹配分；最高分决定主要类型，同时展示次接近类型和根据分差、答题覆盖率计算的“结果稳定度”。
+- 四个身份仍分别使用 8 道公共题 + 4 道身份题；身份模块保持隔离，不会向研究者展示开发题或向开发者展示产品题。
+- 公共题移除 SaaS、代码上线和重试算法等职业偏向，改为跨职业的 AI 成果核验、独立来源与外部承诺场景。
+- 开发、产品、创作者模块的多选、排序、分类题均接入确定性答案矩阵，不再只依赖开放题关键词。
+- 开放题请求现在包含题目、上下文、语言和 0—3 分 rubric；模型异常时返回规则降级结果，不阻断出结果。
+- 新增回归覆盖：明显代驾、无限追问、均衡共驾不再落入“AI 项目监工”兜底；结果包含九种匹配分和有界稳定度。
+- 验证：根工程 551 项测试、Web 58 项测试全部通过；两处类型检查和生产构建全部通过。
+- 发布状态：2026-08-04 经用户明确授权部署到生产环境；本地变更仍未提交、未合并主分支。
+- 公网 SPA 为 `index-BOO1vuew.js`，包含 `MIOU-ACT-V1.1`、新版状态键和结果稳定度；公网文件与本地构建 SHA-256 一致。
+- 公网开放题接口使用包含题干、上下文和 rubric 的 V1.1 请求验证，返回 `200`、`ok: true` 和 `mode: model_structured`。
+- `mindiou.service` 为 active、`NRestarts=0`；两份 SQLite 数据库均为 WAL 模式且 `integrity_check=ok`；每日备份 timer 为 active。
+- 后端回滚点：`/opt/mindiou/deploy-backups/assessment-v1.1-20260804T232716`。
+- 静态前端回滚点：`/var/www/mindiou-backup-20260804232808`。
+
+## 结果插画加载修复（2026-08-05，已部署）
+
+- 生产资源检查确认 18 张中英文 WebP 均存在并返回 200；问题集中在结果页保留末题滚动位置、图片使用懒加载且 URL 无版本标识时可能不发起加载或继续使用旧缓存。
+- 进入结果页时强制回到顶部；结果图改为 `loading=eager` 和高优先级加载，资源 URL 增加 `MIOU-ACT-V1.1` 版本参数。
+- 首次图片请求失败会自动增加重试参数再次加载；再次失败时显示明确错误提示，不再留下无说明的空白区域。
+- 新增结果图片 DOM 回归测试；Web 59 项测试、类型检查和生产构建通过。
+- 已部署公网包 `index-BFK4xxn0.js` 与 `index-MqnnkvCF.css`，二者分别与本地构建 SHA-256 一致；18 个版本化图片 URL 全部验证为 200。
+- 本次只更新静态前端，Node 服务未重启且 `NRestarts=0`；静态回滚点为 `/var/www/mindiou-backup-20260805020413`。
+
+## 结果插画第二次线上修复（2026-08-05，已恢复正确入口）
+
+- 复查发现线上 `index.html` 曾被另一份静态发布覆盖，指向 `index-DkngHj1u.js`；该包包含 assessment 文本但没有 `assessment-results`、WebP 或图片加载逻辑，因此移动端和桌面端都会看不到图。
+- 已从已验证的 `web/dist` SPA 产物重新同步，不动后端、数据库和旧页面；当前公网 `index.html` 明确指向 `index-BFK4xxn0.js` 与 `index-MqnnkvCF.css`。
+- 公网 JS SHA-256 与本地已验证构建一致：`a2c52b27a44845d2eb0b4d8445de249c4743e07a6e40e228a57a1510052750b1`；公网 JS 已确认包含 `assessment-results` 和 `fetchPriority`。
+- 公网版本化结果图请求返回 200；`mindiou.service` 仍为 active、`NRestarts=0`。
+- 此次本地重新构建被并行未完成的 `projectMemory.ts` 路由改动阻断（`"projects"` 尚未加入路由类型）；为避免覆盖该未完成工作，部署使用此前已通过 59 项 Web 测试、类型检查和构建的 `web/dist` 产物。
+- 新静态回滚点：`/var/www/mindiou-backup-image-fix-20260805T024354`。
+
+## 题库 V1.2 扩充（2026-08-05，已部署）
+
+- 公共题由 8 道扩充为 12 道，身份题仍为每个身份 4 道，总题数由 12 道变为 16 道。
+- 新增公共行为覆盖：AI 起草与人类最终判断边界、无法解释的结论如何用独立材料重建、交付后如何复盘与迁移、真实工作中的数据/复核/失败回滚/责任边界。
+- 新增题目均提供中英文文案；多选、排序、选择题均接入确定性计分，开放题沿用题目上下文和 0—3 分 rubric。
+
+## 按用户要求回滚 V1.2（2026-08-05）
+
+- 用户反馈 V1.2 误改变主页页面、宣传活动内容和结果页后半段，要求先回滚，再以最小改动保留原图片问题修复。
+- 生产静态目录已精确恢复到 V1.1 图片修复版本：`/var/www/mindiou-backup-assessment-v12-20260805T025751`。
+- 当前公网入口为 `index-BFK4xxn0.js` / `index-MqnnkvCF.css`，包含 `MIOU-ACT-V1.1`、原 9 张结果图映射、eager 图片加载和失败重试；不包含 V1.2 的 `core-12`/16 题扩充。
+- V1.2 当前线上目录已整体保留在 `/var/www/mindiou-after-v12-before-rollback-20260805T030032`，可恢复，不影响数据。
+- 公网入口、9 张中文结果图、健康接口均已验证；Node 服务未重启，`mindiou.service` active、`NRestarts=0`。
+- 评分覆盖新增 `core-9`、`core-11`、`core-12`；结果稳定度覆盖率分母同步由 12 调整为 16。
+- 测试版本升级为 `MIOU-ACT-V1.2`，浏览器状态键升级为 `mindiou_ai_collaboration_test_v1_2`，避免 V1.1 未完成答案直接进入 V1.2 结果。
+- 首屏测试时长由 5—7 分钟更新为 7—10 分钟，题数说明更新为 16 题。
+- Web 测试 59 项通过；Vite 生产构建通过，产物包含 `MIOU-ACT-V1.2`、`core-12` 和结果图片加载逻辑。
+- 因并行未完成的 `projectMemory.ts` 改动尚未加入 `projects` 路由类型，完整 `tsc` 检查当前仍会报该独立错误；本次部署使用已通过 Web 测试、经 Vite 构建验证的 SPA 产物，未修改或覆盖那组并行源文件。
+- 公网入口已切换至 `index-C1a7WKZ8.js` / `index-Db9HixoU.css`；公网 JS 与本地 Vite 产物 SHA-256 一致，9 张中文结果图均返回 200。
+- Node 服务未重启，`mindiou.service` active、`NRestarts=0`；静态回滚点：`/var/www/mindiou-backup-assessment-v12-20260805T025751`。
+
+## 公网再次回滚到用户指定版本（2026-08-05）
+
+- 复查发现公网曾被后续 `index-Bc5NXxWX.js` 构建覆盖，导致上一条回滚记录与用户实际看到的版本不一致。
+- 已将公网完整静态目录切回用户指定的 V1.1 图片修复快照 `/var/www/mindiou-backup-assessment-v12-20260805T025751`，不是只替换单个入口文件。
+- 当前公网入口为 `index-BFK4xxn0.js` / `index-MqnnkvCF.css`，包含主页、`#/genesis` 001 期档案内容、原结果页后半段、`MIOU-ACT-V1.1`、`assessment-results`、`fetchPriority` 和 9 种结果类型的中英文图片映射。
+- 当前 9 种结果类型的 18 个 WebP 资源（中文/英文）均返回 200；`/mindiou-api/api/genesis` 返回正常数据；`mindiou.service` active、`NRestarts=0`。
+- 回滚前的后续构建完整保留在 `/var/www/mindiou-before-v11-rollback-20260804T194956Z`，没有删除；当前静态切换不涉及 Node 服务或 SQLite 数据。
+- 本地 Web 59 项测试、TypeScript 检查和 Vite 构建通过；未强制回退并行的 Project Memory 源码改动。

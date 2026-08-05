@@ -379,6 +379,22 @@ export type DebtDetailResponse = {
   reviews: ReviewTask[]
   understandingLevel: UnderstandingLevel
   masteryLabel: string
+  projectMemory?: {
+    links: Array<{
+      id: string
+      relation: string
+      relevance: string
+      artifact: { id: string; name: string; repositoryRelativePath?: string; symbolName?: string; gitCommitHash?: string; projectId: string }
+      workItemId?: string
+      workItemTitle?: string
+      sessionId?: string
+      sessionTitle?: string
+      decisionId?: string
+      decisionTitle?: string
+    }>
+    recurrences: Array<{ id: string; projectId: string; projectName?: string; sessionId?: string; reason: string; confidence: number }>
+    evidence: Array<{ id: string; evidenceLevel: string; evidenceType: string; result: string; evidenceSummary?: string; occurredAt: string }>
+  }
 }
 
 export type StartReviewResponse = {

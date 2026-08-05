@@ -77,6 +77,13 @@ export class ApiError extends Error {
   }
 }
 
+export async function projectMemoryRequest<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  return apiFetch<T>(path, options)
+}
+
 function defaultErrorMessage(status: number): string {
   if ([502, 503, 504].includes(status)) {
     return t('服务暂时不可用，请稍后重试')
@@ -526,7 +533,7 @@ export type AssessmentOpenReview = {
   reason: string
 }
 
-export async function reviewAssessment(payload: { version: string; role: string; answers: Record<string,string> }): Promise<ApiResult<{ reviews: AssessmentOpenReview[]; mode: 'model_structured'|'rule_fallback' }>> {
+export async function reviewAssessment(payload: { version: string; role: string; locale: string; answers: Record<string,string>; questions: Array<{ id:string; title:string; context?:string; rubric?:string }> }): Promise<ApiResult<{ reviews: AssessmentOpenReview[]; mode: 'model_structured'|'rule_fallback' }>> {
   return apiFetch('/api/assessment/review', { method: 'POST', body: JSON.stringify(payload) })
 }
 

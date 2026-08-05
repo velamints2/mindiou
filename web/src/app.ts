@@ -25,6 +25,7 @@ import { getLocale, observeTranslations, setLocale } from './i18n'
 import { renderPersistentNavigation } from './navigation'
 import { renderAssessmentPage } from './assessment'
 import { renderChallengePage } from './challenge'
+import { renderAgentSessionPage, renderProjectListPage, renderProjectPage, renderWorkItemPage } from './projectMemory'
 
 const app = document.getElementById('app') as HTMLElement
 observeTranslations(app)
@@ -165,6 +166,22 @@ async function render(route: Route): Promise<void> {
     case 'repayment-detail':
       await renderRepaymentDetailPage(app, route.gapId)
       trackRoute('repayment')
+      return
+    case 'projects':
+      await renderProjectListPage(app)
+      trackRoute('projects')
+      return
+    case 'project':
+      await renderProjectPage(app, route.projectId)
+      trackRoute('project')
+      return
+    case 'work-item':
+      await renderWorkItemPage(app, route.projectId, route.workItemId)
+      trackRoute('work-item')
+      return
+    case 'agent-session':
+      await renderAgentSessionPage(app, route.sessionId)
+      trackRoute('agent-session')
       return
     case 'not-found':
     default:

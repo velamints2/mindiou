@@ -72,6 +72,13 @@ import {
   completePendingReviewItems,
   updateCapabilityProfile
 } from "./cognitive-repayment.js";
+import {
+  analyzeNormalizedSession,
+  createAgentSessionAdapters,
+  fingerprint,
+  normalizeSessionImport
+} from "./project-memory-analysis.js";
+import { createProjectMemoryStore } from "./project-memory-store.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -135,6 +142,9 @@ const repaymentStore = createCognitiveRepaymentStore(dataDbPath, { legacyJsonPat
 await repaymentStore.load();
 const authStore = createAuthStore(dataDbPath);
 const usageLedger = createUsageLedger(dataDbPath);
+const projectMemoryStore = createProjectMemoryStore(dataDbPath);
+const projectMemoryHookToken = process.env.PROJECT_MEMORY_HOOK_TOKEN || "";
+const projectMemoryAdapters = createAgentSessionAdapters();
 const rawWebResearch = researchProvider === "public_web"
   ? createPublicWebResearch({ timeoutMs: openAiResearchTimeoutMs })
   : createOpenAiWebResearch({
@@ -537,6 +547,334 @@ function loadOwnedMvp1Session(id, userId) {
     return mvp1Store.getSession(id, userId);
   } catch {
     return null;
+  }
+}
+
+function projectMemoryTokenSet(value) {
+  const source = String(value || "").toLowerCase();
+  const tokens = source.split(/[^\p{L}\p{N}_-]+/u).map(token => token.trim()).filter(token => token.length >= 2);
+  for (const phrase of source.match(/[\u4e00-\u9fff]{2,}/g) || []) {
+    for (let size = 2; size <= Math.min(4, phrase.length); size += 1) {
+      for (let index = 0; index + size <= phrase.length; index += 1) tokens.push(phrase.slice(index, index + size));
+    }
+  }
+  return tokens;
+}
+
+function projectMemorySimilarity(left, right) {
+  const a = new Set(projectMemoryTokenSet(left));
+  const b = new Set(projectMemoryTokenSet(right));
+  if (!a.size || !b.size) return 0;
+  return [...a].filter(token => b.has(token)).length / Math.max(1, Math.min(a.size, b.size));
+}
+
+function projectMemoryAnalysisForStorage(analysis) {
+  const safe = { ...(analysis || {}) };
+  delete safe.messages;
+  return safe;
+}
+
+function projectMemoryCandidateArtifacts(normalized, analysis) {
+  const combined = [
+    ...(analysis?.artifactCandidates || []),
+    ...(normalized.changedArtifacts || []).map(item => ({ ...item, type: item.type || "file", path: item.path || item.repositoryRelativePath })),
+    ...(normalized.commits || []).map(item => ({
+      ...item,
+      type: "commit",
+      gitCommitHash: item.gitCommitHash || item.hash || item.commitHash,
+      name: item.name || "Commit " + (item.gitCommitHash || item.hash || item.commitHash || "")
+    }))
+  ];
+  const dedupe = new Map();
+  for (const item of combined) {
+    const key = [item.type, item.path || item.repositoryRelativePath, item.symbolName, item.gitCommitHash || item.hash].join("|");
+    if (!dedupe.has(key)) dedupe.set(key, item);
+  }
+  return [...dedupe.values()];
+}
+
+function projectMemoryFindWorkItem(projectId, userId, candidate, artifacts) {
+  const existing = projectMemoryStore.listWorkItems(projectId, userId);
+  let best = null;
+  for (const workItem of existing) {
+    const titleScore = projectMemorySimilarity(candidate.title, workItem.title);
+    const summaryScore = projectMemorySimilarity(candidate.summary, workItem.summary || "");
+    const linked = projectMemoryStore.listWorkItemArtifacts(workItem.id, userId);
+    const artifactScore = artifacts.length
+      ? linked.filter(artifact => artifacts.some(item =>
+        (artifact.repositoryRelativePath && item.repositoryRelativePath === artifact.repositoryRelativePath) ||
+        (artifact.symbolName && item.symbolName === artifact.symbolName)
+      )).length / artifacts.length
+      : 0;
+    const score = Math.min(1, titleScore * 0.6 + summaryScore * 0.15 + artifactScore * 0.25);
+    if (!best || score > best.score) best = { workItem, score };
+  }
+  return best;
+}
+
+function projectMemorySearch(query, projectId, userId) {
+  const results = projectMemoryStore.search(query, projectId, userId);
+  const needle = String(query || "").toLowerCase().trim();
+  const debts = trainingStore.listCognitiveDebts(userId).filter(debt => {
+    const links = projectMemoryStore.listDebtLinks(debt.id, userId);
+    const inProject = !projectId || links.some(link => link.artifact.projectId === projectId);
+    const textMatch = !needle || [debt.id, debt.gapText, debt.gapEvidence, debt.status].some(value => String(value || "").toLowerCase().includes(needle));
+    const linkedArtifactMatch = !needle || links.some(link => [
+      link.artifact.name, link.artifact.repositoryRelativePath, link.artifact.symbolName, link.artifact.gitCommitHash
+    ].some(value => String(value || "").toLowerCase().includes(needle)));
+    return inProject && (textMatch || linkedArtifactMatch);
+  }).map(debt => ({ ...debt, context: projectMemoryStore.listDebtLinks(debt.id, userId).slice(0, 8) }));
+  results.groups.cognitiveDebts = debts;
+  results.total = Object.values(results.groups).reduce((total, group) => total + group.length, 0);
+  return results;
+}
+
+async function projectMemoryImportSession(input, userId, importMethod = "manual_paste") {
+  if (input.rawContentStorage === "encrypted") {
+    throw new Error("Encrypted raw content storage is not enabled; choose not_stored or redacted");
+  }
+  const adapter = Array.isArray(input.events)
+    ? projectMemoryAdapters.find(item => item.platform === "hook")
+    : projectMemoryAdapters.find(item => item.platform === "manual");
+  const normalized = await (adapter || projectMemoryAdapters[0]).parse({ ...input, importMethod });
+  const existingSession = projectMemoryStore.findAgentSessionByFingerprint(normalized.sourceFingerprint, userId);
+  if (existingSession) {
+    const existingDetail = projectMemoryStore.getSessionDetail(existingSession.id, userId);
+    return {
+      project: projectMemoryStore.getProject(existingSession.projectId, userId),
+      session: existingDetail,
+      analysis: existingSession.analysis || {},
+      workItem: existingDetail.workItems[0] || null,
+      workItemMatch: { confidence: 1, action: "idempotent", existing: true },
+      idempotent: true
+    };
+  }
+  const project = projectMemoryStore.ensureProject({
+    id: input.projectId,
+    name: input.projectName || normalized.projectHints.workspaceName || "未命名项目",
+    description: input.projectDescription,
+    projectType: input.projectType || "software",
+    repositoryUrl: normalized.projectHints.repositoryUrl,
+    localWorkspaceFingerprint: normalized.projectHints.gitRootFingerprint,
+    defaultBranch: input.defaultBranch
+  }, userId);
+  const analysis = analyzeNormalizedSession(normalized);
+  const savedSession = projectMemoryStore.saveAgentSession({
+    projectId: project.id,
+    platform: normalized.platform,
+    externalSessionId: normalized.externalSessionId,
+    sourceFingerprint: normalized.sourceFingerprint,
+    startedAt: normalized.startedAt,
+    endedAt: normalized.endedAt,
+    title: input.title || analysis.workItemCandidates[0]?.title,
+    rawTitle: input.rawTitle,
+    userIntentSummary: analysis.userIntent,
+    implementationSummary: analysis.implementationSummary,
+    outcomeSummary: analysis.outcomeSummary,
+    keyTopics: analysis.keyTopics,
+    technologies: analysis.technologies,
+    importMethod,
+    rawContentStorage: input.rawContentStorage,
+    rawContentReference: input.rawContentReference,
+    rawContent: normalized.rawContent,
+    processingStatus: "completed",
+    analysis: projectMemoryAnalysisForStorage(analysis)
+  }, userId);
+  const artifacts = [];
+  for (const candidate of projectMemoryCandidateArtifacts(normalized, analysis)) {
+    const artifact = projectMemoryStore.upsertArtifact({
+      projectId: project.id,
+      type: candidate.type === "function" ? "function" : candidate.type === "commit" ? "commit" : candidate.type || "file",
+      name: candidate.name || candidate.symbolName || candidate.path || candidate.repositoryRelativePath || "Artifact " + (candidate.gitCommitHash || ""),
+      repositoryRelativePath: candidate.path || candidate.repositoryRelativePath,
+      symbolName: candidate.symbolName,
+      gitCommitHash: candidate.gitCommitHash || candidate.hash || candidate.commitHash,
+      pullRequestUrl: candidate.pullRequestUrl,
+      contentHash: candidate.contentHash,
+      diffSummary: candidate.diffSummary,
+      relevantSnippet: candidate.relevantSnippet,
+      language: candidate.language,
+      sensitivity: candidate.sensitivity || "metadata_only"
+    }, userId);
+    projectMemoryStore.linkSessionArtifact(savedSession.id, artifact.id, {
+      relation: candidate.relation || "modified"
+    }, userId);
+    artifacts.push({ ...artifact, relation: candidate.relation || "modified", confidence: Number(candidate.confidence || 0.8) });
+  }
+  const candidateWorkItem = analysis.workItemCandidates[0];
+  const match = candidateWorkItem ? projectMemoryFindWorkItem(project.id, userId, candidateWorkItem, artifacts) : null;
+  let workItem = null;
+  let workItemMatch = { confidence: candidateWorkItem?.confidence || 0, action: "pending_confirmation" };
+  if (match && match.score >= 0.85) {
+    workItem = match.workItem;
+    workItemMatch = { confidence: match.score, action: "auto_linked", existing: true };
+  } else if (candidateWorkItem && candidateWorkItem.confidence >= 0.85) {
+    workItem = projectMemoryStore.createWorkItem({
+      projectId: project.id,
+      title: candidateWorkItem.title,
+      summary: candidateWorkItem.summary,
+      type: candidateWorkItem.type,
+      source: "session_import",
+      confidence: candidateWorkItem.confidence,
+      status: "in_progress"
+    }, userId);
+    workItemMatch = { confidence: candidateWorkItem.confidence, action: "created", existing: false };
+  }
+  if (workItem) {
+    projectMemoryStore.linkSessionWorkItem(savedSession.id, workItem.id, {
+      relation: "created",
+      confidence: workItemMatch.confidence,
+      source: "automatic"
+    }, userId);
+    for (const artifact of artifacts) {
+      projectMemoryStore.linkWorkItemArtifact(workItem.id, artifact.id, {
+        relation: artifact.relation,
+        sourceSessionId: savedSession.id
+      }, userId);
+    }
+  }
+  const decisions = [];
+  for (const candidate of analysis.decisionCandidates || []) {
+    decisions.push(projectMemoryStore.createDecision({
+      projectId: project.id,
+      workItemId: workItem?.id,
+      sessionId: savedSession.id,
+      title: candidate.title,
+      decision: candidate.decision,
+      rationale: candidate.rationale,
+      alternatives: candidate.alternatives,
+      tradeoffs: candidate.tradeoffs,
+      assumptions: candidate.assumptions,
+      risks: candidate.risks,
+      decisionType: candidate.type || candidate.decisionType,
+      decisionMaker: candidate.decisionMaker,
+      userParticipation: candidate.userParticipation,
+      importance: candidate.importance
+    }, userId));
+  }
+  return {
+    project,
+    session: projectMemoryStore.getSessionDetail(savedSession.id, userId),
+    analysis: { ...analysis, artifacts: artifacts.map(item => item.id), decisions: decisions.map(item => item.id) },
+    workItem,
+    workItemMatch,
+    idempotent: false
+  };
+}
+
+async function projectMemoryDetectRecurrences(result, userId) {
+  const existingDebts = trainingStore.listCognitiveDebts(userId);
+  const context = [
+    result.analysis?.userIntent,
+    result.analysis?.implementationSummary,
+    ...(result.analysis?.keyTopics || [])
+  ].join(" ");
+  const recurrences = [];
+  for (const debt of existingDebts) {
+    const similarity = projectMemorySimilarity(debt.gapText, context);
+    if (similarity < 0.55 || !result.workItem) continue;
+    const recurrence = projectMemoryStore.createRecurrence({
+      debtId: debt.id,
+      projectId: result.project.id,
+      workItemId: result.workItem.id,
+      sessionId: result.session.session.id,
+      artifactId: result.session.artifacts[0]?.id,
+      reason: "新会话与历史欠条主题相关（相似度 " + similarity.toFixed(2) + "），需要确认是迁移还是复发。",
+      confidence: similarity
+    }, userId);
+    recurrences.push(recurrence);
+    if (similarity >= 0.85) {
+      const profile = trainingStore.getMasteryProfile(debt.id);
+      if (profile) await trainingStore.saveMasteryProfile(handleRelapse(profile));
+      debt.status = "relapsed";
+      debt.recurrenceCount = Number(debt.recurrenceCount || 0) + 1;
+      debt.updatedAt = new Date().toISOString();
+      await trainingStore.saveCognitiveDebt(debt);
+    }
+  }
+  return recurrences;
+}
+
+async function projectMemoryAcceptDebtCandidate(sessionId, index, userId) {
+  const detail = projectMemoryStore.getSessionDetail(sessionId, userId);
+  const candidate = detail.session.analysis?.cognitiveDebtCandidates?.[Number(index)];
+  if (!candidate) throw new Error("Cognitive debt candidate not found");
+  const existing = trainingStore.findCognitiveDebtByGap(userId, candidate.description || candidate.title);
+  const debt = existing || createCognitiveDebt({
+    userId,
+    reportId: "project-memory:" + sessionId,
+    cardId: detail.workItems[0]?.id,
+    gapText: candidate.description || candidate.title,
+    gapEvidence: candidate.reason
+  });
+  if (!existing) await trainingStore.saveCognitiveDebt(debt);
+  const workItem = detail.workItems[0];
+  const artifacts = detail.artifacts;
+  const decisions = detail.decisions;
+  for (const artifact of artifacts) {
+    projectMemoryStore.linkDebtArtifact({
+      debtId: debt.id,
+      artifactId: artifact.id,
+      workItemId: workItem?.id,
+      sessionId,
+      decisionId: decisions[0]?.id,
+      relation: "implemented_in",
+      relevance: artifact.id === artifacts[0]?.id ? "primary" : "secondary"
+    }, userId);
+  }
+  if (!trainingStore.getMasteryProfile(debt.id)) {
+    await trainingStore.saveMasteryProfile({
+      cognitiveDebtId: debt.id,
+      conceptualUnderstanding: 0,
+      independentRecall: 0,
+      hintIndependence: 0,
+      misconceptionResistance: 0,
+      transferAbility: 0,
+      retentionStrength: 0,
+      overallMastery: 0,
+      currentStage: 0,
+      successfulAttempts: 0,
+      failedAttempts: 0,
+      relapseCount: 0
+    });
+  }
+  return { debt, links: projectMemoryStore.listDebtLinks(debt.id, userId) };
+}
+
+async function projectMemoryRecordTrainingEvidence(attempt, userId) {
+  if (!attempt?.cognitiveDebtId || attempt.userId !== userId) return;
+  const levelByStage = {
+    initial_compensation: "E1",
+    delayed_recall: "E2",
+    misconception_check: "E3",
+    error_detection: "E3",
+    scenario_transfer: "E4",
+    real_work_validation: "E5"
+  };
+  const typeByStage = {
+    initial_compensation: "read",
+    delayed_recall: "independent_explanation",
+    misconception_check: "misconception_detection",
+    error_detection: "error_detection",
+    scenario_transfer: "scenario_transfer",
+    real_work_validation: "real_work_validation"
+  };
+  const links = projectMemoryStore.listDebtLinks(attempt.cognitiveDebtId, userId);
+  if (!links.length || projectMemoryStore.listEvidenceForDebt(attempt.cognitiveDebtId, userId).some(item => item.trainingAttemptId === attempt.id)) return;
+  for (const link of links) {
+    projectMemoryStore.createEvidence({
+      userId,
+      debtId: attempt.cognitiveDebtId,
+      projectId: link.artifact.projectId,
+      workItemId: link.workItemId,
+      artifactId: link.artifact.id,
+      trainingAttemptId: attempt.id,
+      evidenceType: typeByStage[attempt.trainingStage] || "read",
+      evidenceLevel: levelByStage[attempt.trainingStage] || "E0",
+      result: attempt.evaluation?.passed ? "passed" : "partial",
+      evidenceSummary: "训练阶段 " + attempt.trainingStage + " 的既有训练结果；真实所有权仍需按证据核验。",
+      occurredAt: attempt.completedAt || new Date().toISOString()
+    }, userId);
   }
 }
 
@@ -1567,17 +1905,27 @@ function fallbackAssessmentReview(answers) {
 async function reviewAssessmentAnswers(payload) {
   const answers = payload?.answers && typeof payload.answers === "object" ? payload.answers : {};
   const limited = Object.fromEntries(Object.entries(answers).slice(0, 12).map(([id, value]) => [clean(id).slice(0, 40), clean(value).slice(0, 3000)]).filter(([, value]) => value));
+  const questions = Array.isArray(payload?.questions) ? payload.questions.slice(0, 12).map(question => ({
+    id: clean(question?.id).slice(0, 40), title: clean(question?.title).slice(0, 500),
+    context: clean(question?.context).slice(0, 2000), rubric: clean(question?.rubric).slice(0, 1000)
+  })).filter(question => question.id && Object.hasOwn(limited, question.id)) : [];
   const fallback = () => fallbackAssessmentReview(limited);
-  const result = await chatJson([
-    { role: "system", content: [
-      "Evaluate constructed responses in MindIOU's AI collaboration behavior test.",
-      "Do not infer personality, occupation, intelligence, or long-term mastery.",
-      "Score only the evidence in each answer. Each field is an integer 0-3.",
-      "Quote a short exact excerpt from the answer in evidence.",
-      "Return JSON only: {reviews:[{questionId,causal_explanation,independent_judgment,risk_identification,uncertainty_awareness,transfer,evidence,reason}]}"
-    ].join("\n") },
-    { role: "user", content: JSON.stringify({ version: clean(payload?.version), role: clean(payload?.role), answers: limited }) }
-  ], fallback);
+  let result;
+  try {
+    result = await chatJson([
+      { role: "system", content: [
+        "Evaluate constructed responses in MindIOU's AI collaboration behavior test.",
+        "Use each question's context and rubric. Do not reward jargon unless it answers that rubric.",
+        "Do not infer personality, occupation, intelligence, or long-term mastery.",
+        "Score only evidence present in the answer. Each field is an integer 0-3.",
+        "Quote a short exact excerpt from the answer in evidence.",
+        "Return JSON only: {reviews:[{questionId,causal_explanation,independent_judgment,risk_identification,uncertainty_awareness,transfer,evidence,reason}]}"
+      ].join("\n") },
+      { role: "user", content: JSON.stringify({ version: clean(payload?.version), role: clean(payload?.role), locale: clean(payload?.locale), questions: questions.map(question => ({...question, answer: limited[question.id]})) }) }
+    ], fallback);
+  } catch {
+    result = { ...fallback(), __fallback: true };
+  }
   const reviews = Array.isArray(result?.reviews) ? result.reviews.slice(0, 12).map(item => ({
     questionId: clean(item?.questionId).slice(0, 40),
     causal_explanation: Math.max(0, Math.min(3, Number(item?.causal_explanation) || 0)),
@@ -1804,6 +2152,293 @@ const server = createServer(async (req, res) => {
       mvp0Store, spiralStore, eventLog, mvp1Sessions, authStore
     })) return;
 
+    // ── Project Memory: project, session, artifact, decision and evidence graph ──
+    const pmProjectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+    const pmProjectMemoryMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/memory$/);
+    const pmProjectTimelineMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/timeline$/);
+    const pmProjectSearchMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/search$/);
+    const pmProjectOwnershipMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership$/);
+    const pmProjectWorkItemsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/work-items$/);
+    const pmProjectArtifactsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/artifacts$/);
+    const pmProjectDecisionsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/decisions$/);
+    const pmWorkItemMatch = url.pathname.match(/^\/api\/work-items\/([^/]+)$/);
+    const pmWorkItemMergeMatch = url.pathname.match(/^\/api\/work-items\/([^/]+)\/merge$/);
+    const pmWorkItemSplitMatch = url.pathname.match(/^\/api\/work-items\/([^/]+)\/split$/);
+    const pmSessionMatch = url.pathname.match(/^\/api\/agent-sessions\/([^/]+)$/);
+    const pmSessionWorkItemLinkMatch = url.pathname.match(/^\/api\/agent-sessions\/([^/]+)\/link-work-item$/);
+    const pmAnalyzeMatch = url.pathname.match(/^\/api\/agent-sessions\/([^/]+)\/(analyze|reprocess)$/);
+    const pmDebtArtifactMatch = url.pathname.match(/^\/api\/debts\/([^/]+)\/artifacts$/);
+    const pmDebtArtifactDeleteMatch = url.pathname.match(/^\/api\/debts\/([^/]+)\/artifacts\/([^/]+)$/);
+    const pmDebtHistoryMatch = url.pathname.match(/^\/api\/debts\/([^/]+)\/project-history$/);
+    const pmDebtRecurrencesMatch = url.pathname.match(/^\/api\/debts\/([^/]+)\/recurrences$/);
+    const pmDebtEvidenceMatch = url.pathname.match(/^\/api\/debts\/([^/]+)\/evidence$/);
+    const pmArtifactMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)$/);
+    const pmArtifactDebtMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/link-debt$/);
+    const pmArtifactSessionMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/link-session$/);
+    const pmDecisionMatch = url.pathname.match(/^\/api\/decisions\/([^/]+)$/);
+    const pmSessionCandidateMatch = url.pathname.match(/^\/api\/agent-sessions\/([^/]+)\/debt-candidates\/([^/]+)\/accept$/);
+    const pmHookTokenMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/hook-token$/);
+    const pmHookTokenRevokeMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/hook-token\/([^/]+)$/);
+
+    const isProjectMemoryRoute = url.pathname === "/api/projects" ||
+      url.pathname === "/api/search" ||
+      url.pathname === "/api/agent-sessions/import" ||
+      url.pathname === "/api/agent-sessions/events" ||
+      pmProjectMatch || pmProjectMemoryMatch || pmProjectTimelineMatch || pmProjectSearchMatch ||
+      pmProjectOwnershipMatch || pmProjectWorkItemsMatch || pmProjectArtifactsMatch || pmProjectDecisionsMatch ||
+      pmWorkItemMatch || pmWorkItemMergeMatch || pmWorkItemSplitMatch || pmSessionMatch || pmSessionWorkItemLinkMatch || pmAnalyzeMatch ||
+      pmDebtArtifactMatch || pmDebtArtifactDeleteMatch || pmDebtHistoryMatch || pmDebtRecurrencesMatch ||
+      pmArtifactMatch || pmArtifactDebtMatch || pmArtifactSessionMatch || pmDecisionMatch ||
+      pmDebtEvidenceMatch ||
+      pmSessionCandidateMatch || pmHookTokenMatch || pmHookTokenRevokeMatch;
+    if (isProjectMemoryRoute) {
+      let body = {};
+      if (req.method !== "GET" && req.method !== "DELETE") {
+        requireJsonRequest(req);
+        body = parseJson(await readBody(req));
+      }
+      const isHookEventRoute = req.method === "POST" && url.pathname === "/api/agent-sessions/events";
+      let user = null;
+      let hookIdentity = null;
+      if (isHookEventRoute) {
+        const bearer = readBearer(req);
+        if (bearer) {
+          hookIdentity = projectMemoryStore.validateHookToken(bearer);
+          if (!hookIdentity && projectMemoryHookToken && safeEqual(bearer, projectMemoryHookToken) && body.userId) {
+            if (authStore.getUserById(String(body.userId))) {
+              hookIdentity = { userId: String(body.userId), projectId: body.projectId || null };
+            }
+          }
+          if (!hookIdentity) {
+            jsonResponse(res, 401, { ok: false, error: "Invalid Project Memory hook token" });
+            return;
+          }
+          user = { id: hookIdentity.userId };
+        } else {
+          user = requireAuth(req, res);
+          if (!user) return;
+        }
+      } else {
+        user = requireAuth(req, res);
+        if (!user) return;
+      }
+      try {
+        if (req.method === "GET" && url.pathname === "/api/projects") {
+          jsonResponse(res, 200, { ok: true, projects: projectMemoryStore.listProjects(user.id) });
+          return;
+        }
+        if (req.method === "POST" && url.pathname === "/api/projects") {
+          jsonResponse(res, 201, { ok: true, project: projectMemoryStore.createProject(body, user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmProjectMatch) {
+          jsonResponse(res, 200, { ok: true, project: projectMemoryStore.getProject(decodeURIComponent(pmProjectMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "PATCH" && pmProjectMatch) {
+          jsonResponse(res, 200, { ok: true, project: projectMemoryStore.updateProject(decodeURIComponent(pmProjectMatch[1]), body, user.id) });
+          return;
+        }
+        if (req.method === "DELETE" && pmProjectMatch) {
+          jsonResponse(res, 200, { ok: true, project: projectMemoryStore.deleteProject(decodeURIComponent(pmProjectMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmProjectMemoryMatch) {
+          const projectId = decodeURIComponent(pmProjectMemoryMatch[1]);
+          jsonResponse(res, 200, { ok: true, memory: projectMemoryStore.memory(projectId, user.id, trainingStore.listCognitiveDebts(user.id)) });
+          return;
+        }
+        if (req.method === "GET" && pmProjectTimelineMatch) {
+          jsonResponse(res, 200, { ok: true, timeline: projectMemoryStore.timeline(decodeURIComponent(pmProjectTimelineMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmProjectSearchMatch) {
+          jsonResponse(res, 200, { ok: true, results: projectMemorySearch(url.searchParams.get("q") || "", decodeURIComponent(pmProjectSearchMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmProjectOwnershipMatch) {
+          const projectId = decodeURIComponent(pmProjectOwnershipMatch[1]);
+          jsonResponse(res, 200, { ok: true, ownership: projectMemoryStore.getOwnership(projectId, user.id, trainingStore.listCognitiveDebts(user.id)) });
+          return;
+        }
+        if (req.method === "GET" && pmProjectWorkItemsMatch) {
+          jsonResponse(res, 200, { ok: true, workItems: projectMemoryStore.listWorkItems(decodeURIComponent(pmProjectWorkItemsMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "POST" && pmProjectWorkItemsMatch) {
+          jsonResponse(res, 201, { ok: true, workItem: projectMemoryStore.createWorkItem({ ...body, projectId: decodeURIComponent(pmProjectWorkItemsMatch[1]) }, user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmProjectArtifactsMatch) {
+          jsonResponse(res, 200, { ok: true, artifacts: projectMemoryStore.listArtifacts(decodeURIComponent(pmProjectArtifactsMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmProjectDecisionsMatch) {
+          jsonResponse(res, 200, { ok: true, decisions: projectMemoryStore.listDecisions(decodeURIComponent(pmProjectDecisionsMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmWorkItemMatch) {
+          jsonResponse(res, 200, { ok: true, detail: projectMemoryStore.getWorkItemDetail(decodeURIComponent(pmWorkItemMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "PATCH" && pmWorkItemMatch) {
+          jsonResponse(res, 200, { ok: true, workItem: projectMemoryStore.updateWorkItem(decodeURIComponent(pmWorkItemMatch[1]), body, user.id) });
+          return;
+        }
+        if (req.method === "POST" && pmWorkItemMergeMatch) {
+          const targetId = decodeURIComponent(pmWorkItemMergeMatch[1]);
+          jsonResponse(res, 200, { ok: true, merge: projectMemoryStore.mergeWorkItems(targetId, body.sourceWorkItemId || body.sourceId, user.id) });
+          return;
+        }
+        if (req.method === "POST" && pmWorkItemSplitMatch) {
+          jsonResponse(res, 201, { ok: true, workItem: projectMemoryStore.splitWorkItem(decodeURIComponent(pmWorkItemSplitMatch[1]), body, user.id) });
+          return;
+        }
+        if (req.method === "POST" && url.pathname === "/api/agent-sessions/import") {
+          const result = await projectMemoryImportSession(body, user.id, body.importMethod || "manual_paste");
+          result.recurrences = result.idempotent ? [] : await projectMemoryDetectRecurrences(result, user.id);
+          jsonResponse(res, 200, { ok: true, ...result });
+          return;
+        }
+        if (req.method === "POST" && url.pathname === "/api/agent-sessions/events") {
+          const events = Array.isArray(body.events) ? body.events : [body];
+          if (!events.length) throw new Error("events must not be empty");
+          if (hookIdentity?.projectId && body.projectId && hookIdentity.projectId !== body.projectId) throw new Error("Hook token is bound to another project");
+          for (const event of events) projectMemoryStore.recordHookEvent({ ...event, projectId: event.projectId || body.projectId || hookIdentity?.projectId, sessionId: event.sessionId || body.sessionId }, user.id);
+          const eventIds = events.map(event => event.id || event.idempotencyKey || event.type);
+          const result = await projectMemoryImportSession({
+            ...body,
+            projectId: body.projectId || hookIdentity?.projectId,
+            externalSessionId: body.externalSessionId || body.sessionId,
+            sourceFingerprint: body.sourceFingerprint || fingerprint({ projectId: body.projectId || hookIdentity?.projectId, sessionId: body.sessionId, eventIds }),
+            events
+          }, user.id, "hook");
+          result.recurrences = result.idempotent ? [] : await projectMemoryDetectRecurrences(result, user.id);
+          jsonResponse(res, 200, { ok: true, ...result, eventsAccepted: events.length });
+          return;
+        }
+        if (req.method === "GET" && pmSessionMatch) {
+          jsonResponse(res, 200, { ok: true, detail: projectMemoryStore.getSessionDetail(decodeURIComponent(pmSessionMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "DELETE" && pmSessionMatch) {
+          jsonResponse(res, 200, { ok: true, result: projectMemoryStore.deleteAgentSession(decodeURIComponent(pmSessionMatch[1]), user.id, { rawOnly: url.searchParams.get("rawOnly") === "1" }) });
+          return;
+        }
+        if (req.method === "POST" && pmAnalyzeMatch) {
+          const sessionId = decodeURIComponent(pmAnalyzeMatch[1]);
+          const source = projectMemoryStore.getAgentSessionSource(sessionId, user.id);
+          if (!source.rawContent) throw new Error("This session did not retain source content; re-import it to reprocess");
+          const analysis = analyzeNormalizedSession(normalizeSessionImport(source));
+          projectMemoryStore.updateAgentSession(sessionId, {
+            userIntentSummary: analysis.userIntent,
+            implementationSummary: analysis.implementationSummary,
+            outcomeSummary: analysis.outcomeSummary,
+            keyTopics: analysis.keyTopics,
+            technologies: analysis.technologies,
+            rawContentStorage: source.rawContent ? "redacted" : "not_stored",
+            rawContent: source.rawContent,
+            processingStatus: "completed",
+            analysis: projectMemoryAnalysisForStorage(analysis)
+          }, user.id);
+          jsonResponse(res, 200, { ok: true, detail: projectMemoryStore.getSessionDetail(sessionId, user.id) });
+          return;
+        }
+        if (req.method === "POST" && pmSessionWorkItemLinkMatch) {
+          jsonResponse(res, 201, { ok: true, link: projectMemoryStore.linkSessionWorkItem(decodeURIComponent(pmSessionWorkItemLinkMatch[1]), body.workItemId, { ...body, source: "manual" }, user.id) });
+          return;
+        }
+        if (req.method === "POST" && pmSessionCandidateMatch) {
+          jsonResponse(res, 201, { ok: true, ...(await projectMemoryAcceptDebtCandidate(decodeURIComponent(pmSessionCandidateMatch[1]), decodeURIComponent(pmSessionCandidateMatch[2]), user.id)) });
+          return;
+        }
+        if (req.method === "GET" && pmArtifactMatch) {
+          jsonResponse(res, 200, { ok: true, artifact: projectMemoryStore.getArtifact(decodeURIComponent(pmArtifactMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "POST" && pmArtifactDebtMatch) {
+          const debtId = body.debtId;
+          trainingStore.getCognitiveDebt(debtId, user.id);
+          jsonResponse(res, 201, { ok: true, link: projectMemoryStore.linkDebtArtifact({ ...body, debtId, artifactId: decodeURIComponent(pmArtifactDebtMatch[1]) }, user.id) });
+          return;
+        }
+        if (req.method === "POST" && pmArtifactSessionMatch) {
+          const sessionId = body.sessionId;
+          jsonResponse(res, 201, { ok: true, link: projectMemoryStore.linkSessionArtifact(sessionId, decodeURIComponent(pmArtifactSessionMatch[1]), body, user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmDebtArtifactMatch) {
+          trainingStore.getCognitiveDebt(decodeURIComponent(pmDebtArtifactMatch[1]), user.id);
+          jsonResponse(res, 200, { ok: true, links: projectMemoryStore.listDebtLinks(decodeURIComponent(pmDebtArtifactMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "POST" && pmDebtArtifactMatch) {
+          trainingStore.getCognitiveDebt(decodeURIComponent(pmDebtArtifactMatch[1]), user.id);
+          jsonResponse(res, 201, { ok: true, link: projectMemoryStore.linkDebtArtifact({ ...body, debtId: decodeURIComponent(pmDebtArtifactMatch[1]) }, user.id) });
+          return;
+        }
+        if (req.method === "DELETE" && pmDebtArtifactDeleteMatch) {
+          trainingStore.getCognitiveDebt(decodeURIComponent(pmDebtArtifactDeleteMatch[1]), user.id);
+          projectMemoryStore.deleteDebtLink(decodeURIComponent(pmDebtArtifactDeleteMatch[1]), decodeURIComponent(pmDebtArtifactDeleteMatch[2]), user.id);
+          jsonResponse(res, 200, { ok: true });
+          return;
+        }
+        if (req.method === "GET" && pmDebtHistoryMatch) {
+          trainingStore.getCognitiveDebt(decodeURIComponent(pmDebtHistoryMatch[1]), user.id);
+          jsonResponse(res, 200, { ok: true, history: projectMemoryStore.listDebtHistory(decodeURIComponent(pmDebtHistoryMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmDebtRecurrencesMatch) {
+          trainingStore.getCognitiveDebt(decodeURIComponent(pmDebtRecurrencesMatch[1]), user.id);
+          jsonResponse(res, 200, { ok: true, recurrences: projectMemoryStore.listRecurrences(decodeURIComponent(pmDebtRecurrencesMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmDebtEvidenceMatch) {
+          jsonResponse(res, 200, { ok: true, evidence: projectMemoryStore.listEvidenceForDebt(decodeURIComponent(pmDebtEvidenceMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "POST" && pmDebtEvidenceMatch) {
+          const debtId = decodeURIComponent(pmDebtEvidenceMatch[1]);
+          trainingStore.getCognitiveDebt(debtId, user.id);
+          if (body.projectId) projectMemoryStore.getProject(body.projectId, user.id);
+          if (body.workItemId) projectMemoryStore.getWorkItem(body.workItemId, user.id);
+          if (body.artifactId) projectMemoryStore.getArtifact(body.artifactId, user.id);
+          jsonResponse(res, 201, { ok: true, evidence: projectMemoryStore.createEvidence({ ...body, debtId }, user.id) });
+          return;
+        }
+        if (req.method === "GET" && pmDecisionMatch) {
+          jsonResponse(res, 200, { ok: true, decision: projectMemoryStore.getDecision(decodeURIComponent(pmDecisionMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "PATCH" && pmDecisionMatch) {
+          jsonResponse(res, 200, { ok: true, decision: projectMemoryStore.updateDecision(decodeURIComponent(pmDecisionMatch[1]), body, user.id) });
+          return;
+        }
+        if (req.method === "GET" && url.pathname === "/api/search") {
+          jsonResponse(res, 200, { ok: true, results: projectMemorySearch(url.searchParams.get("q") || "", url.searchParams.get("projectId"), user.id) });
+          return;
+        }
+        if (req.method === "POST" && pmHookTokenMatch) {
+          jsonResponse(res, 201, { ok: true, hook: projectMemoryStore.createHookToken(decodeURIComponent(pmHookTokenMatch[1]), user.id, body.name) });
+          return;
+        }
+        if (req.method === "GET" && pmHookTokenMatch) {
+          jsonResponse(res, 200, { ok: true, tokens: projectMemoryStore.listHookTokens(decodeURIComponent(pmHookTokenMatch[1]), user.id) });
+          return;
+        }
+        if (req.method === "DELETE" && pmHookTokenRevokeMatch) {
+          projectMemoryStore.revokeHookToken(decodeURIComponent(pmHookTokenRevokeMatch[2]), user.id);
+          jsonResponse(res, 200, { ok: true });
+          return;
+        }
+        jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
+      } catch (error) {
+        const status = /not found/i.test(String(error.message)) ? 404 : 400;
+        jsonResponse(res, status, { ok: false, error: error.message });
+      }
+      return;
+    }
+
     // ── Web MVP-0/MVP-1 routes: cookie session auth, per-user data isolation ──
 
     const mvp1SessionMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)$/);
@@ -2004,6 +2639,7 @@ const server = createServer(async (req, res) => {
             evaluation
           });
           await trainingStore.saveAttempt(attempt);
+          await projectMemoryRecordTrainingEvidence(attempt, user.id);
 
           let profile = trainingStore.getMasteryProfile(debt.id);
           profile = updateMasteryProfile(profile, attempt);
@@ -2628,7 +3264,8 @@ const server = createServer(async (req, res) => {
           attempts,
           reviews,
           understandingLevel,
-          masteryLabel: masteryLabel(understandingLevel)
+          masteryLabel: masteryLabel(understandingLevel),
+          projectMemory: projectMemoryStore.listDebtHistory(debtId, userId)
         });
       } catch (error) {
         jsonResponse(res, 404, { ok: false, error: error.message });
@@ -2749,6 +3386,7 @@ const server = createServer(async (req, res) => {
           durationSeconds: undefined
         };
         await trainingStore.saveAttempt(attempt);
+        await projectMemoryRecordTrainingEvidence(attempt, user.id);
 
         let profile = trainingStore.getMasteryProfile(task.cognitiveDebtId);
         profile = updateMasteryProfile(profile, attempt);

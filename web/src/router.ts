@@ -20,6 +20,10 @@ export type Route =
   | { name: 'training-debt'; debtId: string }  // 产品区：认知欠条详情
   | { name: 'repayment' }            // 产品区：认知清偿 V1 列表
   | { name: 'repayment-detail'; gapId: string }  // 产品区：认知清偿欠条详情
+  | { name: 'projects' }
+  | { name: 'project'; projectId: string }
+  | { name: 'work-item'; projectId: string; workItemId: string }
+  | { name: 'agent-session'; sessionId: string }
   | { name: 'not-found' }
 
 // 判断是否为公开路由（无需登录）
@@ -65,6 +69,14 @@ export function parseRoute(): Route {
       return rest[0] ? { name: 'training-debt', debtId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     case 'repayment':
       return rest[0] ? { name: 'repayment-detail', gapId: decodeURIComponent(rest[0]) } : { name: 'repayment' }
+    case 'projects':
+      if (!rest[0]) return { name: 'projects' }
+      if (rest[1] === 'work-items' && rest[2]) {
+        return { name: 'work-item', projectId: decodeURIComponent(rest[0]), workItemId: decodeURIComponent(rest[2]) }
+      }
+      return { name: 'project', projectId: decodeURIComponent(rest[0]) }
+    case 'agent-sessions':
+      return rest[0] ? { name: 'agent-session', sessionId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     default:
       return { name: 'not-found' }
   }
@@ -89,6 +101,10 @@ export function navigate(route: Route): void {
     case 'training': path = '/training'; break
     case 'training-debt': path = `/training-debt/${encodeURIComponent(route.debtId)}`; break
     case 'repayment': path = '/repayment'; break
+    case 'projects': path = '/projects'; break
+    case 'project': path = '/projects/' + encodeURIComponent(route.projectId); break
+    case 'work-item': path = '/projects/' + encodeURIComponent(route.projectId) + '/work-items/' + encodeURIComponent(route.workItemId); break
+    case 'agent-session': path = '/agent-sessions/' + encodeURIComponent(route.sessionId); break
     case 'repayment-detail': path = `/repayment/${encodeURIComponent(route.gapId)}`; break
     case 'not-found': path = '/not-found'; break
   }

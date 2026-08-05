@@ -1586,6 +1586,34 @@ export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: st
     page.appendChild(el('div', `debt-status level-${data.understandingLevel}`, data.masteryLabel))
     page.appendChild(el('p', 'debt-gap-large', data.debt.gapText))
 
+    if (data.projectMemory) {
+      const memory = el('section', 'project-memory-panel')
+      memory.appendChild(el('h3', 'result-section-title', '项目认知账本关联'))
+      const links = data.projectMemory.links || []
+      for (const link of links.slice(0, 12)) {
+        const item = el('article', 'project-memory-card')
+        item.appendChild(el('strong', undefined, link.artifact.repositoryRelativePath || link.artifact.name))
+        item.appendChild(el('p', undefined, [
+          link.artifact.symbolName,
+          link.artifact.gitCommitHash ? 'Commit ' + link.artifact.gitCommitHash : '',
+          link.workItemTitle,
+          link.sessionTitle,
+          link.decisionTitle
+        ].filter(Boolean).join(' · ')))
+        memory.appendChild(item)
+      }
+      const evidence = data.projectMemory.evidence || []
+      const highest = evidence.reduce((current, item) => item.evidenceLevel > current ? item.evidenceLevel : current, 'E0')
+      memory.appendChild(el('p', 'project-memory-status', '当前最高证据：' + highest + '；测试通过不自动等于项目所有权。'))
+      if (data.projectMemory.recurrences.length) {
+        memory.appendChild(el('h4', 'result-section-title', '复发记录'))
+        for (const recurrence of data.projectMemory.recurrences.slice(0, 6)) {
+          memory.appendChild(el('p', undefined, (recurrence.projectName || recurrence.projectId) + '：' + recurrence.reason))
+        }
+      }
+      page.appendChild(memory)
+    }
+
     if (data.profile) {
       const mastery = el('div', 'mastery-info')
       mastery.appendChild(el('h3', 'result-section-title', '掌握度信息'))
