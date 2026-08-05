@@ -7267,3 +7267,42 @@ body.has-persistent-navigation .page-devices > .page-header {
     padding: 0.3rem 0.8rem;
   }
 }
+
+/* ── 社群入口（MBAI 测试结果页 / 001 期报名页复用） ── */
+.community-cta {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 28px;
+  align-items: center;
+  padding: 26px;
+  margin-top: 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(238, 242, 255, 0.9), rgba(255, 255, 255, 0.78));
+}
+.community-cta-text { display: grid; gap: 12px; }
+.community-cta-title { margin: 0; font-size: 20px; color: #0f172a; }
+.community-cta-desc { margin: 0; color: #475569; font-size: 14px; line-height: 1.7; }
+.community-cta-button { justify-self: start; }
+.community-cta-qr {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+.community-cta-qr img {
+  width: 200px;
+  height: 200px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.community-cta-qr-caption { font-size: 12px; color: #64748b; text-align: center; }
+@media (max-width: 640px) {
+  .community-cta { grid-template-columns: 1fr; gap: 18px; padding: 20px; }
+  .community-cta-qr { justify-self: center; }
+  .community-cta-qr img { width: 180px; height: 180px; }
+}

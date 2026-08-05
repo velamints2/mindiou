@@ -6,6 +6,7 @@
 import { getLocale } from './i18n'
 import { renderSiteFooter } from './navigation'
 import { el, navigate } from './router'
+import { renderCommunityCta } from './community-cta'
 
 // ── 活动配置（需要人工配置的内容集中在这里） ──
 const CHALLENGE = {
@@ -301,6 +302,8 @@ function renderJoin(page: HTMLElement): void {
   card.appendChild(rules)
   section.appendChild(card)
   page.appendChild(section)
+  // 报名后引导加入活动群
+  page.appendChild(renderCommunityCta('challenge'))
 }
 
 // ── 常见问题 ──
