@@ -3615,44 +3615,6 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // ── MVP-0: collaboration timeline (step 1 of the report pipeline) ──
-
-    if (req.method === "POST" && url.pathname === "/api/mvp0/timelines") {
-      const user = requireAuth(req, res);
-      if (!user) return;
-      const artifactText = String(payload.artifactText || "").trim();
-      let artifactType = clean(payload.artifactType || "");
-      if (!artifactText) {
-        jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
-        return;
-      }
-      if (!artifactType) {
-        artifactType = detectArtifactType(artifactText);
-      }
-      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-      const timeline = await generateCollaborationTimeline(artifactText, artifactType, chatFn);
-      const draft = await mvp0Store.saveDraft({
-        userId: user.id,
-        input: {
-          artifactText: artifactText.slice(0, 30000),
-          artifactType,
-          charCount: clean(artifactText).length
-        },
-        timeline: { steps: timeline.steps },
-        generation: timeline.generation,
-        status: "timeline"
-      });
-      const isFallback = Boolean(timeline.generation?.fallback);
-      jsonResponse(res, 200, {
-        ok: true,
-        draft,
-        timeline: { steps: draft.timeline.steps, ...(timeline.note ? { note: timeline.note } : {}) },
-        fallback: isFallback,
-        ...(isFallback && timeline.generation?.error ? { error: timeline.generation.error } : {}),
-        detectedType: artifactType
-      });
-      return;
-    }
 
     if (req.method === "PATCH" && mvp0DraftMatch) {
       const user = requireAuth(req, res);
