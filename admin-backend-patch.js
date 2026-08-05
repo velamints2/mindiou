@@ -135,6 +135,28 @@ export function computeAdminStats(mvp0Store, spiralStore, eventLog, mvp1Sessions
     }
   } catch { /* */ }
 
+  // ── MBAI 协作测试统计（基于 assessment_review 事件埋点） ──
+  const assessmentEvents = eventLog.filter(e => e.type === 'assessment_review')
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const assessmentStats = {
+    total: assessmentEvents.length,
+    today: assessmentEvents.filter(e => {
+      const ts = e.data?.ts || 0
+      return ts && new Date(ts).toISOString().startsWith(todayStr)
+    }).length,
+    byRole: {},
+    byLocale: {},
+    byMode: {}
+  }
+  for (const e of assessmentEvents) {
+    const role = e.data?.role || 'unknown'
+    const locale = e.data?.locale || 'unknown'
+    const mode = e.data?.mode || 'unknown'
+    assessmentStats.byRole[role] = (assessmentStats.byRole[role] || 0) + 1
+    assessmentStats.byLocale[locale] = (assessmentStats.byLocale[locale] || 0) + 1
+    assessmentStats.byMode[mode] = (assessmentStats.byMode[mode] || 0) + 1
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     funnel,
@@ -154,6 +176,7 @@ export function computeAdminStats(mvp0Store, spiralStore, eventLog, mvp1Sessions
       dwellTime
     },
     spiral: spiralMetrics,
+    assessment: assessmentStats,
     eventCount: eventLog.length
   }
 }

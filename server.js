@@ -2194,6 +2194,17 @@ const server = createServer(async (req, res) => {
       try {
         const payload = parseJson(await readBody(req));
         const result = await reviewAssessmentAnswers(payload);
+        // 埋点：记录 MBAI 测试完成次数，用于运营后台统计。
+        // 不记录任何答案内容或用户身份，仅记录角色、语言和评审模式。
+        recordEvent({
+          type: "assessment_review",
+          data: {
+            role: clean(payload.role || "unknown"),
+            locale: clean(payload.locale || "zh"),
+            mode: result.mode || "unknown",
+            ts: Date.now()
+          }
+        });
         jsonResponse(res, 200, { ok: true, ...result });
       } catch (error) {
         jsonResponse(res, 400, { ok: false, error: clean(error?.message || "Assessment review failed") });
