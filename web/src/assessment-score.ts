@@ -2,11 +2,19 @@ import type { AssessmentQuestion, AssessmentRole } from './assessment-bank'
 
 export type AssessmentAnswers = Record<string, string | string[] | number | Record<string, number | string>>
 export type ResultKey = keyof typeof TYPES
+export type AssessmentGap = {
+  title: string; titleEn: string
+  evidence: string; evidenceEn: string
+  impact: string; impactEn: string
+}
+
 export type AssessmentResult = {
   typeKey: ResultKey; type: string; typeEn: string; tagline: string; taglineEn: string
   strength: string; strengthEn: string; risk: string; riskEn: string
   evidence: string[]; evidenceEn: string[]; dimensions: Record<string, number>
   matchScores: Record<ResultKey, number>; stability: number; secondaryType: string; secondaryTypeEn: string
+  // 结构化认知漏洞列表，用于结果页引导用户去认知欠条软件还债。
+  gaps: AssessmentGap[]
 }
 
 const TYPES = {
@@ -107,9 +115,100 @@ export function scoreAssessment(_role: AssessmentRole, questions: AssessmentQues
   const key=ranked[0][0],secondary=ranked[1][0],coverage=clamp((Object.keys(answers).length/12)*100)
   const stability=clamp(38+(ranked[0][1]-ranked[1][1])*2+coverage*.24)
   const type=TYPES[key], second=TYPES[secondary]
+  // ── 结构化认知漏洞：基于维度得分动态生成 4-6 条 ──
+  // 每条漏洞包含标题、证据、影响，用于结果页引导用户去认知欠条软件还债。
+  const gaps: AssessmentGap[] = []
+  if (d.learning < 55) {
+    gaps.push({
+      title: '任务后的知识沉淀缺位',
+      titleEn: 'No reusable learning retained after delivery',
+      evidence: record === 0
+        ? '你在时间分配里没有为任务后的知识沉淀预留时间。'
+        : `你只把 ${record}% 的时间用于复盘与记录。`,
+      evidenceEn: record === 0
+        ? 'You reserved no time to retain reusable learning after the task.'
+        : `You allocated only ${record}% of your time to review and record.`,
+      impact: '同一个坑会在下一个项目里再次出现；AI 帮你跳过的理解，会变成下次出错的成本。把这次任务里被代劳的关键判断写进认知欠条，是补上这一环最便宜的方式。',
+      impactEn: 'The same trap will reappear in the next project. The understanding AI did for you turns into the cost of your next mistake. Turning the key judgments skipped this time into cognitive IOUs is the cheapest way to close the gap.'
+    })
+  }
+  if (Math.abs(confidenceGap) > 25) {
+    const over = confidenceGap > 0
+    gaps.push({
+      title: over ? '信心跑在了证据前面' : '证据没转化成信心',
+      titleEn: over ? 'Confidence outran the evidence' : 'Evidence did not turn into confidence',
+      evidence: `你识别出 ${core5.total} 个关键问题中的 ${core5.found} 个，信心为 ${confidence}/100。`,
+      evidenceEn: `You found ${core5.found} of ${core5.total} key issues with ${confidence}/100 confidence.`,
+      impact: over
+        ? '高信心低证据时，你会签收本应被退回的 AI 输出。认知欠条会逼你用自己的话把"为什么这样是对的"讲一遍，讲不清就先别交付。'
+        : '识别到了风险却没有据此调整决策，相当于把验证工作做了一半。认知欠条会把这个"半步"补成完整的闭环。',
+      impactEn: over
+        ? 'With high confidence and thin evidence, you sign off on AI output that should be sent back. A cognitive IOU forces you to explain in your own words why this is correct—if you cannot, do not ship it.'
+        : 'You spotted the risk but did not let it change the decision, which is half-finished verification. A cognitive IOU closes that half-step into a full loop.'
+    })
+  }
+  if (d.alertness < 55) {
+    gaps.push({
+      title: '风险与错误警觉偏弱',
+      titleEn: 'Weak alertness to risk and errors',
+      evidence: `错误警觉维度得分 ${d.alertness}/100。`,
+      evidenceEn: `Error-alertness dimension scored ${d.alertness}/100.`,
+      impact: 'AI 偷懒、幻觉、越界时你不会第一时间发现。把每次"事后才看到的问题"做成一张欠条，下次类似场景出现时你会被提示主动核对。',
+      impactEn: 'When AI slacks off, hallucinates, or overreaches, you will not catch it in time. Turn each "problem I only saw afterwards" into an IOU, and the next similar scenario will prompt you to check proactively.'
+    })
+  }
+  if (d.ownership < 55) {
+    gaps.push({
+      title: '解释所有权外包给 AI',
+      titleEn: 'Explanatory ownership outsourced to AI',
+      evidence: `解释所有权维度得分 ${d.ownership}/100。`,
+      evidenceEn: `Explanatory-ownership dimension scored ${d.ownership}/100.`,
+      impact: '能改完交付，但讲不清"为什么这样改是对的"。一旦 AI 不可用或换模型，成果就不再属于你。认知欠条用费曼解释把这部分所有权一笔笔赎回来。',
+      impactEn: 'You can edit and ship, but cannot explain why the edit is correct. The moment AI is unavailable or the model changes, the work is no longer yours. Cognitive IOUs buy back that ownership one Feynman explanation at a time.'
+    })
+  }
+  if (d.independent < 50) {
+    gaps.push({
+      title: '独立判断让位于 AI 的第一反应',
+      titleEn: 'Independent judgment yields to AI\'s first answer',
+      evidence: `独立起步维度得分 ${d.independent}/100。`,
+      evidenceEn: `Independent-start dimension scored ${d.independent}/100.`,
+      impact: 'AI 的第一答案会锚定你后续的思考。把"我先想了什么 / AI 给了什么 / 我改了什么"做成时间线欠条，能恢复你自己的判断起点。',
+      impactEn: 'AI\'s first answer anchors everything you think after it. Turning "what I thought first / what AI gave / what I changed" into a timeline IOU restores your own starting point of judgment.'
+    })
+  }
+  if (d.transfer < 50) {
+    gaps.push({
+      title: '场景迁移能力不足',
+      titleEn: 'Limited transfer across scenarios',
+      evidence: `能力迁移维度得分 ${d.transfer}/100。`,
+      evidenceEn: `Transfer dimension scored ${d.transfer}/100.`,
+      impact: '这次会了，换个项目又不会。认知欠条会刻意安排延迟回忆和场景迁移练习，把"一次性的会"变成"可复用的会"。',
+      impactEn: 'You can do it this time, but not in the next project. Cognitive IOUs deliberately schedule delayed recall and scenario-transfer practice, turning "one-time ability" into "reusable ability".'
+    })
+  }
+  // 兜底：如果维度都健康，仍给出一条基于最弱维度的引导
+  if (gaps.length === 0) {
+    const weakest = (Object.entries(d) as [keyof typeof d, number][]).sort((a, b) => a[1] - b[1])[0]
+    const names: Record<string, [string, string]> = {
+      independent: ['独立起步', 'Independent start'], ownership: ['解释所有权', 'Explanatory ownership'],
+      alertness: ['错误警觉', 'Error alertness'], calibration: ['信心校准', 'Confidence calibration'],
+      transfer: ['能力迁移', 'Transfer'], learning: ['学习闭环', 'Learning loop']
+    }
+    const [zh, en] = names[weakest[0]] || [weakest[0], weakest[0]]
+    gaps.push({
+      title: `${zh}仍有提升空间`,
+      titleEn: `${en} still has room to grow`,
+      evidence: `六个维度中最低的是${zh}（${weakest[1]}/100）。`,
+      evidenceEn: `The lowest of the six dimensions is ${en} (${weakest[1]}/100).`,
+      impact: '即使整体协作健康，最弱的那一维就是下一个被 AI 代劳的认知工作。把它做成第一笔认知欠条，主动还掉。',
+      impactEn: 'Even when the overall collaboration is healthy, the weakest dimension is the next piece of cognitive work AI will do for you. Turn it into your first cognitive IOU and pay it back proactively.'
+    })
+  }
+
   const strongAlertness=d.alertness>=d.ownership, lowLearning=d.learning<45
   return {typeKey:key,type:type[0],typeEn:type[1],tagline:type[2],taglineEn:type[3],
     strength:strongAlertness?'你会主动寻找风险和证据。':'你愿意修改并承担最终成果。',strengthEn:strongAlertness?'You actively look for risk and evidence.':'You edit the output and take ownership of the final result.',
     risk:lowLearning?'任务完成后的复盘与知识沉淀仍然偏少。':'需要根据任务后果调整验证投入，避免固定使用同一种协作深度。',riskEn:lowLearning?'You retain too little reusable learning after delivery.':'Adjust verification effort to consequences instead of using one fixed collaboration depth.',
-    evidence:evidence.slice(0,3),evidenceEn:evidenceEn.slice(0,3),dimensions:d,matchScores,stability,secondaryType:second[0],secondaryTypeEn:second[1]}
+    evidence:evidence.slice(0,3),evidenceEn:evidenceEn.slice(0,3),dimensions:d,matchScores,stability,secondaryType:second[0],secondaryTypeEn:second[1],gaps}
 }
