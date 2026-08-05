@@ -21,9 +21,12 @@ function renderPublicHeader(parent: HTMLElement, active: 'landing' | 'how-it-wor
   ;(navHow as HTMLAnchorElement).href = '#/how-it-works'
   const navGenesis = el('a', 'site-nav-link', '创始档案')
   ;(navGenesis as HTMLAnchorElement).href = '#/genesis'
+  const navTest = el('a', 'site-nav-link', '协作测试')
+  ;(navTest as HTMLAnchorElement).href = '#/assessment'
   nav.appendChild(navHome)
   nav.appendChild(navHow)
   nav.appendChild(navGenesis)
+  nav.appendChild(navTest)
 
   // 右侧 CTA：已登录显示进入产品，未登录显示开始体验
   const ctaWrap = el('div', 'site-header-cta')
@@ -274,6 +277,24 @@ export function renderLandingPage(root: HTMLElement): void {
   microtime.appendChild(el('p', 'microtime-belief', '目标不是减少 AI 代劳，而是让代劳变得可见、可控、可清偿。'))
   page.appendChild(microtime)
 
+  // 首期计划宣传入口：001 期 7 天认知清债挑战
+  const promo = el('section', 'landing-section landing-challenge-promo')
+  const promoCopy = el('div', 'landing-challenge-copy')
+  promoCopy.appendChild(el('p', 'landing-kicker', '001 期 · 首期计划'))
+  promoCopy.appendChild(el('h2', 'section-heading', '7 天认知清债挑战'))
+  promoCopy.appendChild(el('p', 'landing-lead', '用一段真实的 AI 协作材料开始：发现欠条、亲自解释、延迟回忆、场景迁移。7 天，把 AI 代劳变成真正掌握。'))
+  const promoActions = el('div', 'landing-challenge-actions')
+  const joinBtn = el('button', 'btn btn-primary btn-lg', '了解 001 期挑战')
+  joinBtn.onclick = () => navigate({ name: 'challenge', slug: '001' })
+  const testBtn = el('button', 'btn btn-ghost btn-lg', '先做免费协作测试')
+  testBtn.onclick = () => navigate({ name: 'assessment' })
+  promoActions.appendChild(joinBtn)
+  promoActions.appendChild(testBtn)
+  promoCopy.appendChild(promoActions)
+  promoCopy.appendChild(el('p', 'landing-challenge-note', '首期筹备中 · 20 天开放期随报随学 · 个人 7 天周期 · 不限名额'))
+  promo.appendChild(promoCopy)
+  page.appendChild(promo)
+
   // 底部 CTA
   const bottomCta = el('section', 'landing-section bottom-cta')
   bottomCta.appendChild(el('h2', 'cta-heading', '别让理解停留在 AI 那一侧'))
@@ -288,6 +309,26 @@ export function renderLandingPage(root: HTMLElement): void {
   page.appendChild(renderSiteFooter())
 
   root.appendChild(page)
+
+  // ── 首期计划浮窗宣传 ──
+  var banner = el("aside", "challenge-floating-banner")
+  var bannerBody = el("div", "challenge-floating-body")
+  var bannerText = el("div", "challenge-floating-text")
+  bannerText.appendChild(el("span", "challenge-floating-kicker", "001 期 · 首期计划"))
+  bannerText.appendChild(el("strong", "challenge-floating-title", "7 天认知清债挑战"))
+  bannerBody.appendChild(bannerText)
+  bannerBody.appendChild(el("span", "challenge-floating-price", "¥29.9"))
+  var bannerBtn = el("a", "challenge-floating-btn", "了解详情")
+  bannerBtn.href = "#/challenge/001"
+  bannerBody.appendChild(bannerBtn)
+  banner.appendChild(bannerBody)
+  var closeBtn = el("button", "challenge-floating-close", "×")
+  closeBtn.onclick = function() { banner.style.display = "none" }
+  banner.appendChild(closeBtn)
+  root.appendChild(banner)
+
+
+
 }
 
 // ── 原理页 ──
@@ -392,4 +433,8 @@ export function renderHowItWorksPage(root: HTMLElement): void {
 
   page.appendChild(renderSiteFooter())
   root.appendChild(page)
+
+
+
+
 }

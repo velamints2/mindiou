@@ -224,8 +224,8 @@ export function renderRegisterPage(root: HTMLElement): void {
   const genesisNotice = el('aside', 'genesis-register-notice')
   genesisNotice.appendChild(el('strong', undefined, t('首发体验者 001 期', 'Genesis Cohort 001')))
   genesisNotice.appendChild(el('p', undefined, t(
-    '注册后将预留候选编号；完成首次真实分析后计入正式参与。永久身份需完成 15 天训练并通过结业审核，是否公开始终由你决定。',
-    'Registration reserves a candidate ID. Your first real analysis makes you an official participant. Permanent status requires the 15-day program and completion review; public display is always optional.'
+    '注册后将预留候选编号；完成首次真实分析后计入正式参与。永久身份是否公开展示，始终由你决定。',
+    'Registration reserves a candidate ID. Your first real analysis makes you an official participant. Whether your permanent identity is public is always your choice.'
   )))
   card.appendChild(genesisNotice)
 
@@ -1082,32 +1082,10 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
   const page = el('div', 'page page-genesis')
   page.appendChild(el('p', 'genesis-kicker', t('永久档案 · 001 期', 'Permanent archive · Cohort 001')))
   page.appendChild(el('h1', 'genesis-title', t('第一批用户，参与了 MindIOU 的诞生', 'The first users helped shape MindIOU')))
-  page.appendChild(el('p', 'genesis-lead', t(
-    '连续 15 天，每天花 5—10 分钟，找出一件 AI 替你完成、但你还没有真正理解的事情，并通过解释、复习和迁移训练把它真正变成自己的能力。',
-    'For 15 days, spend 5–10 minutes a day finding something AI completed for you that you do not yet truly understand—then turn it into your own ability through explanation, review, and transfer practice.'
-  )))
-  const heroActions = el('div', 'genesis-actions')
-  const join = el('a', 'btn btn-primary', t('加入 001 期挑战', 'Join Cohort 001')) as HTMLAnchorElement; join.href = '#/register'
-  const test = el('a', 'btn btn-secondary', t('先测测我的认知债务', 'Take the AI collaboration test')) as HTMLAnchorElement; test.href = '#/assessment'
-  heroActions.append(join, test); page.appendChild(heroActions)
-  page.appendChild(el('p', 'genesis-action-note', t(
-    '首期限量 300 人。完成首次真实认知欠条分析后，才视为正式加入。',
-    'Cohort 001 is limited to 300 people. You officially join only after completing your first real cognitive-debt analysis.'
-  )))
   page.appendChild(loading(t('正在读取 001 期档案…', 'Loading the Cohort 001 archive…')))
   root.appendChild(page)
   try {
     const { genesis } = await fetchGenesis(); page.querySelector('.loading')?.remove()
-
-    const participant = genesis.participant
-    let ctaLabel = t('加入 001 期挑战', 'Join Cohort 001')
-    let ctaHref = '#/register'
-    if (participant?.registered && !participant.officiallyJoined) {
-      ctaLabel = t('完成首次认知债务扫描', 'Complete your first debt scan'); ctaHref = '#/app'
-    } else if (participant?.registered) {
-      ctaLabel = t('查看我的 001 期进度', 'View my Cohort 001 progress'); ctaHref = '#genesis-progress'
-    }
-    ;[join].forEach(link => { link.textContent = ctaLabel; link.href = ctaHref })
 
     const metrics = el('section', 'genesis-metrics')
     const metricData = [
@@ -1118,93 +1096,7 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
     metricData.forEach(([label, actual, note]) => {
       const item = el('article', 'genesis-metric'); item.appendChild(el('span', 'genesis-metric-label', label)); item.appendChild(el('strong', undefined, String(actual))); item.appendChild(el('small', undefined, note)); metrics.appendChild(item)
     })
-    const forecast = el('div', 'genesis-forecast')
-    forecast.append(
-      el('span', '', t(`首期名额：${genesis.capacity} 人`, `Cohort capacity: ${genesis.capacity}`)),
-      el('span', '', t(`预期完成者：约 ${genesis.estimates.completed} 人（预估）`, `Expected finishers: about ${genesis.estimates.completed} (estimate)`)),
-      el('span', '', t('计划采纳建议：不设数量目标，以实际质量为准', 'Suggestions: no quota; quality determines adoption'))
-    )
-    page.append(metrics, forecast)
-
-    if (participant) {
-      const progress = el('section', 'genesis-progress'); progress.id = 'genesis-progress'
-      progress.appendChild(el('p', 'genesis-section-index', 'RECORD · MY 001'))
-      progress.appendChild(el('h2', '', t('我的 001 期状态', 'My Cohort 001 status')))
-      progress.appendChild(el('p', 'genesis-section-copy', participant.officiallyJoined
-        ? t(`已生成 ${participant.reportCount} 份真实报告，完成 ${participant.completedClearanceCount} 次清偿。正式挑战尚未开始，15 天进度不会提前计时。`, `You have generated ${participant.reportCount} real reports and completed ${participant.completedClearanceCount} repayments. The formal challenge has not started, so the 15-day clock is not running yet.`)
-        : t('账户已创建，但完成首次真实认知债务扫描后才计入正式参与人数。', 'Your account is ready. Complete your first real cognitive-debt scan to be counted as an official participant.')))
-      const progressAction = el('a', 'btn btn-primary', participant.officiallyJoined ? t('开始一次新的分析', 'Start a new analysis') : t('完成首次认知债务扫描', 'Complete first debt scan')) as HTMLAnchorElement
-      progressAction.href = '#/app'; progress.appendChild(progressAction); page.appendChild(progress)
-    }
-
-    const section = (index: string, titleZh: string, titleEn: string, copyZh?: string, copyEn?: string) => {
-      const node = el('section', 'genesis-section')
-      node.appendChild(el('p', 'genesis-section-index', index))
-      node.appendChild(el('h2', '', t(titleZh, titleEn)))
-      if (copyZh) node.appendChild(el('p', 'genesis-section-copy', t(copyZh, copyEn || copyZh)))
-      return node
-    }
-    const cards = (items: Array<[string, string, string, string]>, className = '') => {
-      const grid = el('div', `genesis-card-grid ${className}`.trim())
-      items.forEach(([titleZh, titleEn, bodyZh, bodyEn], index) => {
-        const card = el('article', 'genesis-archive-card')
-        card.appendChild(el('span', 'genesis-card-number', String(index + 1).padStart(2, '0')))
-        card.appendChild(el('h3', '', t(titleZh, titleEn)))
-        card.appendChild(el('p', '', t(bodyZh, bodyEn)))
-        grid.appendChild(card)
-      })
-      return grid
-    }
-
-    const journey = section('TIMELINE · 15 DAYS', '这 15 天会发生什么', 'What happens over 15 days')
-    journey.appendChild(cards([
-      ['第 1—3 天：发现欠条', 'Days 1–3: Find the debt', '导入一次真实 AI 协作内容，识别自己能够使用、但无法解释的部分，并完成第一次认知清偿。', 'Import real AI-assisted work, identify what you can use but cannot explain, and complete your first repayment.'],
-      ['第 4—7 天：建立清偿习惯', 'Days 4–7: Build the habit', '识别 AI 答案中的隐含假设、关键选择和潜在风险，生成第一周认知报告。', 'Identify hidden assumptions, key choices, and risks in AI answers, then generate your first-week report.'],
-      ['第 8—12 天：验证是否真正学会', 'Days 8–12: Verify learning', '脱离原答案重新解释，审核 AI 输出，并在相似问题中验证能力能否迁移。', 'Explain without the original answer, audit AI output, and test whether the ability transfers to a similar problem.'],
-      ['第 13—15 天：形成个人协作方法', 'Days 13–15: Form your method', '整理最重要的认知欠条，制定自己的 AI 协作规则，并生成 15 天成长报告。', 'Organize your most important debts, define personal AI collaboration rules, and generate a 15-day growth report.']
-    ]))
-    journey.appendChild(el('p', 'genesis-callout', t('每天只需要完成一个 5—10 分钟的真实训练任务。允许最多 2 次补做，不要求机械连续签到。', 'Complete one real 5–10 minute training task each day. Up to two make-up days are allowed; mechanical streaks are not required.')))
-    page.appendChild(journey)
-
-    const outcomes = section('OUTCOMES · VERIFIED', '你最终会获得什么', 'What you will receive')
-    outcomes.appendChild(cards([
-      ['个人认知成长报告', 'Personal cognitive growth report', '记录 15 天内的认知欠条、掌握度变化、最容易被 AI 跳过的能力和下一阶段建议。', 'A record of your debts, mastery changes, abilities AI most often bypasses, and next-step recommendations.'],
-      ['Genesis 001 首发体验者身份', 'Genesis 001 identity', '获得唯一编号，例如 MIOU-001-0027，并永久保留在账户和官方验证档案中。', 'Receive a unique ID such as MIOU-001-0027, retained in your account and official verification archive.'],
-      ['Founding Lite 初级永久权益', 'Founding Lite permanent tier', '计划包含每月基础分析与训练额度、基础记录保存、新功能优先体验和高级套餐长期折扣。永久权益指保留 Founding Lite 版本，不代表所有高级功能永久免费。', 'Planned benefits include monthly basic analysis and training allowances, basic record retention, early feature access, and a lasting advanced-plan discount. This preserves the Founding Lite tier—not every future premium feature for free.'],
-      ['最高 30 美元 AI 实验经费', 'Up to US$30 in AI experiment credit', '通过完整结业审核后，可获得 AI 实验经费或等值 MindIOU 模型额度；具体额度按有效训练、结业反馈和共创贡献确定，不提供共享 API Key。', 'After passing the completion review, you may receive AI experiment credit or equivalent MindIOU model usage. The amount depends on valid training, feedback, and contribution; no shared API key is provided.']
-    ]))
-    page.appendChild(outcomes)
-
-    const qualify = section('IDENTITY · EARNED', '如何成为首发体验者', 'How to earn Genesis status', 'Genesis 001 首发体验者不是报名称号，而是一项经过真实行动获得的身份。', 'Genesis 001 is not a sign-up label. It is earned through verified action.')
-    const conditions = el('ul', 'genesis-check-list')
-    ;[
-      t('完成至少 13 个有效训练日', 'Complete at least 13 valid training days'),
-      t('完成第 3 天、第 7 天和第 15 天关键任务', 'Complete the Day 3, 7, and 15 milestones'),
-      t('至少完成 10 笔真实认知欠条训练', 'Complete at least 10 real cognitive-debt exercises'),
-      t('提交一次结业反馈', 'Submit completion feedback'),
-      t('通过活动有效性审核', 'Pass the activity validity review')
-    ].forEach(item => conditions.appendChild(el('li', '', item)))
-    qualify.appendChild(conditions)
-    const cocreator = el('div', 'genesis-callout')
-    cocreator.appendChild(el('strong', '', t('产品共创者', 'Product co-creator')))
-    cocreator.appendChild(el('p', '', t('建议被采用、发现重要问题、参加深度访谈或提供高质量案例后，可以从“首发体验者”升级为“产品共创者”。首发体验者代表早期使用；产品共创者代表真正帮助产品发生了改变。', 'Participants whose suggestions ship, who uncover important issues, join in-depth interviews, or contribute high-quality cases can advance to Product Co-creator. Genesis marks early use; Co-creator marks real product change.')))
-    qualify.appendChild(cocreator); page.appendChild(qualify)
-
-    const history = el('section', 'genesis-history'); history.appendChild(el('h2', undefined, t('正在共同书写的产品历史', 'Product history in the making')))
-    const stage = isEnglish() ? (genesis.stageEn || genesis.stage) : genesis.stage
-    const states = el('div', 'genesis-status-row')
-    ;[t('候选体验者招募中', 'Candidate recruitment'), t('系统压力测试中', 'System stress testing'), t('正式挑战未开始', 'Formal challenge not started')].forEach((label, index) => states.appendChild(el('span', `genesis-status ${index < 2 ? 'is-active' : ''}`, label)))
-    history.appendChild(states)
-    history.appendChild(el('p', undefined, `${t('产品阶段', 'Product stage')}: ${stage}`))
-    history.appendChild(el('p', undefined, t('001 期正在招募候选体验者，正式开始时间将在人数和系统测试达到要求后公布。日期确定前不会启动连续 15 天计时。', 'Cohort 001 is recruiting candidates. The start date will be announced when participation and system testing are ready. The 15-day clock will not start before dates are confirmed.')))
-    history.appendChild(el('p', undefined, t('被采纳的建议和产品改进将在确认并上线后记录于此，不提前虚构。', 'Adopted suggestions and product improvements will be recorded here only after they are verified and shipped.')))
-    const unlocks = el('div', 'genesis-unlocks')
-    ;[
-      t('活动开始与结束日期', 'Start and end dates'), t('正式参与人数', 'Official participants'), t('完成挑战人数', 'Challenge finishers'),
-      t('产生的认知欠条数量', 'Cognitive debts created'), t('完成的清偿数量', 'Repayments completed'), t('授权公开的昵称和编号', 'Authorized public names and IDs'),
-      t('被采纳的产品建议', 'Adopted product suggestions'), t('产品发生的真实变化', 'Verified product changes'), t('001 期结业报告', 'Cohort 001 final report')
-    ].forEach(label => { const row = el('div', 'genesis-unlock'); row.append(el('span', '', label), el('small', '', t('待解锁', 'Pending'))); unlocks.appendChild(row) })
-    history.appendChild(unlocks); page.appendChild(history)
+    page.append(metrics)
 
     const wall = el('section', 'genesis-wall'); wall.appendChild(el('h2', undefined, t('首发体验者名录', 'Genesis participants')))
     if (!genesis.members.length) wall.appendChild(el('p', 'genesis-empty', t('等待第一位主动选择公开的完成者。', 'Waiting for the first finisher who chooses to be listed.')))
@@ -1217,20 +1109,13 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
       card.append(identity, el('span', undefined, member.number)); wall.appendChild(card)
     }); page.appendChild(wall)
 
-    const compare = section('METHOD · NOT A STREAK', '这不是普通签到活动', 'This is not a check-in streak')
-    compare.appendChild(cards([
-      ['普通打卡', 'Ordinary check-in', '每天打开页面、点击签到、为了奖励完成动作，活动结束后没有留下任何能力。', 'Open a page, click check-in, act for the reward, and retain no ability when the event ends.'],
-      ['MindIOU 认知清债挑战', 'MindIOU cognitive-debt challenge', '使用自己的真实 AI 协作内容，每天完成理解训练，保存回答和掌握度变化，最终形成个人 AI 协作方法。', 'Use real AI-assisted work, train understanding daily, preserve answers and mastery changes, and form a personal AI collaboration method.']
-    ], 'genesis-card-grid-two'))
-    compare.appendChild(el('p', 'genesis-quote', t('我们记录的不是你登录了多少天，而是有多少原本属于 AI 的答案，最后真正变成了你的能力。', 'We do not record how many days you logged in. We record how many answers that once belonged to AI truly became your ability.')))
-    page.appendChild(compare)
-
-    const fit = section('PARTICIPATION · FIT', '这项挑战适合你吗', 'Is this challenge a fit?')
-    fit.appendChild(cards([
-      ['适合参加', 'A good fit', '经常用 AI 写代码、做产品或研究；能使用输出但无法完整解释；希望提升协作能力；愿意每天投入 5—10 分钟并提供坦诚反馈。', 'You often use AI for code, products, or research; can use outputs but cannot fully explain them; want better collaboration; and can invest 5–10 minutes daily with honest feedback.'],
-      ['暂时不适合', 'Probably not yet', '只希望领取奖励；不愿使用任何真实任务；希望 AI 代写训练答案；只想学习提示词技巧；或暂时无法保持基本参与。', 'You only want the reward, will not use any real task, want AI to write the training answers, only seek prompt tricks, or cannot maintain basic participation right now.']
-    ], 'genesis-card-grid-two')); page.appendChild(fit)
-
+    const section = (index: string, titleZh: string, titleEn: string, copyZh?: string, copyEn?: string) => {
+      const node = el('section', 'genesis-section')
+      node.appendChild(el('p', 'genesis-section-index', index))
+      node.appendChild(el('h2', '', t(titleZh, titleEn)))
+      if (copyZh) node.appendChild(el('p', 'genesis-section-copy', t(copyZh, copyEn || copyZh)))
+      return node
+    }
     const privacy = section('PRIVACY · CURRENT CAPABILITY', '隐私与数据说明', 'Privacy and data', '你的真实项目内容不会自动出现在公开档案中。', 'Your real project content will never automatically appear in the public archive.')
     const privacyGrid = el('div', 'genesis-privacy-grid')
     ;[
@@ -1238,17 +1123,6 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
       [t('上线前需补齐', 'Required before launch'), [t('自助删除导入内容和账户数据', 'Self-service deletion of imports and account data'), t('只保留结构化欠条、不长期保留完整原文的模式', 'A structured-debt-only mode without long-term source retention'), t('分享卡片生成前的逐次确认', 'Per-share confirmation before generating public cards')]]
     ].forEach(([title, items]) => { const card = el('article', 'genesis-privacy-card'); card.appendChild(el('h3', '', title as string)); const list = el('ul'); (items as string[]).forEach(item => list.appendChild(el('li', '', item))); card.appendChild(list); privacyGrid.appendChild(card) })
     privacy.appendChild(privacyGrid); page.appendChild(privacy)
-
-    const finalCta = el('section', 'genesis-final-cta')
-    finalCta.appendChild(el('p', 'genesis-section-index', 'NEXT · JOIN THE RECORD'))
-    finalCta.appendChild(el('h2', '', t('AI 完成得越来越快，你对它的理解也应该同步增长。', 'As AI gets faster, your understanding should grow with it.')))
-    finalCta.appendChild(el('p', '', t('加入 MindIOU 001 期，用 15 天建立一套更专业、更可控的 AI 协作方法，并成为这款产品第一段历史的一部分。', 'Join MindIOU Cohort 001, build a more professional and controllable AI collaboration method in 15 days, and become part of the product’s first chapter.')))
-    const finalActions = el('div', 'genesis-actions')
-    const finalJoin = el('a', 'btn btn-primary', ctaLabel) as HTMLAnchorElement; finalJoin.href = ctaHref
-    const finalTest = el('a', 'btn btn-secondary', t('先完成认知债务测试', 'Take the AI collaboration test first')) as HTMLAnchorElement; finalTest.href = '#/assessment'
-    finalActions.append(finalJoin, finalTest); finalCta.appendChild(finalActions)
-    finalCta.appendChild(el('small', '', t('报名不等于获得身份。完成真实训练和结业审核后，才会获得 Genesis 001 首发体验者编号。', 'Registration does not grant the identity. A Genesis 001 number is earned only after real training and completion review.')))
-    page.appendChild(finalCta)
   } catch (error) { page.querySelector('.loading')?.remove(); page.appendChild(errorBox(error instanceof Error ? error.message : t('档案加载失败', 'Could not load archive'))) }
   page.appendChild(renderSiteFooter())
 }
@@ -1488,7 +1362,7 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
     if (data.totalDue === 0) {
       const empty = el('div', 'empty-state')
       empty.appendChild(el('p', 'empty-title', '今天没有复训任务'))
-      empty.appendChild(el('p', 'empty-desc', '完成新的 MVP-1 清偿后，系统会自动生成复训任务。'))
+      empty.appendChild(el('p', 'empty-desc', '完成新的清偿后，系统会自动生成复训任务。'))
       page.appendChild(empty)
       return
     }
@@ -1637,7 +1511,7 @@ export async function renderTrainingDebtListPage(root: HTMLElement): Promise<voi
   header.appendChild(headerActions)
   page.appendChild(header)
 
-  page.appendChild(el('p', 'page-intro', '所有被识别但尚未稳定掌握的认知欠条。完成 MVP-1 清偿后会自动加入。'))
+  page.appendChild(el('p', 'page-intro', '所有被识别但尚未稳定掌握的认知欠条。完成清偿后会自动加入。'))
 
   const loadingEl = el('p', 'loading', '正在加载认知欠条…')
   page.appendChild(loadingEl)
@@ -1647,7 +1521,7 @@ export async function renderTrainingDebtListPage(root: HTMLElement): Promise<voi
     const data = await fetchTrainingDebts()
     clear(page)
     page.appendChild(header)
-    page.appendChild(el('p', 'page-intro', '所有被识别但尚未稳定掌握的认知欠条。完成 MVP-1 清偿后会自动加入。'))
+    page.appendChild(el('p', 'page-intro', '所有被识别但尚未稳定掌握的认知欠条。完成清偿后会自动加入。'))
 
     if (!data.ok) {
       page.appendChild(el('p', 'error', data.error || '加载失败'))
@@ -1657,7 +1531,7 @@ export async function renderTrainingDebtListPage(root: HTMLElement): Promise<voi
     if (data.debts.length === 0) {
       const empty = el('div', 'empty-state')
       empty.appendChild(el('p', 'empty-title', '暂无认知欠条'))
-      empty.appendChild(el('p', 'empty-desc', '完成 MVP-1 清偿会话后，系统会自动创建认知欠条。'))
+      empty.appendChild(el('p', 'empty-desc', '完成清偿会话后，系统会自动创建认知欠条。'))
       page.appendChild(empty)
       return
     }
