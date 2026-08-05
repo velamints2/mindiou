@@ -19,6 +19,7 @@ import {
   renderTrainingPage
 } from './pages'
 import { renderRepaymentDetailPage, renderRepaymentPage } from './repayment'
+import { renderModuleDetailPage, renderOwnershipMapPage, renderProjectListPage as renderOwnershipProjectListPage } from './ownershipApp'
 import { clear, el, navigate, parseRoute, type Route } from './router'
 import { initTracker, trackRoute } from './tracker'
 import { getLocale, observeTranslations, setLocale } from './i18n'
@@ -130,6 +131,14 @@ async function render(route: Route): Promise<void> {
     case 'app':
       await renderAppPage(app)
       trackRoute('app')
+      return
+    case 'project-ownership':
+      await renderOwnershipMapPage(app, route.projectId)
+      trackRoute('project-ownership')
+      return
+    case 'project-ownership-module':
+      await renderModuleDetailPage(app, route.projectId, route.moduleId)
+      trackRoute('project-ownership-module')
       return
     case 'timeline':
       await renderTimelinePage(app, route.draftId)

@@ -15,6 +15,9 @@ export type Route =
   | { name: 'report'; reportId: string }
   | { name: 'session'; sessionId: string }
   | { name: 'devices' }             // 产品区：设备 Token 管理
+  | { name: 'projects' }            // 产品区：项目列表
+  | { name: 'project-ownership'; projectId: string }  // 产品区：项目所有权地图
+  | { name: 'project-ownership-module'; projectId: string; moduleId: string }  // 产品区：模块详情
   | { name: 'admin' }               // 运营后台
   | { name: 'training' }            // 产品区：今日复训
   | { name: 'training-debt'; debtId: string }  // 产品区：认知欠条详情
@@ -33,7 +36,9 @@ export function isPublicRoute(route: Route): boolean {
 
 export function parseRoute(): Route {
   const hash = location.hash.replace(/^#\/?/, '')
-  const [path, ...rest] = hash.split('/')
+  const parts = hash.split('/').filter(Boolean)
+  const path = parts[0] || ''
+  const rest = parts.slice(1)
 
   switch (path) {
     case '':
@@ -76,6 +81,21 @@ export function parseRoute(): Route {
       }
       return { name: 'project', projectId: decodeURIComponent(rest[0]) }
     case 'agent-sessions':
+    case 'project-ownership': {
+      const projectId = rest[0]
+      if (!projectId) return { name: 'not-found' }
+      return { name: 'project-ownership', projectId: decodeURIComponent(projectId) }
+    }
+    case 'project-ownership-module': {
+      const projectId = rest[0]
+      const moduleId = rest[1]
+      if (!projectId || !moduleId) return { name: 'not-found' }
+      return {
+        name: 'project-ownership-module',
+        projectId: decodeURIComponent(projectId),
+        moduleId: decodeURIComponent(moduleId)
+      }
+    }
       return rest[0] ? { name: 'agent-session', sessionId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     default:
       return { name: 'not-found' }
@@ -105,6 +125,10 @@ export function navigate(route: Route): void {
     case 'project': path = '/projects/' + encodeURIComponent(route.projectId); break
     case 'work-item': path = '/projects/' + encodeURIComponent(route.projectId) + '/work-items/' + encodeURIComponent(route.workItemId); break
     case 'agent-session': path = '/agent-sessions/' + encodeURIComponent(route.sessionId); break
+    case 'project-ownership': path = `/project-ownership/${encodeURIComponent(route.projectId)}`; break
+    case 'project-ownership-module':
+      path = `/project-ownership-module/${encodeURIComponent(route.projectId)}/${encodeURIComponent(route.moduleId)}`
+      break
     case 'repayment-detail': path = `/repayment/${encodeURIComponent(route.gapId)}`; break
     case 'not-found': path = '/not-found'; break
   }

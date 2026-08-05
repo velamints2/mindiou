@@ -79,6 +79,25 @@ import {
   normalizeSessionImport
 } from "./project-memory-analysis.js";
 import { createProjectMemoryStore } from "./project-memory-store.js";
+import { createOwnershipStore } from "./project-ownership-store.js";
+import {
+  calculateDecisionOwnershipStatus,
+  aggregateModuleStatus,
+  calculateModuleRiskLevel,
+  calculateProjectSummary,
+  deriveEvidenceLevel,
+  determineMissingEvidenceTypes,
+  ownershipGapFromModuleStatus,
+  buildModuleDetailView,
+  isImportantAIDecision,
+  levelToString,
+  EVIDENCE_LEVEL,
+  MODULE_OWNERSHIP_STATUS,
+  DECISION_OWNERSHIP_STATUS,
+  OWNERSHIP_CALCULATION_VERSION,
+} from "./project-ownership.js";
+import { generateModuleRecommendation, generateProjectRecommendations } from "./learning-orchestrator.js";
+import { seedOwnershipData } from "./ownership-seed.js";
 
 const port = Number(process.env.PORT || 8793);
 const host = process.env.HOST || "0.0.0.0";
@@ -153,6 +172,16 @@ const rawWebResearch = researchProvider === "public_web"
       model: researchModel,
       timeoutMs: openAiResearchTimeoutMs
     });
+const ownershipStorePath = process.env.OWNERSHIP_STORE_PATH || "tmp/ownership-store.json";
+const ownershipStore = createOwnershipStore(ownershipStorePath);
+await ownershipStore.load();
+
+// 初始化种子数据（幂等）
+try {
+  await seedOwnershipData(ownershipStore, trainingStore);
+} catch (seedError) {
+  console.warn(`Ownership seed failed (non-blocking): ${seedError.message}`);
+}
 
 const learningCoachSystemPrompt = [
   "You are Learn Coach, a rigorous but patient AI teacher for smart glasses including Even G2 and Rokid AIUI devices.",
@@ -877,6 +906,141 @@ async function projectMemoryRecordTrainingEvidence(attempt, userId) {
     }, userId);
   }
 }
+/**
+ * 计算项目所有权视图（实时计算，非缓存）
+ *
+ * 读取项目所有数据 + trainingStore 中的认知欠条和训练记录，
+ * 构建决策视图和模块视图，返回摘要和模块列表。
+ */
+function computeProjectOwnershipView(ownershipStore, trainingStore, projectId, userId) {
+  const projectData = ownershipStore.getProjectData(projectId);
+  const allDebts = trainingStore.listCognitiveDebts(userId);
+  const allAttempts = trainingStore.listAttempts(userId);
+
+  // 为每个决策构建视图
+  const decisionViews = projectData.decisionRecords.map((decision) => {
+    const linkedDebtIds = projectData.decisionDebtLinks
+      .filter((l) => l.decisionId === decision.id)
+      .map((l) => l.cognitiveDebtId);
+    const linkedDebts = allDebts
+      .filter((d) => linkedDebtIds.includes(d.id))
+      .map((d) => {
+        const link = projectData.decisionDebtLinks.find(
+          (l) => l.decisionId === decision.id && l.cognitiveDebtId === d.id
+        );
+        return { ...d, riskType: link?.riskType };
+      });
+
+    const linkedArtifactIds = projectData.decisionArtifactLinks
+      .filter((l) => l.decisionId === decision.id)
+      .map((l) => l.artifactId);
+    const linkedArtifacts = projectData.artifacts.filter((a) => linkedArtifactIds.includes(a.id));
+
+    const decisionEvidence = projectData.evidenceRecords.filter(
+      (e) => e.decisionId === decision.id || (e.workItemId === decision.workItemId)
+    );
+
+    const decisionAttempts = allAttempts.filter(
+      (a) => linkedDebtIds.includes(a.cognitiveDebtId) || a.workItemId === decision.workItemId
+    );
+
+    const evidenceLevel = deriveEvidenceLevel({
+      evidenceRecords: decisionEvidence,
+      trainingAttempts: decisionAttempts,
+      artifacts: linkedArtifacts,
+    });
+
+    const status = calculateDecisionOwnershipStatus({
+      decision,
+      evidenceLevel,
+      linkedDebts,
+    });
+
+    return {
+      decisionId: decision.id,
+      workItemId: decision.workItemId,
+      title: decision.title,
+      importance: decision.importance,
+      decisionMaker: decision.decisionMaker,
+      isImportant: isImportantAIDecision(decision),
+      status,
+      evidenceLevel,
+      evidenceLevelLabel: levelToString(evidenceLevel),
+    };
+  });
+
+  // 为每个模块（WorkItem）构建视图
+  const moduleViews = projectData.workItems.map((workItem) => {
+    const moduleDecisionViews = decisionViews.filter((d) => d.workItemId === workItem.id);
+    const moduleStatus = aggregateModuleStatus(moduleDecisionViews);
+    const moduleRisk = calculateModuleRiskLevel(moduleDecisionViews, allDebts);
+    const maxLevel = moduleDecisionViews.reduce(
+      (max, d) => Math.max(max, d.evidenceLevel ?? EVIDENCE_LEVEL.E0),
+      EVIDENCE_LEVEL.E0
+    );
+    const missingTypes = determineMissingEvidenceTypes(maxLevel);
+    const ownershipGap = ownershipGapFromModuleStatus(moduleStatus);
+
+    // 模块关联数据计数
+    const moduleAgentSessions = projectData.agentSessions.filter((s) => s.workItemId === workItem.id);
+    const moduleArtifacts = projectData.artifacts.filter((a) => a.workItemId === workItem.id);
+    const moduleDebtIds = projectData.decisionDebtLinks
+      .filter((l) => {
+        const dec = projectData.decisionRecords.find((d) => d.id === l.decisionId);
+        return dec && dec.workItemId === workItem.id;
+      })
+      .map((l) => l.cognitiveDebtId);
+    const moduleDebts = allDebts.filter((d) => moduleDebtIds.includes(d.id));
+    const highRiskDebts = moduleDebts.filter((d) => {
+      const link = projectData.decisionDebtLinks.find(
+        (l) => l.cognitiveDebtId === d.id && moduleDebtIds.includes(l.cognitiveDebtId)
+      );
+      return link?.riskType;
+    });
+
+    // 最近活动
+    const timestamps = [
+      ...moduleAgentSessions.map((s) => s.importedAt),
+      ...moduleDecisionViews.map((d) => d.createdAt),
+      ...projectData.evidenceRecords.filter((e) => e.workItemId === workItem.id).map((e) => e.createdAt),
+    ].filter(Boolean);
+
+    return {
+      workItemId: workItem.id,
+      title: workItem.title,
+      status: moduleStatus,
+      statusLabel: MODULE_STATUS_LABELS_TEXT[moduleStatus] || moduleStatus,
+      riskLevel: moduleRisk,
+      importantDecisionCount: moduleDecisionViews.filter((d) => d.isImportant).length,
+      highestEvidenceLevel: maxLevel,
+      highestEvidenceLevelLabel: levelToString(maxLevel),
+      relatedSessionCount: moduleAgentSessions.length,
+      relatedArtifactCount: moduleArtifacts.length,
+      openDebtCount: moduleDebts.filter((d) => d.status !== "mastered" && d.status !== "ignored").length,
+      highRiskDebtCount: highRiskDebts.length,
+      missingEvidenceTypes: missingTypes,
+      ownershipGapType: ownershipGap,
+      latestActivityAt: timestamps.length > 0 ? timestamps.sort().reverse()[0] : undefined,
+    };
+  });
+
+  const summary = calculateProjectSummary({
+    projectId,
+    decisionViews,
+    moduleViews,
+  });
+
+  return { project: projectData.project, summary, modules: moduleViews, decisions: decisionViews };
+}
+
+const MODULE_STATUS_LABELS_TEXT = {
+  high_risk_unowned: "高风险无人负责",
+  needs_initial_understanding: "缺少初步理解",
+  needs_error_boundary_validation: "缺少错误与边界验证",
+  needs_transfer_validation: "缺少迁移验证",
+  needs_real_work_validation: "缺少独立修改证据",
+  owned: "已具备人类所有权",
+};
 
 function detectArtifactType(text) {
   const lower = text.toLowerCase();
@@ -2224,7 +2388,13 @@ const server = createServer(async (req, res) => {
       }
       try {
         if (req.method === "GET" && url.pathname === "/api/projects") {
-          jsonResponse(res, 200, { ok: true, projects: projectMemoryStore.listProjects(user.id) });
+          const pmProjects = projectMemoryStore.listProjects(user.id);
+          const ownershipProjects = ownershipStore.listProjects(user.id);
+          const allProjects = [...pmProjects];
+          for (const op of ownershipProjects) {
+            if (!allProjects.find((p) => p.id === op.id)) allProjects.push(op);
+          }
+          jsonResponse(res, 200, { ok: true, projects: allProjects });
           return;
         }
         if (req.method === "POST" && url.pathname === "/api/projects") {
@@ -2258,7 +2428,13 @@ const server = createServer(async (req, res) => {
         }
         if (req.method === "GET" && pmProjectOwnershipMatch) {
           const projectId = decodeURIComponent(pmProjectOwnershipMatch[1]);
-          jsonResponse(res, 200, { ok: true, ownership: projectMemoryStore.getOwnership(projectId, user.id, trainingStore.listCognitiveDebts(user.id)) });
+          const project = ownershipStore.getProject(projectId, user.id);
+          if (!project) {
+            jsonResponse(res, 404, { ok: false, error: "Project not found" });
+            return;
+          }
+          const view = computeProjectOwnershipView(ownershipStore, trainingStore, projectId, user.id);
+          jsonResponse(res, 200, { ok: true, ...view });
           return;
         }
         if (req.method === "GET" && pmProjectWorkItemsMatch) {
@@ -3297,13 +3473,220 @@ const server = createServer(async (req, res) => {
       }
     } // close isDraftOrTimelineRoute
 
-    if (req.method !== "POST" && req.method !== "PATCH") {
+    // 所有权地图的 GET 路由需要绕过 405 门禁
+    const isOwnershipRoute = url.pathname.startsWith("/api/projects");
+    if (!isOwnershipRoute && req.method !== "POST" && req.method !== "PATCH") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
       return;
     }
-
     if (url.pathname === "/api/mvp0/timelines") requireJsonRequest(req);
-    const payload = parseJson(await readBody(req));
+    const payload = (req.method === "POST" || req.method === "PATCH") ? parseJson(await readBody(req)) : {};
+
+    // ── Training system: review start and submit ──
+    if (trainingReviewStartMatch && req.method === "POST") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const taskId = decodeURIComponent(trainingReviewStartMatch[1]);
+      try {
+        const task = trainingStore.getReviewTask(taskId, userId);
+        task.status = "in_progress";
+        await trainingStore.saveReviewTask(task);
+        jsonResponse(res, 200, { ok: true, task });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (trainingReviewSubmitMatch && req.method === "POST") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const taskId = decodeURIComponent(trainingReviewSubmitMatch[1]);
+      try {
+        const task = trainingStore.getReviewTask(taskId, userId);
+        const debt = trainingStore.getCognitiveDebt(task.cognitiveDebtId, userId);
+        const answer = String(payload.answer || "").trim().slice(0, 6000);
+        if (!answer) {
+          jsonResponse(res, 400, { ok: false, error: "Answer is required" });
+          return;
+        }
+
+        // 优先使用 AI 评估，失败时 fallback 到规则评估
+        let evaluation;
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        if (chatFn) {
+          try {
+            const evalRequest = buildEvaluationRequest({
+              card: { prompt: task.prompt, target: debt.gapText },
+              attempt: { originalPrompt: task.prompt, initialAnswer: answer, finalAnswer: answer },
+              hintEvents: [],
+              capabilityLevel: "unknown"
+            });
+            const rawEval = await chatFn(
+              [
+                { role: "system", content: getTrainingEvaluationPrompt() },
+                { role: "user", content: JSON.stringify(evalRequest) }
+              ],
+              () => ({ overallScore: 50, passed: true, conceptualAccuracy: 50, completeness: 50, independentRecall: 50, hintDependency: 0, transferAbility: 0, understandingLevel: "initially_understood", strengths: [], missingPoints: [], misconceptions: [], nextTrainingGoal: "继续练习", recommendedNextStage: task.trainingStage, userFeedback: "AI 评估暂时不可用，使用规则评估。" })
+            );
+            evaluation = normalizeEvaluation(rawEval);
+          } catch (evalError) {
+            console.warn(`AI evaluation failed for task ${taskId}: ${evalError.message}`);
+            evaluation = deriveEvaluationFromAnalysis(
+              { coverage: 0.5, demonstrated: [], missing: [], misconceptions: [], feedback: "" },
+              [],
+              task.trainingStage
+            );
+          }
+        } else {
+          evaluation = deriveEvaluationFromAnalysis(
+            { coverage: 0.5, demonstrated: [], missing: [], misconceptions: [], feedback: "" },
+            [],
+            task.trainingStage
+          );
+        }
+
+        const attempt = {
+          id: crypto.randomUUID(),
+          userId,
+          cardId: task.cardId,
+          cognitiveDebtId: task.cognitiveDebtId,
+          trainingStage: task.trainingStage,
+          taskType: task.taskType,
+          originalPrompt: task.prompt,
+          initialAnswer: answer,
+          finalAnswer: answer,
+          hintEvents: [],
+          evaluation,
+          startedAt: task.createdAt,
+          completedAt: new Date().toISOString(),
+          durationSeconds: undefined
+        };
+        await trainingStore.saveAttempt(attempt);
+
+        let profile = trainingStore.getMasteryProfile(task.cognitiveDebtId);
+        profile = updateMasteryProfile(profile, attempt);
+        await trainingStore.saveMasteryProfile(profile);
+
+        const newStatus = deriveStatusFromStage(task.trainingStage, evaluation);
+        debt.status = newStatus;
+        debt.updatedAt = new Date().toISOString();
+        await trainingStore.saveCognitiveDebt(debt);
+
+        const { nextReviewAt } = calculateNextReview({
+          trainingStage: task.trainingStage,
+          evaluation,
+          hintEvents: [],
+          previousAttempts: trainingStore.listAttempts(userId, { cognitiveDebtId: task.cognitiveDebtId }),
+          currentMastery: profile
+        });
+        profile.nextReviewAt = nextReviewAt;
+        await trainingStore.saveMasteryProfile(profile);
+
+        task.status = "completed";
+        task.attemptId = attempt.id;
+        await trainingStore.saveReviewTask(task);
+
+        if (evaluation.passed) {
+          const nextStage = recommendNextStage(profile.currentStage, evaluation, profile);
+          const nextTask = generateRuleBasedReviewTask({
+            debt,
+            card: { id: task.cardId, target: debt.gapText, prompt: task.prompt },
+            firstAttempt: attempt,
+            mastery: profile,
+            trainingStage: nextStage,
+            dueAt: nextReviewAt,
+            userId
+          });
+          await trainingStore.saveReviewTask(nextTask);
+        }
+
+        jsonResponse(res, 200, {
+          ok: true,
+          attempt,
+          evaluation,
+          profile,
+          debtStatus: debt.status,
+          nextReviewAt
+        });
+      } catch (error) {
+        jsonResponse(res, 400, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    // ── MVP-0: collaboration timeline (step 1 of the report pipeline) ──
+
+    if (req.method === "POST" && url.pathname === "/api/mvp0/timelines") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const artifactText = String(payload.artifactText || "").trim();
+      let artifactType = clean(payload.artifactType || "");
+      if (!artifactText) {
+        jsonResponse(res, 400, { ok: false, error: "Missing artifactText" });
+        return;
+      }
+      if (!artifactType) {
+        artifactType = detectArtifactType(artifactText);
+      }
+      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+      const timeline = await generateCollaborationTimeline(artifactText, artifactType, chatFn);
+      const draft = await mvp0Store.saveDraft({
+        userId: user.id,
+        input: {
+          artifactText: artifactText.slice(0, 30000),
+          artifactType,
+          charCount: clean(artifactText).length
+        },
+        timeline: { steps: timeline.steps },
+        generation: timeline.generation,
+        status: "timeline"
+      });
+      const isFallback = Boolean(timeline.generation?.fallback);
+      jsonResponse(res, 200, {
+        ok: true,
+        draft,
+        timeline: { steps: draft.timeline.steps, ...(timeline.note ? { note: timeline.note } : {}) },
+        fallback: isFallback,
+        ...(isFallback && timeline.generation?.error ? { error: timeline.generation.error } : {}),
+        detectedType: artifactType
+      });
+      return;
+    }
+
+    if (req.method === "PATCH" && mvp0DraftMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      try {
+        const draftId = decodeURIComponent(mvp0DraftMatch[1]);
+        const confusions = payload.confusions;
+        const confusionsValid =
+          confusions === undefined ||
+          (Array.isArray(confusions) &&
+            confusions.every(
+              entry =>
+                entry !== null &&
+                typeof entry === "object" &&
+                typeof entry.stepId === "string" &&
+                typeof entry.text === "string"
+            ));
+        if (!confusionsValid) {
+          jsonResponse(res, 400, {
+            ok: false,
+            error: "confusions must be an array of { stepId, text }"
+          });
+          return;
+        }
+        const draft = await mvp0Store.updateDraftConfusions(draftId, confusions, user.id);
+        jsonResponse(res, 200, { ok: true, draft });
+      } catch (error) {
+        jsonResponse(res, /not found/i.test(String(error.message)) ? 404 : 400, {
+          ok: false,
+          error: error.message
+        });
+      }
+      return;
+    }
 
     // ── Training system: review start and submit ──
     if (trainingReviewStartMatch && req.method === "POST") {
@@ -3580,6 +3963,171 @@ const server = createServer(async (req, res) => {
         source: payload.source || "g2"
       });
       jsonResponse(res, 200, { ok: true, ...result, today: spiralStore.dashboard() });
+      return;
+    }
+
+    // ── 项目认知所有权地图 ──
+
+    const ownershipMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership$/);
+    const ownershipModuleMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership\/modules\/([^/]+)$/);
+    const ownershipHighRiskMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership\/high-risk$/);
+    const ownershipHistoryMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership\/history$/);
+    const ownershipRecalculateMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/ownership\/recalculate$/);
+    const projectDetailMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+
+    // GET /api/projects — 列出当前用户的项目
+    if (req.method === "GET" && url.pathname === "/api/projects") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projects = ownershipStore.listProjects(user.id);
+      jsonResponse(res, 200, { ok: true, projects });
+      return;
+    }
+
+    // GET /api/projects/:projectId — 项目详情
+    if (req.method === "GET" && projectDetailMatch && !ownershipMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(projectDetailMatch[1]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const workItems = ownershipStore.listWorkItems(projectId);
+      jsonResponse(res, 200, { ok: true, project, workItems });
+      return;
+    }
+
+    // GET /api/projects/:projectId/ownership — 所有权摘要 + 模块列表
+    if (req.method === "GET" && ownershipMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(ownershipMatch[1]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const view = computeProjectOwnershipView(ownershipStore, trainingStore, projectId, user.id);
+      jsonResponse(res, 200, { ok: true, ...view });
+      return;
+    }
+
+    // GET /api/projects/:projectId/ownership/modules/:workItemId — 模块详情
+    if (req.method === "GET" && ownershipModuleMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(ownershipModuleMatch[1]);
+      const workItemId = decodeURIComponent(ownershipModuleMatch[2]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const workItem = ownershipStore.getWorkItem(workItemId);
+      if (!workItem || workItem.projectId !== projectId) {
+        jsonResponse(res, 404, { ok: false, error: "Work item not found" });
+        return;
+      }
+      const projectData = ownershipStore.getProjectData(projectId);
+      const moduleAgentSessions = projectData.agentSessions.filter((s) => s.workItemId === workItemId);
+      const moduleArtifacts = projectData.artifacts.filter((a) => a.workItemId === workItemId);
+      const moduleEvidence = projectData.evidenceRecords.filter((e) => e.workItemId === workItemId);
+
+      // 从 trainingStore 获取关联认知欠条和训练记录
+      const allDebts = trainingStore.listCognitiveDebts(user.id);
+      const linkedDebtIds = projectData.decisionDebtLinks
+        .filter((l) => {
+          const decision = projectData.decisionRecords.find((d) => d.id === l.decisionId);
+          return decision && decision.workItemId === workItemId;
+        })
+        .map((l) => l.cognitiveDebtId);
+      const moduleDebts = allDebts.filter((d) => linkedDebtIds.includes(d.id));
+      const moduleAttempts = trainingStore.listAttempts(user.id)
+        .filter((a) => linkedDebtIds.includes(a.cognitiveDebtId) || a.workItemId === workItemId);
+
+      const detailView = buildModuleDetailView({
+        workItem,
+        agentSessions: moduleAgentSessions,
+        decisions: projectData.decisionRecords.filter((d) => d.workItemId === workItemId),
+        artifacts: moduleArtifacts,
+        evidenceRecords: moduleEvidence,
+        cognitiveDebts: moduleDebts,
+        decisionDebtLinks: projectData.decisionDebtLinks,
+        decisionArtifactLinks: projectData.decisionArtifactLinks,
+        trainingAttempts: moduleAttempts,
+      });
+
+      const recommendation = generateModuleRecommendation({
+        ...detailView,
+        projectId,
+      });
+
+      jsonResponse(res, 200, { ok: true, module: detailView, recommendation });
+      return;
+    }
+
+    // GET /api/projects/:projectId/ownership/high-risk — 高风险模块
+    if (req.method === "GET" && ownershipHighRiskMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(ownershipHighRiskMatch[1]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const view = computeProjectOwnershipView(ownershipStore, trainingStore, projectId, user.id);
+      const highRiskModules = view.modules.filter(
+        (m) => m.status === MODULE_OWNERSHIP_STATUS.high_risk_unowned
+      );
+      jsonResponse(res, 200, { ok: true, highRiskModules });
+      return;
+    }
+
+    // GET /api/projects/:projectId/ownership/history — 快照历史
+    if (req.method === "GET" && ownershipHistoryMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(ownershipHistoryMatch[1]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const snapshots = ownershipStore.listSnapshots(projectId);
+      jsonResponse(res, 200, { ok: true, snapshots });
+      return;
+    }
+
+    // POST /api/projects/:projectId/ownership/recalculate — 重新计算并保存快照
+    if (req.method === "POST" && ownershipRecalculateMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      const projectId = decodeURIComponent(ownershipRecalculateMatch[1]);
+      const project = ownershipStore.getProject(projectId, user.id);
+      if (!project) {
+        jsonResponse(res, 404, { ok: false, error: "Project not found" });
+        return;
+      }
+      const view = computeProjectOwnershipView(ownershipStore, trainingStore, projectId, user.id);
+      // 保存快照
+      const snapshot = {
+        projectId,
+        summary: view.summary,
+        moduleSummary: view.modules.map((m) => ({
+          workItemId: m.workItemId,
+          title: m.title,
+          status: m.status,
+          riskLevel: m.riskLevel,
+          importantDecisionCount: m.importantDecisionCount,
+          highestEvidenceLevel: m.highestEvidenceLevel,
+        })),
+      };
+      const { createOwnershipSnapshot } = await import("./project-ownership.js");
+      await ownershipStore.saveSnapshot(createOwnershipSnapshot(snapshot));
+      jsonResponse(res, 200, { ok: true, ...view, snapshotSaved: true });
       return;
     }
 
