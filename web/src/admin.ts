@@ -81,6 +81,13 @@ type AdminStats = {
     dwellTime: Record<string, { avgMs: number; count: number }>
   }
   spiral: unknown
+  assessment: {
+    total: number
+    today: number
+    byRole: Record<string, number>
+    byLocale: Record<string, number>
+    byMode: Record<string, number>
+  }
   eventCount: number
 }
 type EventItem = { at?: string; type: string; data?: Record<string, unknown> }
@@ -187,7 +194,10 @@ export async function renderAdminDashboard(root: HTMLElement): Promise<void> {
   // ── 3. 用户活跃度 ── ★ 新增
   page.appendChild(renderUserActivity(users))
 
-  // ── 4. 漏斗分析 ──
+  // ── 4. MBAI 协作测试统计 ── ★ 新增
+  page.appendChild(renderAssessment(stats))
+
+  // ── 5. 漏斗分析 ──
   page.appendChild(renderFunnel(stats))
 
   // ── 5. 节点停留时长 ──
@@ -206,6 +216,78 @@ export async function renderAdminDashboard(root: HTMLElement): Promise<void> {
   page.appendChild(renderEventStream(events))
 
   root.appendChild(page)
+}
+
+// ── MBAI 协作测试统计 ──
+function renderAssessment(stats: AdminStats): HTMLElement {
+  const section = el('section', 'admin-section')
+  section.appendChild(el('h2', 'admin-section-title', 'MBAI 协作测试'))
+  section.appendChild(el('p', 'admin-section-desc', 'AI 协作类型测试（/assessment）的完成情况，按角色 / 语言 / 评审模式分布'))
+
+  const a = stats.assessment
+  if (!a) {
+    section.appendChild(el('p', 'admin-empty', '暂无测试数据（埋点未启用或后端版本过旧）'))
+    return section
+  }
+
+  // 概览卡片
+  const overviewGrid = el('div', 'metric-grid')
+  const overviewCards = [
+    { label: '累计测试', value: a.total, sub: `今日 ${a.today}` },
+    { label: '今日测试', value: a.today, sub: a.total > 0 ? `${((a.today / a.total) * 100).toFixed(1)}% 占比` : '0%' },
+    { label: '角色类型数', value: Object.keys(a.byRole).length, sub: '4 种为完整覆盖' },
+    { label: '模型评审占比', value: a.byMode.model_structured || 0, sub: a.total > 0 ? `${(((a.byMode.model_structured || 0) / a.total) * 100).toFixed(1)}%` : '0%' }
+  ]
+  for (const c of overviewCards) {
+    const card = el('div', 'metric-card')
+    card.appendChild(el('span', 'metric-value', String(c.value)))
+    card.appendChild(el('span', 'metric-label', c.label))
+    card.appendChild(el('span', 'metric-sub', c.sub))
+    overviewGrid.appendChild(card)
+  }
+  section.appendChild(overviewGrid)
+
+  if (a.total === 0) {
+    section.appendChild(el('p', 'admin-empty', '还没有人完成测试'))
+    return section
+  }
+
+  // 分布表
+  const ROLE_LABELS: Record<string, [string, string]> = {
+    developer: ['开发者与 Vibe Coder', 'Developer'],
+    product: ['产品经理与创业者', 'Product'],
+    research: ['学生与研究者', 'Researcher'],
+    creator: ['内容创作者', 'Creator']
+  }
+  const renderDist = (title: string, dist: Record<string, number>, labels?: Record<string, [string, string]>): HTMLElement => {
+    const block = el('div', 'admin-dist-block')
+    block.appendChild(el('h3', 'admin-dist-title', title))
+    const entries = Object.entries(dist).sort((a, b) => b[1] - a[1])
+    if (entries.length === 0) {
+      block.appendChild(el('p', 'admin-empty', '无数据'))
+      return block
+    }
+    const list = el('div', 'admin-dist-list')
+    for (const [key, count] of entries) {
+      const row = el('div', 'admin-dist-row')
+      const name = labels?.[key]?.[0] || key
+      const pct = a.total > 0 ? ((count / a.total) * 100).toFixed(1) : '0'
+      row.appendChild(el('span', 'admin-dist-name', `${name} (${key})`))
+      row.appendChild(el('span', 'admin-dist-count', String(count)))
+      row.appendChild(el('span', 'admin-dist-pct', `${pct}%`))
+      list.appendChild(row)
+    }
+    block.appendChild(list)
+    return block
+  }
+
+  const distGrid = el('div', 'admin-dist-grid')
+  distGrid.appendChild(renderDist('按角色分布', a.byRole, ROLE_LABELS))
+  distGrid.appendChild(renderDist('按语言分布', a.byLocale))
+  distGrid.appendChild(renderDist('按评审模式分布', a.byMode))
+  section.appendChild(distGrid)
+
+  return section
 }
 
 // ── 概览卡片 ──

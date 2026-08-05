@@ -3299,6 +3299,15 @@ body {
 }
 .admin-section-title { font-size: 1.05rem; margin: 0 0 0.4rem; }
 .admin-section-desc { color: var(--muted); margin: 0 0 1rem; font-size: 0.85rem; }
+.admin-dist-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-top: 14px; }
+.admin-dist-block { padding: 16px 18px; border: 1px solid var(--border, #e2e8f0); border-radius: 14px; background: var(--bg-soft, #f8fafc); }
+.admin-dist-title { margin: 0 0 12px; font-size: 14px; color: var(--text, #0f172a); }
+.admin-dist-list { display: grid; gap: 6px; }
+.admin-dist-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--border, #e2e8f0); }
+.admin-dist-row:last-child { border-bottom: none; }
+.admin-dist-name { font-size: 13px; color: var(--text, #0f172a); }
+.admin-dist-count { font-weight: 600; color: var(--primary, #4f46e5); min-width: 32px; text-align: right; }
+.admin-dist-pct { font-size: 12px; color: var(--muted, #64748b); min-width: 48px; text-align: right; }
 
 /* 概览卡片网格 */
 .metric-grid {
