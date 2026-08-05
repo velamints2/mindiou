@@ -309,6 +309,26 @@ export function renderLandingPage(root: HTMLElement): void {
   page.appendChild(renderSiteFooter())
 
   root.appendChild(page)
+
+  // ── 首期计划浮窗宣传 ──
+  var banner = el("aside", "challenge-floating-banner")
+  var bannerBody = el("div", "challenge-floating-body")
+  var bannerText = el("div", "challenge-floating-text")
+  bannerText.appendChild(el("span", "challenge-floating-kicker", "001 期 · 首期计划"))
+  bannerText.appendChild(el("strong", "challenge-floating-title", "7 天认知清债挑战"))
+  bannerBody.appendChild(bannerText)
+  bannerBody.appendChild(el("span", "challenge-floating-price", "¥29.9"))
+  var bannerBtn = el("a", "challenge-floating-btn", "了解详情")
+  bannerBtn.href = "#/challenge/001"
+  bannerBody.appendChild(bannerBtn)
+  banner.appendChild(bannerBody)
+  var closeBtn = el("button", "challenge-floating-close", "×")
+  closeBtn.onclick = function() { banner.style.display = "none" }
+  banner.appendChild(closeBtn)
+  root.appendChild(banner)
+
+
+
 }
 
 // ── 原理页 ──
@@ -413,4 +433,8 @@ export function renderHowItWorksPage(root: HTMLElement): void {
 
   page.appendChild(renderSiteFooter())
   root.appendChild(page)
+
+
+
+
 }

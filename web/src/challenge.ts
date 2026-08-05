@@ -11,7 +11,7 @@ import { el, navigate } from './router'
 const CHALLENGE = {
   slug: '001',
   // 首期建议价，仅作展示，不涉交易
-  priceDisplay: '¥39.9',
+  priceDisplay: '¥29.9',
   // 爱发电商品链接：配置后购买按钮自动可用；留空则按钮显示「即将开放」
   afdianUrl: 'https://ifdian.net/item/2a561d748fe811f1a3b552540025c377',
   openDays: 20,
@@ -64,12 +64,12 @@ function renderHero(page: HTMLElement): void {
 
   const actions = el('div', 'challenge-actions')
   const primary = el('button', 'challenge-btn challenge-btn-primary', label('免费发现第一张认知欠条', 'Find my first cognitive debt—free'))
-  primary.onclick = () => navigate({ name: 'assessment' })
+  primary.onclick = () => navigate({ name: 'login' })
   const secondary = el('button', 'challenge-btn challenge-btn-ghost', label('我已购买，兑换挑战密钥', 'I have purchased—redeem my key'))
   secondary.onclick = () => document.getElementById('challenge-join')?.scrollIntoView({ behavior: 'smooth' })
   actions.append(primary, secondary)
   copy.appendChild(actions)
-  copy.appendChild(el('p', 'challenge-hero-note', label('先免费完成 AI 协作测试，再决定是否加入。', 'Take the free AI collaboration test first, then decide.')))
+  copy.appendChild(el('p', 'challenge-hero-note', label('先发现第一张欠条，再决定是否加入。', 'Find your first debt first, then decide.')))
   hero.appendChild(copy)
 
   const visual = el('figure', 'challenge-hero-visual')
@@ -331,7 +331,7 @@ function renderFinalCta(page: HTMLElement): void {
   const section = el('section', 'challenge-section challenge-final')
   section.appendChild(el('h2', 'challenge-section-title', label('先看见自己的欠条，再决定要不要清。', 'See your debts first. Then decide whether to clear them.')))
   const primary = el('button', 'challenge-btn challenge-btn-primary', label('免费发现第一张认知欠条', 'Find my first cognitive debt—free'))
-  primary.onclick = () => navigate({ name: 'assessment' })
+  primary.onclick = () => navigate({ name: 'login' })
   section.appendChild(primary)
   page.appendChild(section)
 }
