@@ -257,6 +257,9 @@ export type ClearanceSession = {
     difficulty?: string
   }
   clearanceQuestion: string
+  // 追问被采纳后，学习者实际正在回答的问题（缺省时等于 clearanceQuestion）
+  currentQuestion?: string
+  teachingMode?: 'coach' | 'direct'
   researchSummary?: string
   researchMode?: string
   sources?: SourceRecord[]

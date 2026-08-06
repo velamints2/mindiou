@@ -2,6 +2,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   endClearanceSession,
+  getClearanceResearchPrompt,
+  getResearchStructuringPrompt,
   normalizeResearchSources,
   publicSession,
   startClearanceSession,
@@ -269,5 +271,226 @@ describe("MVP-1 clearance session", () => {
     expect(request.priorProfile.available.L1).toBe(true);
     expect(request.priorProfile.available.L3).toBe(true);
     expect(request.priorProfile.rules.length).toBeGreaterThan(0);
+  });
+
+  it("evaluates the follow-up question the learner is actually answering", async () => {
+    const session = await startClearanceSession({ report, cardId: "card-1", researchFn: async () => research });
+    expect(session.currentQuestion).toBe(session.clearanceQuestion);
+    const followUp = "At which step does CORS act?";
+    await submitClearanceAnswer({
+      session,
+      answer: "It fails because the network is bad.",
+      analyzeFn: async () => ({
+        status: "needs_practice",
+        coverage: 0.2,
+        demonstrated: [],
+        missing: ["Does not distinguish transport from CORS"],
+        misconceptions: [],
+        evidence: [],
+        materialSourceIds: [],
+        feedback: "You merged three boundaries.",
+        teaching: "A request can reach the server and still be unreadable to browser JavaScript.",
+        nextQuestion: followUp,
+        recommendation: "continue"
+      })
+    });
+    expect(session.currentQuestion).toBe(followUp);
+
+    const seenInputs = [];
+    await submitClearanceAnswer({
+      session,
+      answer: "CORS acts when browser code reads the response.",
+      analyzeFn: async input => {
+        seenInputs.push(input);
+        return {
+          status: "needs_practice",
+          coverage: 0.5,
+          demonstrated: ["Places CORS at response read time"],
+          missing: ["WebView policy boundary"],
+          misconceptions: [],
+          evidence: [],
+          materialSourceIds: [],
+          feedback: "One boundary placed, one still missing.",
+          teaching: "WebView policy can block transport before CORS is consulted.",
+          nextQuestion: "Which boundary blocks transport before CORS?",
+          recommendation: "continue"
+        };
+      }
+    });
+    expect(seenInputs).toHaveLength(1);
+    expect(seenInputs[0].question).toBe(followUp);
+    expect(seenInputs[0].originalQuestion).toBe(session.clearanceQuestion);
+    expect(publicSession(session).currentQuestion).toBe("Which boundary blocks transport before CORS?");
+  });
+
+  it("switches the analyze input to direct mode on the second consecutive failure", async () => {
+    const session = await startClearanceSession({ report, cardId: "card-1", researchFn: async () => research });
+    const weakAnalysis = teaching => ({
+      status: "needs_practice",
+      coverage: 0.2,
+      demonstrated: [],
+      missing: ["Does not distinguish transport from CORS"],
+      misconceptions: [],
+      evidence: [],
+      materialSourceIds: [],
+      feedback: "Still merging boundaries.",
+      teaching,
+      nextQuestion: "At which step does CORS act?",
+      recommendation: "continue"
+    });
+    const seenInputs = [];
+    const analyzeFn = async input => {
+      seenInputs.push(input);
+      return weakAnalysis(`Teaching for attempt ${seenInputs.length}.`);
+    };
+
+    await submitClearanceAnswer({ session, answer: "The network is bad.", analyzeFn });
+    expect(seenInputs[0].teachingMode).toBe("coach");
+    expect(seenInputs[0].consecutiveFailures).toBe(0);
+    expect(session.consecutiveFailures).toBe(1);
+    expect(session.teachingMode).toBe("coach");
+
+    await submitClearanceAnswer({ session, answer: "The network is still bad.", analyzeFn });
+    expect(seenInputs[1].teachingMode).toBe("direct");
+    expect(seenInputs[1].consecutiveFailures).toBe(1);
+    expect(seenInputs[1].previousTeachings).toEqual(["Teaching for attempt 1."]);
+    expect(session.consecutiveFailures).toBe(2);
+    expect(session.teachingMode).toBe("direct");
+
+    await submitClearanceAnswer({
+      session,
+      answer: "Reachability is transport, CORS gates script reads, WebView policy is separate.",
+      analyzeFn: async input => {
+        seenInputs.push(input);
+        return {
+          status: "provisionally_cleared",
+          coverage: 0.9,
+          demonstrated: ["Separates all three boundaries"],
+          missing: [],
+          misconceptions: [],
+          evidence: [],
+          materialSourceIds: [],
+          feedback: "Core model demonstrated.",
+          teaching: "",
+          nextQuestion: "",
+          recommendation: "end"
+        };
+      }
+    });
+    expect(seenInputs[2].teachingMode).toBe("direct");
+    expect(session.consecutiveFailures).toBe(0);
+  });
+
+  it("replaces verbatim-repeated teaching with a labeled scaffold-based explanation", async () => {
+    const session = await startClearanceSession({ report, cardId: "card-1", researchFn: async () => research });
+    const repeatedTeaching = "A request can reach the server and still be unreadable to browser JavaScript.";
+    const analyze = teaching => async () => ({
+      status: "needs_practice",
+      coverage: 0.2,
+      demonstrated: [],
+      missing: ["Does not distinguish transport from CORS"],
+      misconceptions: [],
+      evidence: [],
+      materialSourceIds: [],
+      feedback: "Still merging boundaries.",
+      teaching,
+      nextQuestion: "At which step does CORS act?",
+      recommendation: "continue"
+    });
+
+    await submitClearanceAnswer({ session, answer: "The network is bad.", analyzeFn: analyze(repeatedTeaching) });
+    // Same text with different casing and whitespace must still count as a repeat.
+    const second = await submitClearanceAnswer({
+      session,
+      answer: "The network is still bad.",
+      analyzeFn: analyze(`  ${repeatedTeaching.toUpperCase()}\n`)
+    });
+    expect(second.analysis.teaching).not.toBe(repeatedTeaching);
+    expect(second.analysis.teaching).toContain("（系统直接讲解，基于来源要点）");
+    expect(second.analysis.teaching).toContain("Reachability determines whether a request reaches the server.");
+    expect(second.analysis.teaching).toContain("CORS determines whether browser code may read a cross-origin response.");
+
+    const third = await submitClearanceAnswer({
+      session,
+      answer: "Transport works, CORS blocks the read.",
+      analyzeFn: analyze("Fresh teaching that references this attempt specifically.")
+    });
+    expect(third.analysis.teaching).toBe("Fresh teaching that references this attempt specifically.");
+  });
+
+  it("keeps old sessions without tracking fields working with derived defaults", async () => {
+    const session = await startClearanceSession({ report, cardId: "card-1", researchFn: async () => research });
+    delete session.currentQuestion;
+    delete session.consecutiveFailures;
+    delete session.teachingMode;
+
+    const seenInputs = [];
+    await submitClearanceAnswer({
+      session,
+      answer: "The network is bad.",
+      analyzeFn: async input => {
+        seenInputs.push(input);
+        return {
+          status: "needs_practice",
+          coverage: 0.2,
+          demonstrated: [],
+          missing: ["Does not distinguish transport from CORS"],
+          misconceptions: [],
+          evidence: [],
+          materialSourceIds: [],
+          feedback: "You merged three boundaries.",
+          teaching: "A request can reach the server and still be unreadable to browser JavaScript.",
+          nextQuestion: "At which step does CORS act?",
+          recommendation: "continue"
+        };
+      }
+    });
+    expect(seenInputs[0].question).toBe(session.clearanceQuestion);
+    expect(seenInputs[0].teachingMode).toBe("coach");
+    expect(seenInputs[0].previousTeachings).toEqual([]);
+    expect(session.consecutiveFailures).toBe(1);
+    expect(session.currentQuestion).toBe("At which step does CORS act?");
+
+    // An old session whose stored attempts already failed once derives
+    // direct mode even though consecutiveFailures was never persisted.
+    delete session.consecutiveFailures;
+    delete session.teachingMode;
+    await submitClearanceAnswer({
+      session,
+      answer: "The network is still bad.",
+      analyzeFn: async input => {
+        seenInputs.push(input);
+        return {
+          status: "needs_practice",
+          coverage: 0.2,
+          demonstrated: [],
+          missing: ["WebView policy boundary"],
+          misconceptions: [],
+          evidence: [],
+          materialSourceIds: [],
+          feedback: "Still merging boundaries.",
+          teaching: "WebView policy can block transport independently of CORS.",
+          nextQuestion: "Does a blocked WebView request reach the CORS check?",
+          recommendation: "continue"
+        };
+      }
+    });
+    expect(seenInputs[1].teachingMode).toBe("direct");
+    expect(seenInputs[1].consecutiveFailures).toBe(1);
+    expect(session.consecutiveFailures).toBe(2);
+  });
+
+  it("requires both research prompts to reject same-word different-mechanism sources", () => {
+    const researchPrompt = getClearanceResearchPrompt({
+      originalQuestion: "Explain the CLI wrapper launcher script.",
+      targetDebt: "wrapper launcher scripts"
+    });
+    const structuringPrompt = getResearchStructuringPrompt();
+    for (const prompt of [researchPrompt, structuringPrompt]) {
+      expect(prompt).toContain("different mechanism");
+      expect(prompt).toContain("--wrap");
+      expect(prompt).toContain("wrapper launcher");
+    }
+    expect(structuringPrompt).toContain("do not put their source IDs in the scaffold");
   });
 });

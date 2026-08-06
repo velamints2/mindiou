@@ -1076,6 +1076,15 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
     return
   }
 
+  // 当前问题（追问被采纳后评估目标会更新，需在输入区上方明确展示）
+  const currentBox = el('section', 'session-question')
+  currentBox.appendChild(el('p', 'session-question-label', '当前问题'))
+  currentBox.appendChild(el('h2', 'session-question-text', session.currentQuestion || session.clearanceQuestion))
+  if (session.teachingMode === 'direct') {
+    currentBox.appendChild(el('p', 'session-question-label', '系统已进入直接教学模式：先学会，再用一句话确认。'))
+  }
+  page.appendChild(currentBox)
+
   // 输入区
   const inputArea = el('section', 'session-input')
   const textarea = el('textarea', 'answer-input') as HTMLTextAreaElement
