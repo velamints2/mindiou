@@ -27,11 +27,12 @@ export type Route =
   | { name: 'project'; projectId: string }
   | { name: 'work-item'; projectId: string; workItemId: string }
   | { name: 'agent-session'; sessionId: string }
+  | { name: 'verify-email'; token?: string }
   | { name: 'not-found' }
 
 // 判断是否为公开路由（无需登录）
 export function isPublicRoute(route: Route): boolean {
-  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register' || route.name === 'genesis' || route.name === 'assessment' || route.name === 'challenge'
+  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register' || route.name === 'genesis' || route.name === 'assessment' || route.name === 'challenge' || route.name === 'verify-email'
 }
 
 export function parseRoute(): Route {
@@ -97,6 +98,8 @@ export function parseRoute(): Route {
       }
     }
       return rest[0] ? { name: 'agent-session', sessionId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
+    case 'verify-email':
+      return { name: 'verify-email', token: new URLSearchParams(location.hash.split('?')[1] || '').get('token') || undefined }
     default:
       return { name: 'not-found' }
   }
@@ -130,6 +133,7 @@ export function navigate(route: Route): void {
       path = `/project-ownership-module/${encodeURIComponent(route.projectId)}/${encodeURIComponent(route.moduleId)}`
       break
     case 'repayment-detail': path = `/repayment/${encodeURIComponent(route.gapId)}`; break
+    case 'verify-email': path = '/verify-email'; break
     case 'not-found': path = '/not-found'; break
   }
   location.hash = path

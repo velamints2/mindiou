@@ -48,6 +48,15 @@ export function createAuthStore(dbPath) {
       revoked_at TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id)
     );
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token TEXT UNIQUE NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    );
   `);
 
   const userColumns = new Set(db.prepare("PRAGMA table_info(users)").all().map(column => column.name));
@@ -85,6 +94,7 @@ export function createAuthStore(dbPath) {
       id: row.id,
       email: row.email,
       name: row.display_name || undefined,
+      emailVerified: row.email_verified === 1,
       genesisIdentity: row.genesis_number ? {
         number: formatGenesisNumber(row.genesis_number),
         reservedAt: row.genesis_reserved_at,
@@ -214,6 +224,50 @@ export function createAuthStore(dbPath) {
     return { joined: Number(totals.joined || 0), completed: Number(totals.completed || 0), members };
   }
 
+  const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  function createEmailVerificationToken(userId) {
+    db.prepare("DELETE FROM email_verification_tokens WHERE user_id = ?").run(String(userId));
+    const token = crypto.randomBytes(32).toString("hex");
+    const now = new Date();
+    db.prepare(
+      "INSERT INTO email_verification_tokens (id, user_id, token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(crypto.randomUUID(), String(userId), token, now.toISOString(),
+          new Date(now.getTime() + VERIFICATION_TOKEN_TTL_MS).toISOString());
+    return token;
+  }
+
+  function verifyEmailToken(token) {
+    const raw = String(token || "");
+    if (!raw) return { ok: false, error: "Token is required" };
+    const row = db.prepare(
+      "SELECT * FROM email_verification_tokens WHERE token = ?"
+    ).get(raw);
+    if (!row) return { ok: false, error: "Invalid or expired token" };
+    if (row.used_at) return { ok: false, error: "Token already used" };
+    if (new Date(row.expires_at).getTime() <= Date.now()) {
+      db.prepare("DELETE FROM email_verification_tokens WHERE id = ?").run(row.id);
+      return { ok: false, error: "Token has expired" };
+    }
+    db.transaction(() => {
+      db.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").run(row.user_id);
+      db.prepare("UPDATE email_verification_tokens SET used_at = ? WHERE id = ?").run(
+        new Date().toISOString(), row.id
+      );
+    })();
+    return { ok: true, userId: row.user_id };
+  }
+
+  function isEmailVerified(userId) {
+    const row = db.prepare("SELECT email_verified FROM users WHERE id = ?").get(String(userId || ""));
+    return row ? row.email_verified === 1 : false;
+  }
+
+  function getUserEmail(userId) {
+    const row = db.prepare("SELECT email FROM users WHERE id = ?").get(String(userId || ""));
+    return row ? row.email : null;
+  }
+
   // The plaintext token is returned exactly once here; only its bcrypt hash
   // is persisted. Device tokens stay valid until manually revoked.
   function generateDeviceToken(userId, name) {
@@ -301,6 +355,10 @@ export function createAuthStore(dbPath) {
     listUsersWithStats,
     activateGenesisIdentity,
     updateGenesisIdentity,
-    getGenesisArchive
+    getGenesisArchive,
+    createEmailVerificationToken,
+    verifyEmailToken,
+    isEmailVerified,
+    getUserEmail
   };
 }

@@ -5,6 +5,7 @@ import { createMvp0Store } from "./mvp0-store.js";
 import { createMvp1Store } from "./mvp1-store.js";
 import { deriveReportDisplay, sessionLastActivityAt } from "./report-display.js";
 import { createAuthStore } from "./auth-store.js";
+import nodemailer from "nodemailer";
 import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport, buildCapabilitySnapshot } from "./mvp0-report.js";
 import { generateCollaborationTimeline } from "./mvp0-timeline.js";
@@ -636,6 +637,52 @@ function clearSessionCookie() {
   ];
   if (process.env.NODE_ENV === "production") parts.push("Secure");
   return parts.join("; ");
+}
+
+let mailTransporter = null;
+
+function getMailTransporter() {
+  if (mailTransporter) return mailTransporter;
+  const host = process.env.SMTP_HOST || "";
+  const port = parseInt(process.env.SMTP_PORT || "465", 10);
+  const user = process.env.SMTP_USER || "";
+  const pass = process.env.SMTP_PASS || "";
+  if (!host || !user || !pass) return null;
+  mailTransporter = nodemailer.createTransport({
+    host, port,
+    secure: port === 465,
+    auth: { user, pass }
+  });
+  return mailTransporter;
+}
+
+function getMailFrom() {
+  return process.env.SMTP_FROM || process.env.SMTP_USER || "noreply@mindiou.top";
+}
+
+function getPublicBaseUrl(req) {
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL;
+  const proto = req.headers["x-forwarded-proto"] || "http";
+  const host = req.headers.host || "demo.mindiou.top";
+  return proto + "://" + host;
+}
+
+async function sendVerificationEmail(email, token, req) {
+  const transporter = getMailTransporter();
+  const baseUrl = getPublicBaseUrl(req);
+  const link = baseUrl + "/mindiou/#/verify-email?token=" + token;
+  if (!transporter) {
+    console.warn("[email-verification] SMTP not configured. Link for " + email + ": " + link);
+    return { sent: false, link };
+  }
+  const from = getMailFrom();
+  await transporter.sendMail({
+    from,
+    to: email,
+    subject: "验证你的 MindIOU 邮箱",
+    html: "<div style=\"font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;\"><h2>验证你的邮箱</h2><p>感谢注册 MindIOU。请点击下方按钮完成邮箱验证：</p><p><a href=\"" + link + "\" style=\"display:inline-block;padding:12px 32px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;\">验证邮箱</a></p><p>或复制以下链接到浏览器：</p><p><a href=\"" + link + "\">" + link + "</a></p><p style=\"color:#888;font-size:12px;margin-top:24px;\">此链接 24 小时内有效。如果你没有注册 MindIOU，请忽略此邮件。</p></div>"
+  });
+  return { sent: true, link: null };
 }
 
 function requireAuth(req, res) {
@@ -2427,6 +2474,12 @@ const server = createServer(async (req, res) => {
       const payload = parseJson(await readBody(req));
       try {
         const { user, sessionId } = authStore.register(payload.email, payload.password, payload.name);
+        try {
+          const token = authStore.createEmailVerificationToken(user.id);
+          await sendVerificationEmail(user.email, token, req);
+        } catch (mailError) {
+          console.error("[email-verification] Failed to send: " + mailError.message);
+        }
         jsonResponse(res, 201, { ok: true, user }, { "set-cookie": authSessionCookie(sessionId) });
       } catch (error) {
         const status = /already registered/i.test(String(error.message)) ? 409 : 400;
@@ -2454,6 +2507,33 @@ const server = createServer(async (req, res) => {
       const user = requireAuth(req, res);
       if (!user) return;
       jsonResponse(res, 200, { ok: true, user });
+      return;
+    }
+    if (url.pathname === "/api/auth/verify-email" && req.method === "POST") {
+      const payload = parseJson(await readBody(req));
+      const result = authStore.verifyEmailToken(payload.token);
+      if (result.ok) {
+        jsonResponse(res, 200, { ok: true, message: "Email verified successfully" });
+      } else {
+        jsonResponse(res, 400, { ok: false, error: result.error });
+      }
+      return;
+    }
+    if (url.pathname === "/api/auth/resend-verification" && req.method === "POST") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      if (authStore.isEmailVerified(user.id)) {
+        jsonResponse(res, 200, { ok: true, message: "Email already verified" });
+        return;
+      }
+      try {
+        const token = authStore.createEmailVerificationToken(user.id);
+        const email = authStore.getUserEmail(user.id);
+        if (email) await sendVerificationEmail(email, token, req);
+        jsonResponse(res, 200, { ok: true, message: "Verification email sent" });
+      } catch (mailError) {
+        jsonResponse(res, 500, { ok: false, error: "Failed to send verification email" });
+      }
       return;
     }
     if (url.pathname === "/api/genesis" && req.method === "GET") {

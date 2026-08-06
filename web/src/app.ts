@@ -3,11 +3,12 @@
 // 公开区（landing/how-it-works）无需登录；产品区（app/report/session/login）需邀请码。
 // 视觉样式见 styles.css（占位），由设计师 agent 重构。
 
-import { checkAuthSession, getAccessToken, setAccessToken } from './api'
+import { checkAuthSession, fetchCurrentUser, getAccessToken, setAccessToken } from './api'
 import { renderHowItWorksPage, renderLandingPage } from './marketing'
 import {
   renderAppPage,
   renderDevicesPage,
+  renderEmailVerificationPage,
   renderGenesisPage,
   renderLoginPage,
   renderRegisterPage,
@@ -121,9 +122,21 @@ async function render(route: Route): Promise<void> {
     return
   }
 
-  // 已登录用户访问登录页 → 跳工作区
+  // 已登录用户访问登录页 → 检查验证状态后跳转
   if (route.name === 'login') {
-    navigate({ name: 'app' })
+    const user = await fetchCurrentUser()
+    navigate({ name: user?.emailVerified ? 'app' : 'verify-email' })
+    return
+  }
+  // 邮箱验证页：已登录用户可访问
+  if (route.name === 'verify-email') {
+    renderEmailVerificationPage(app, route.token)
+    trackRoute('verify-email')
+    return
+  }
+  // 其他已登录路由：检查邮箱验证状态
+  if (!await isEmailVerifiedCached()) {
+    navigate({ name: 'verify-email' })
     return
   }
 
@@ -207,6 +220,19 @@ function renderNotFoundPage(root: HTMLElement): void {
   btn.onclick = () => navigate({ name: 'landing' })
   page.appendChild(btn)
   root.appendChild(page)
+}
+
+let cachedEmailVerified: boolean | null = null
+let cacheExpiry = 0
+
+async function isEmailVerifiedCached(): Promise<boolean> {
+  if (cachedEmailVerified !== null && Date.now() < cacheExpiry) {
+    return cachedEmailVerified
+  }
+  const user = await fetchCurrentUser()
+  cachedEmailVerified = user?.emailVerified ?? false
+  cacheExpiry = Date.now() + 30_000
+  return cachedEmailVerified
 }
 
 async function boot(): Promise<void> {
