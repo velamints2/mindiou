@@ -323,7 +323,7 @@ describe("MVP-1 clearance session", () => {
     expect(publicSession(session).currentQuestion).toBe("Which boundary blocks transport before CORS?");
   });
 
-  it("switches the analyze input to direct mode on the second consecutive failure", async () => {
+  it("switches to direct teaching on the first weak answer", async () => {
     const session = await startClearanceSession({ report, cardId: "card-1", researchFn: async () => research });
     const weakAnalysis = teaching => ({
       status: "needs_practice",
@@ -341,22 +341,28 @@ describe("MVP-1 clearance session", () => {
     const seenInputs = [];
     const analyzeFn = async input => {
       seenInputs.push(input);
-      return weakAnalysis(`Teaching for attempt ${seenInputs.length}.`);
+      return weakAnalysis(`Teaching for call ${seenInputs.length}.`);
     };
 
+    // 第1次答错：先用 coach 评估，发现弱回答后立即用 direct 重评，本轮反馈就是直接教学。
     await submitClearanceAnswer({ session, answer: "The network is bad.", analyzeFn });
     expect(seenInputs[0].teachingMode).toBe("coach");
     expect(seenInputs[0].consecutiveFailures).toBe(0);
-    expect(session.consecutiveFailures).toBe(1);
-    expect(session.teachingMode).toBe("coach");
-
-    await submitClearanceAnswer({ session, answer: "The network is still bad.", analyzeFn });
     expect(seenInputs[1].teachingMode).toBe("direct");
-    expect(seenInputs[1].consecutiveFailures).toBe(1);
-    expect(seenInputs[1].previousTeachings).toEqual(["Teaching for attempt 1."]);
+    expect(seenInputs[1].consecutiveFailures).toBe(0);
+    expect(seenInputs[1].previousTeachings).toEqual(["Teaching for call 1."]);
+    expect(session.consecutiveFailures).toBe(1);
+    expect(session.teachingMode).toBe("direct");
+
+    // 第2次答错：已连续失败过，直接用 direct 评估（单次调用）。
+    await submitClearanceAnswer({ session, answer: "The network is still bad.", analyzeFn });
+    expect(seenInputs[2].teachingMode).toBe("direct");
+    expect(seenInputs[2].consecutiveFailures).toBe(1);
+    expect(seenInputs[2].previousTeachings).toEqual(["Teaching for call 2."]);
     expect(session.consecutiveFailures).toBe(2);
     expect(session.teachingMode).toBe("direct");
 
+    // 第3次答对：direct 模式下通过，连续失败计数归零。
     await submitClearanceAnswer({
       session,
       answer: "Reachability is transport, CORS gates script reads, WebView policy is separate.",
@@ -377,7 +383,7 @@ describe("MVP-1 clearance session", () => {
         };
       }
     });
-    expect(seenInputs[2].teachingMode).toBe("direct");
+    expect(seenInputs[3].teachingMode).toBe("direct");
     expect(session.consecutiveFailures).toBe(0);
   });
 
@@ -448,6 +454,9 @@ describe("MVP-1 clearance session", () => {
     expect(seenInputs[0].question).toBe(session.clearanceQuestion);
     expect(seenInputs[0].teachingMode).toBe("coach");
     expect(seenInputs[0].previousTeachings).toEqual([]);
+    // 首次弱回答触发 direct 重评
+    expect(seenInputs[1].teachingMode).toBe("direct");
+    expect(seenInputs[1].consecutiveFailures).toBe(0);
     expect(session.consecutiveFailures).toBe(1);
     expect(session.currentQuestion).toBe("At which step does CORS act?");
 
@@ -475,8 +484,8 @@ describe("MVP-1 clearance session", () => {
         };
       }
     });
-    expect(seenInputs[1].teachingMode).toBe("direct");
-    expect(seenInputs[1].consecutiveFailures).toBe(1);
+    expect(seenInputs[2].teachingMode).toBe("direct");
+    expect(seenInputs[2].consecutiveFailures).toBe(1);
     expect(session.consecutiveFailures).toBe(2);
   });
 

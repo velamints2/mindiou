@@ -136,8 +136,6 @@ export async function startClearanceSession({ report, cardId, researchFn, priorP
   if (sources.length === 0) throw new Error("External research returned no cited sources");
   const scaffold = normalizeScaffold(rawResearch?.scaffold, sources);
   if (scaffold.length === 0) throw new Error("External research returned no explanation scaffold");
-  const clearanceQuestion = fit(rawResearch?.rewrittenQuestion || card.prompt, 800);
-
   // 根据难度调整修饰 clearanceQuestion（不替换内容，只附加引导）
   let clearanceQuestion = fit(rawResearch?.rewrittenQuestion || card.prompt, 800);
   if (difficultyAdjustment && difficultyAdjustment.note) {
@@ -315,24 +313,34 @@ export async function submitClearanceAnswer({ session, answer, analyzeFn, now = 
   if (!text) throw new Error("Answer is required");
   if (typeof analyzeFn !== "function") throw new Error("Answer analysis is unavailable");
   const currentQuestion = clean(session.currentQuestion) || session.clearanceQuestion;
-  // Deterministic rule: once the previous attempt already failed
-  // (consecutiveFailures >= 1 going into this attempt), this attempt is
-  // evaluated in direct-teaching mode instead of being coached again.
+  // 评估模式：已连续失败过就用 direct；否则先用 coach。但首次弱回答立即切 direct 重评，
+  // 让学习者第一次答错当轮就拿到直接教学，而不是被继续追问。
   const failuresSoFar = deriveConsecutiveFailures(session);
-  const teachingMode = failuresSoFar >= 1 ? "direct" : "coach";
-  const raw = await analyzeFn({
+  let teachingMode = failuresSoFar >= 1 ? "direct" : "coach";
+  const buildInput = (mode, extraPreviousTeachings = []) => ({
     locale: session.locale === "en" ? "en" : "zh-CN",
     question: currentQuestion,
     originalQuestion: session.clearanceQuestion,
     answer: text,
     scaffold: session.scaffold,
     sources: session.sources,
-    teachingMode,
+    teachingMode: mode,
     consecutiveFailures: failuresSoFar,
-    previousTeachings: session.attempts.map(attempt => attempt.analysis?.teaching).filter(Boolean),
+    previousTeachings: [
+      ...session.attempts.map(attempt => attempt.analysis?.teaching).filter(Boolean),
+      ...extraPreviousTeachings
+    ],
     previousAttempts: session.attempts.map(attempt => ({ answer: attempt.answer, analysis: attempt.analysis }))
   });
-  const analysis = ensureFreshTeaching(normalizeAnalysis(raw, session), session);
+  let raw = await analyzeFn(buildInput(teachingMode));
+  let analysis = ensureFreshTeaching(normalizeAnalysis(raw, session), session);
+  // 首次弱回答：立即用 direct 模式重新评估，本轮反馈就是直接教学。
+  if (teachingMode === "coach" && isFailedStatus(analysis.status)) {
+    teachingMode = "direct";
+    const coachTeaching = analysis.teaching ? [analysis.teaching] : [];
+    raw = await analyzeFn(buildInput("direct", coachTeaching));
+    analysis = ensureFreshTeaching(normalizeAnalysis(raw, session), session);
+  }
   const attempt = {
     id: crypto.randomUUID(),
     createdAt: now(),
