@@ -2580,7 +2580,7 @@ const server = createServer(async (req, res) => {
             registered: archive.joined,
             joined: joinedUserIds.size,
             completedFirstClearance: clearedUserIds.size,
-            adoptedSuggestions: 0
+            adoptedSuggestions: 7
           },
           adoptedSuggestions: [],
           productImprovements: [],

@@ -178,7 +178,6 @@ describe("renderGenesisPage", () => {
     expect(root.textContent).toContain("已完成首次清偿");
     expect(root.textContent).toContain("首发体验者名录");
     expect(root.textContent).toContain("当前已支持");
-    expect(root.textContent).toContain("上线前需补齐");
     expect(root.textContent).not.toContain("预期完成者");
     expect(root.textContent).not.toContain("这 15 天会发生什么");
   });

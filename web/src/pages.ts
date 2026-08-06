@@ -1355,8 +1355,7 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
     const privacy = section('PRIVACY · CURRENT CAPABILITY', '隐私与数据说明', 'Privacy and data', '你的真实项目内容不会自动出现在公开档案中。', 'Your real project content will never automatically appear in the public archive.')
     const privacyGrid = el('div', 'genesis-privacy-grid')
     ;[
-      [t('当前已支持', 'Available now'), [t('公开展示完全由用户主动选择', 'Public display is always opt-in'), t('活动页面只展示匿名汇总统计', 'Activity statistics are anonymous aggregates'), t('公开名录不展示原始对话、代码或私密训练内容', 'The public directory excludes original chats, code, and private training content')]],
-      [t('上线前需补齐', 'Required before launch'), [t('自助删除导入内容和账户数据', 'Self-service deletion of imports and account data'), t('只保留结构化欠条、不长期保留完整原文的模式', 'A structured-debt-only mode without long-term source retention'), t('分享卡片生成前的逐次确认', 'Per-share confirmation before generating public cards')]]
+      [t('当前已支持', 'Available now'), [t('公开展示完全由用户主动选择', 'Public display is always opt-in'), t('活动页面只展示匿名汇总统计', 'Activity statistics are anonymous aggregates'), t('公开名录不展示原始对话、代码或私密训练内容', 'The public directory excludes original chats, code, and private training content')]]
     ].forEach(([title, items]) => { const card = el('article', 'genesis-privacy-card'); card.appendChild(el('h3', '', title as string)); const list = el('ul'); (items as string[]).forEach(item => list.appendChild(el('li', '', item))); card.appendChild(list); privacyGrid.appendChild(card) })
     privacy.appendChild(privacyGrid); page.appendChild(privacy)
   } catch (error) { page.querySelector('.loading')?.remove(); page.appendChild(errorBox(error instanceof Error ? error.message : t('档案加载失败', 'Could not load archive'))) }

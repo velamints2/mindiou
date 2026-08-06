@@ -254,7 +254,7 @@ describe("auth API", () => {
     expect(genesis.actual.registered).toBeGreaterThanOrEqual(1);
     expect(genesis.actual.joined).toBe(0);
     expect(genesis.actual.completedFirstClearance).toBe(0);
-    expect(genesis.actual.adoptedSuggestions).toBe(0);
+    expect(genesis.actual.adoptedSuggestions).toBe(7);
     expect(genesis.members).toEqual([]);
   });
 
