@@ -55,6 +55,181 @@ function withGenerationStatus(report, fallback, error = "", failedStep = "") {
   return report;
 }
 
+/**
+ * Three-layer capability snapshot.
+ *
+ * L1 (ai_collaboration): cross-domain transferable AI-collaboration skills,
+ *   aggregated from historical reports' analysis.userCapability. Used to decide
+ *   what to check and how hard cards should be.
+ * L2 (domain): domain-bound capability per area (e.g. database, frontend).
+ *   Aggregated from capabilityProfile domain buckets. Cannot be inferred across
+ *   domains.
+ * L3 (knowledge_points): specific knowledge-point depth per domain, from
+ *   capabilityProfile dimensions (conceptualUnderstanding, etc.). Feynman cards
+ *   train this layer.
+ *
+ * The snapshot is a PRIOR. Material evidence in the current artifact always
+ * overrides it. one_shot stability means a single observation and is a weak
+ * prior; stable means >=2 user_verified attempts.
+ */
+export function buildCapabilitySnapshot({ reports = [], capabilityProfiles = [], userId, now = new Date().toISOString() } = {}) {
+  const snapshot = {
+    schemaVersion: "capability_snapshot_v1",
+    collectedAt: now,
+    userId: clean(userId).slice(0, 100) || null,
+    source: "capability_profile_v1+report_history",
+    layers: {
+      L1_ai_collaboration: { available: false, dimensions: {}, note: "" },
+      L2_domain: { available: false, domains: [] },
+      L3_knowledge_points: { available: false, domains: [] }
+    },
+    rules: [
+      "Material evidence in the current artifact always overrides this prior.",
+      "L1 is cross-domain transferable; L2 is domain-bound; L3 is knowledge-point specific.",
+      "one_shot stability = single observation (weak prior); stable = >=2 user_verified attempts.",
+      "Absence of a layer means no history yet; do not infer capability from silence."
+    ]
+  };
+
+  // ── L1: aggregate historical reports' userCapability (cross-domain) ──
+  const recentReports = (Array.isArray(reports) ? reports : [])
+    .filter(r => r && r.analysis?.userCapability && !r.generation?.fallback)
+    .slice(0, 10);
+  if (recentReports.length > 0) {
+    const dimAccum = {};
+    let overallAccum = [];
+    for (const r of recentReports) {
+      const uc = r.analysis.userCapability;
+      const dims = uc.dimensions || {};
+      for (const [dim, val] of Object.entries(dims)) {
+        if (!val || typeof val !== "object") continue;
+        if (!dimAccum[dim]) dimAccum[dim] = { levels: [], evidences: [], confidences: [] };
+        if (val.level) dimAccum[dim].levels.push(val.level);
+        if (val.evidenceStatus) dimAccum[dim].evidences.push(val.evidenceStatus);
+        if (typeof val.confidence === "number") dimAccum[dim].confidences.push(val.confidence);
+      }
+      if (uc.overall) overallAccum.push(uc.overall);
+    }
+    const l1Dims = {};
+    for (const [dim, acc] of Object.entries(dimAccum)) {
+      const levelCounts = acc.levels.reduce((m, l) => (m[l] = (m[l] || 0) + 1, m), {});
+      const topLevel = Object.entries(levelCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "L0";
+      const evidenceCounts = acc.evidences.reduce((m, e) => (m[e] = (m[e] || 0) + 1, m), {});
+      const topEvidence = Object.entries(evidenceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "unobserved";
+      const avgConf = acc.confidences.length > 0
+        ? Math.round((acc.confidences.reduce((s, c) => s + c, 0) / acc.confidences.length) * 100) / 100
+        : 0;
+      l1Dims[dim] = {
+        inferredLevel: topLevel,
+        commonEvidenceStatus: topEvidence,
+        avgConfidence: avgConf,
+        observationCount: acc.levels.length
+      };
+    }
+    snapshot.layers.L1_ai_collaboration = {
+      available: Object.keys(l1Dims).length > 0,
+      dimensions: l1Dims,
+      overallMode: overallAccum.length > 0
+        ? overallAccum.reduce((m, o) => (m[o] = (m[o] || 0) + 1, m), {})
+        : {},
+      reportCount: recentReports.length,
+      note: recentReports.length >= 3
+        ? "Aggregated from recent reports; treat as moderate-strength prior."
+        : "Few historical reports; treat as weak prior."
+    };
+  } else {
+    snapshot.layers.L1_ai_collaboration.note = "No non-fallback historical reports; L1 unknown.";
+  }
+
+  // ── L2 + L3: aggregate capabilityProfile by domain ──
+  const profiles = (Array.isArray(capabilityProfiles) ? capabilityProfiles : [])
+    .filter(p => p && p.userId === userId && p.dimensions);
+  if (profiles.length > 0) {
+    const l2Domains = [];
+    const l3Domains = [];
+    for (const p of profiles) {
+      const domain = clean(p.domain) || "general";
+      const dims = p.dimensions;
+      const dimEntries = Object.entries(dims).filter(([, v]) => v && typeof v === "object");
+      if (dimEntries.length === 0) continue;
+      const scores = dimEntries.map(([, v]) => Number(v.score) || 0);
+      const overallScore = scores.length > 0
+        ? Math.round(scores.reduce((s, x) => s + x, 0) / scores.length)
+        : 0;
+      const stableCount = dimEntries.filter(([, v]) => v.stability === "stable").length;
+      const verifiedEvidenceCount = dimEntries
+        .flatMap(([, v]) => Array.isArray(v.evidence) ? v.evidence : [])
+        .filter(e => e?.source === "user_verified").length;
+      l2Domains.push({
+        domain,
+        overallScore,
+        stability: stableCount >= dimEntries.length / 2 ? "stable" : "one_shot",
+        userVerifiedEvidenceCount: verifiedEvidenceCount,
+        updatedAt: p.updatedAt || null
+      });
+      const l3Dims = {};
+      for (const [dim, v] of dimEntries) {
+        l3Dims[dim] = {
+          score: Number(v.score) || 0,
+          level: clean(v.level) || "L1",
+          stability: v.stability === "stable" ? "stable" : "one_shot",
+          evidenceCount: Array.isArray(v.evidence) ? v.evidence.length : 0
+        };
+      }
+      l3Domains.push({ domain, dimensions: l3Dims, updatedAt: p.updatedAt || null });
+    }
+    snapshot.layers.L2_domain = {
+      available: l2Domains.length > 0,
+      domains: l2Domains
+    };
+    snapshot.layers.L3_knowledge_points = {
+      available: l3Domains.length > 0,
+      domains: l3Domains
+    };
+  }
+
+  return snapshot;
+}
+
+/**
+ * Format the prior profile as a concise hint for Step A. Emphasizes that
+ * material evidence overrides prior, and that the three layers have different
+ * transferability.
+ */
+function formatPriorProfileHint(snapshot) {
+  if (!snapshot || snapshot.schemaVersion !== "capability_snapshot_v1") return "";
+  const lines = [];
+  const l1 = snapshot.layers?.L1_ai_collaboration;
+  const l2 = snapshot.layers?.L2_domain;
+  const l3 = snapshot.layers?.L3_knowledge_points;
+  const hasAny = (l1?.available) || (l2?.available) || (l3?.available);
+  if (!hasAny) return "";
+  lines.push("【用户历史能力先验（三层模型，PRIOR，不可覆盖本次材料证据）】");
+  lines.push("规则：本次材料证据优先；先验仅作参考。L1 可跨领域迁移；L2 仅限本领域；L3 是具体知识点。one_shot=弱先验，stable=强先验。");
+  if (l1?.available) {
+    const dimLines = Object.entries(l1.dimensions || {}).map(([dim, v]) =>
+      `${dim}: ${v.inferredLevel} (evidenceStatus常见=${v.commonEvidenceStatus}, 平均置信度=${v.avgConfidence}, 观察次数=${v.observationCount})`);
+    lines.push(`L1 通用AI协作能力（来自${l1.reportCount}份历史报告，${l1.note}）：`);
+    lines.push(...dimLines.map(s => "  " + s));
+  }
+  if (l2?.available) {
+    const domLines = (l2.domains || []).map(d =>
+      `${d.domain}: 总分${d.overallScore} (${d.stability}, user_verified证据${d.userVerifiedEvidenceCount}条)`);
+    lines.push("L2 领域能力（不跨领域推断）：");
+    lines.push(...domLines.map(s => "  " + s));
+  }
+  if (l3?.available) {
+    lines.push("L3 具体知识点（费曼卡片训练层，按领域分桶）：");
+    for (const d of (l3.domains || [])) {
+      const dimLines = Object.entries(d.dimensions || {}).map(([dim, v]) =>
+        `${dim}: ${v.score}/${v.level} (${v.stability}, 证据${v.evidenceCount}条)`);
+      lines.push(`  [${d.domain}] ` + dimLines.join("; "));
+    }
+  }
+  lines.push("使用方式：L1帮助判断该检查什么、卡片多难；L2帮助判断用户缺的是AI协作还是领域知识；L3帮助定位具体知识点深度。");
+  return lines.join("\n");
+}
+
 /* ── Prompts: the "诊断型教师" (diagnostic teacher), split across steps ── */
 
 const teacherPreamble = [
@@ -360,6 +535,9 @@ async function runBoundedResearch(gaps, researchFn, timeoutMs) {
  * @param {object|null} [options.timeline] - Collaboration timeline ({ steps: [...] })
  * @param {Array} [options.confusions] - [{ stepId, stepTitle, text }] user-annotated confusions
  * @param {number} [options.researchTimeoutMs] - Per-query research timeout
+ * @param {object|null} [options.priorProfile] - Three-layer capability snapshot from
+ *   buildCapabilitySnapshot(). Used as a PRIOR for Step A; material evidence always
+ *   overrides it. When null/absent (cold start), behavior is unchanged.
  * @returns {Promise<object>} Normalized clearance report with all seven sections
  */
 export async function generateClearanceReport(artifactText, artifactType, chatFn, options = {}) {
@@ -372,6 +550,10 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
   const timeline = options.timeline && typeof options.timeline === "object" ? options.timeline : null;
   const confusions = normalizeConfusionsInput(options.confusions);
   const outputLanguage = options.locale === "en" ? "English" : "Chinese";
+  const priorProfile = options.priorProfile && options.priorProfile.schemaVersion === "capability_snapshot_v1"
+    ? options.priorProfile
+    : null;
+  const priorProfileHint = formatPriorProfileHint(priorProfile);
 
   function fallbackReport(error, failedStep) {
     const report = generateFallbackReport(text, type);
@@ -379,6 +561,7 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
     report.display = deriveReportDisplay({ ...report, display: null });
     report.input.preprocess = preprocess;
     report.input.confusions = confusions;
+    if (priorProfile) report.priorProfile = priorProfile;
     return withGenerationStatus(report, true, error, failedStep);
   }
 
@@ -394,19 +577,23 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
   let currentStep = "attribution";
   try {
     // ── Step A: attribution + calibration ──
+    const stepAHintParts = [
+      "分析这份材料中的认知债务：先归因，再校准能力。",
+      "Capability signals detected: " + (detectCapabilitySignals(text).join(" ") || "none auto-detected; infer from content."),
+      preprocess?.didCompress
+        ? `Input strategy: ${preprocess.strategy}. Treat this as a balanced evidence digest from a larger artifact, not the full chronological transcript.`
+        : "Input strategy: plain text."
+    ];
+    if (priorProfileHint) {
+      stepAHintParts.push(priorProfileHint);
+    }
     const stepA = validateStepA(await callStep(chatFn, stepASystemPrompt, {
       artifactText: text,
       artifactType: type,
       outputLanguage,
       charCount: clean(text).length,
       preprocess,
-      hint: [
-        "分析这份材料中的认知债务：先归因，再校准能力。",
-        "Capability signals detected: " + (detectCapabilitySignals(text).join(" ") || "none auto-detected; infer from content."),
-        preprocess?.didCompress
-          ? `Input strategy: ${preprocess.strategy}. Treat this as a balanced evidence digest from a larger artifact, not the full chronological transcript.`
-          : "Input strategy: plain text."
-      ].join(" ")
+      hint: stepAHintParts.join(" ")
     }));
 
     // ── Step B: root gap synthesis (user confusions are first-class input) ──
@@ -471,6 +658,7 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
         confusions
       }
     });
+    if (priorProfile) report.priorProfile = priorProfile;
 
     return withGenerationStatus(report, false);
   } catch (error) {

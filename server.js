@@ -6,7 +6,7 @@ import { createMvp1Store } from "./mvp1-store.js";
 import { deriveReportDisplay, sessionLastActivityAt } from "./report-display.js";
 import { createAuthStore } from "./auth-store.js";
 import { generateFallbackReport } from "./mvp0-fallback.js";
-import { generateClearanceReport } from "./mvp0-report.js";
+import { generateClearanceReport, buildCapabilitySnapshot } from "./mvp0-report.js";
 import { generateCollaborationTimeline } from "./mvp0-timeline.js";
 import { feynmanFollowUp } from "./mvp0-followup.js";
 import { handleAdminRoute } from "./admin-backend-patch.js";
@@ -2983,11 +2983,28 @@ const server = createServer(async (req, res) => {
           ? confusionsFromTimeline(draft.timeline)
           : (Array.isArray(payload.confusions) ? payload.confusions : []);
         const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        // ── 聚合用户历史能力三层快照（L1 报告历史 + L2/L3 capabilityProfile）──
+        let priorProfile = null;
+        try {
+          const historicalReports = mvp0Store.listReports(user.id);
+          const capabilityProfiles = repaymentStore.listCapabilityProfiles(user.id);
+          if (historicalReports.length > 0 || capabilityProfiles.length > 0) {
+            priorProfile = buildCapabilitySnapshot({
+              reports: historicalReports,
+              capabilityProfiles,
+              userId: user.id
+            });
+          }
+        } catch (snapshotError) {
+          // 快照构造失败不应阻断报告生成；降级为无先验（冷启动等价行为）
+          console.warn(`Capability snapshot failed for user ${user.id}: ${snapshotError.message}`);
+        }
         const report = await generateClearanceReport(artifactText, artifactType, chatFn, {
           researchFn: mvp0ResearchFn,
           timeline,
           confusions,
-          locale: draft?.locale || (payload.locale === "en" ? "en" : "zh-CN")
+          locale: draft?.locale || (payload.locale === "en" ? "en" : "zh-CN"),
+          priorProfile
         });
         if (draft) report.draftId = draft.id;
         report.userId = user.id;
