@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # 部署 web/ SPA 前端到 MindIOU 演示服务器。
 #
-# 流程：本地构建两套前端 → 上传 → 备份旧目录 → 清空 → 部署 → 验证。
-# web/dist 作为 /mindiou/ 主 SPA；根 dist 中的旧 Learn Coach 主界面
-# 改名为 legacy.html，并保留 report/desktop/mvp1/training 等全部旧入口。
+# 流程：本地构建 SPA → 上传 → 备份旧目录 → 清空 → 部署 → 验证。
+# web/dist 作为 /mindiou/ 主 SPA。旧多页前端（legacy/report/desktop/mvp1/training）
+# 已废弃，不再构建或部署。
 #
 # 用法:
 #   bash scripts/deploy-web.sh                  # 默认部署到 demo.mindiou.top 源站
@@ -36,10 +36,10 @@ BACKUP_DIR="${WEB_DIR}-backup-${TIMESTAMP}"
 
 echo "==> 目标: ${SSH_TARGET}"
 echo "    静态目录: ${WEB_DIR}"
-echo "    旧前端产物: ${REPO_ROOT}/dist"
+echo "    SPA 源码: ${WEB_SRC_DIR}"
 
 # ─── 1. 本地构建 ───
-echo "==> [1/6] 本地构建 SPA 和旧前端"
+echo "==> [1/6] 本地构建 SPA"
 cd "${WEB_SRC_DIR}"
 echo "    类型检查..."
 npm run check
@@ -48,15 +48,10 @@ npm test
 echo "    构建..."
 npm run build
 cd "${REPO_ROOT}"
-echo "    构建旧前端入口..."
-npm run check
-npm test
-npm run build
-echo "    打包两套构建产物..."
-mkdir -p "${TMP_DIR}/spa" "${TMP_DIR}/legacy"
+echo "    打包 SPA 构建产物..."
+mkdir -p "${TMP_DIR}/spa"
 cp -R "${WEB_SRC_DIR}/dist/." "${TMP_DIR}/spa/"
-cp -R "${REPO_ROOT}/dist/." "${TMP_DIR}/legacy/"
-tar -czf "${TMP_TAR}" -C "${TMP_DIR}" spa legacy
+tar -czf "${TMP_TAR}" -C "${TMP_DIR}" spa
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 # ─── 2. 上传 ───
@@ -64,7 +59,7 @@ echo "==> [2/6] 上传构建包到 ${SSH_TARGET}"
 scp -o StrictHostKeyChecking=no "${TMP_TAR}" "${SSH_TARGET}:${REMOTE_TAR}"
 
 # ─── 3. 远程部署 ───
-echo "==> [3/6] 远程部署（备份 → 清空 → 恢复全部旧入口 → 覆盖主 SPA）"
+echo "==> [3/6] 远程部署（备份 → 清空 → 部署 SPA）"
 ssh -o StrictHostKeyChecking=no "${SSH_TARGET}" "set -euo pipefail
 
 echo '    创建回滚备份（清空之前的快照）...'
@@ -74,10 +69,7 @@ echo '    清空旧静态目录...'
 rm -rf '${WEB_DIR}'/*
 STAGE_DIR=\$(mktemp -d /tmp/mindiou-frontends.XXXXXX)
 tar -xzf '${REMOTE_TAR}' -C \"\$STAGE_DIR\"
-echo '    恢复旧前端的全部页面和资源...'
-cp -a \"\$STAGE_DIR/legacy/.\" '${WEB_DIR}/'
-mv '${WEB_DIR}/index.html' '${WEB_DIR}/legacy.html'
-echo '    部署新 SPA 主入口...'
+echo '    部署 SPA...'
 cp -a \"\$STAGE_DIR/spa/.\" '${WEB_DIR}/'
 find '${WEB_DIR}/' -name '._*' -delete
 rm -rf \"\$STAGE_DIR\"
@@ -105,11 +97,6 @@ verify_url() {
 }
 
 verify_url "/mindiou/index.html"
-verify_url "/mindiou/legacy.html"
-verify_url "/mindiou/report.html"
-verify_url "/mindiou/desktop.html"
-verify_url "/mindiou/mvp1.html"
-verify_url "/mindiou/training.html"
 verify_url "/genesis" 302
 
 # ─── 5. 验证 SPA 包含 training 路由 ───
@@ -147,12 +134,7 @@ echo "部署完成"
 echo "========================================"
 echo "访问地址:"
 echo "  SPA:       ${PUBLIC_ORIGIN}/mindiou/"
-echo "  旧主界面: https://${SSH_HOST}/mindiou/legacy.html"
-echo "  旧报告页: https://${SSH_HOST}/mindiou/report.html"
-echo "  桌面界面: https://${SSH_HOST}/mindiou/desktop.html"
-echo "  MVP-1:     https://${SSH_HOST}/mindiou/mvp1.html"
-echo "  训练系统:  https://${SSH_HOST}/mindiou/training.html"
-echo "  SPA 训练:  https://${SSH_HOST}/mindiou/#/training"
+echo "  SPA 训练:  ${PUBLIC_ORIGIN}/mindiou/#/training"
 echo ""
 echo "回滚方法: ssh ${SSH_TARGET} 'rm -rf ${WEB_DIR} && cp -a ${BACKUP_DIR} ${WEB_DIR}'"
 echo "备份目录: ${BACKUP_DIR}"
