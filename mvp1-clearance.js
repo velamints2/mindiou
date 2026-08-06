@@ -113,16 +113,35 @@ export function buildResearchRequest(report, card) {
   };
 }
 
-export async function startClearanceSession({ report, cardId, researchFn, now = () => new Date().toISOString() }) {
+export async function startClearanceSession({ report, cardId, researchFn, priorProfile, now = () => new Date().toISOString() }) {
   if (!report?.id) throw new Error("A persisted MVP-0 report is required");
   if (typeof researchFn !== "function") throw new Error("External research is unavailable");
   const card = findCard(report, cardId);
   const researchRequest = buildResearchRequest(report, card);
+  // ── 三层能力先验：注入到 researchRequest 让研究侧可参考，并本地推导难度调整 ──
+  const prior = priorProfile && priorProfile.schemaVersion === "capability_snapshot_v1" ? priorProfile : null;
+  if (prior) {
+    researchRequest.priorProfile = {
+      available: {
+        L1: Boolean(prior.layers?.L1_ai_collaboration?.available),
+        L2: Boolean(prior.layers?.L2_domain?.available),
+        L3: Boolean(prior.layers?.L3_knowledge_points?.available)
+      },
+      rules: Array.isArray(prior.rules) ? prior.rules.slice(0, 4) : []
+    };
+  }
+  const difficultyAdjustment = prior ? deriveDifficultyAdjustment(prior, report, card) : null;
   const rawResearch = await researchFn(researchRequest);
   const sources = normalizeResearchSources(rawResearch?.sources);
   if (sources.length === 0) throw new Error("External research returned no cited sources");
   const scaffold = normalizeScaffold(rawResearch?.scaffold, sources);
   if (scaffold.length === 0) throw new Error("External research returned no explanation scaffold");
+
+  // 根据难度调整修饰 clearanceQuestion（不替换内容，只附加引导）
+  let clearanceQuestion = fit(rawResearch?.rewrittenQuestion || card.prompt, 800);
+  if (difficultyAdjustment && difficultyAdjustment.note) {
+    clearanceQuestion = fit(`${clearanceQuestion} ${difficultyAdjustment.note}`, 800);
+  }
 
   return {
     id: crypto.randomUUID(),
@@ -139,7 +158,9 @@ export async function startClearanceSession({ report, cardId, researchFn, now = 
       targetLevel: clean(card.targetLevel),
       difficulty: clean(card.difficulty)
     },
-    clearanceQuestion: fit(rawResearch?.rewrittenQuestion || card.prompt, 800),
+    clearanceQuestion,
+    adjustedDifficulty: difficultyAdjustment ? difficultyAdjustment.adjustedDifficulty : null,
+    priorProfileUsed: Boolean(prior),
     researchSummary: fit(rawResearch?.summary, 1600),
     researchMode: clean(rawResearch?.researchMode || "live_ai"),
     sources,
@@ -147,6 +168,75 @@ export async function startClearanceSession({ report, cardId, researchFn, now = 
     attempts: [],
     finalResult: null
   };
+}
+
+/**
+ * Derive a difficulty adjustment from the three-layer prior. The card's original
+ * targetLevel/difficulty is the baseline; the prior can shift it by one step.
+ *
+ * Rules (material evidence in the report always wins; prior only shifts when
+ * it is stable and points clearly in one direction):
+ * - L3 stable high score (>=85) in a matching domain → upgrade one step.
+ * - L3 one_shot or low score (<40) in a matching domain → keep baseline
+ *   (do not downgrade on weak evidence; the card already targets +1).
+ * - No matching domain → no adjustment (cannot infer across domains).
+ * - L1 stable high across domains → allow upgrade only if L3 also supports.
+ *
+ * Returns null when no adjustment is made. Never throws.
+ */
+function deriveDifficultyAdjustment(prior, report, card) {
+  if (!prior || prior.schemaVersion !== "capability_snapshot_v1") return null;
+  const l3 = prior.layers?.L3_knowledge_points;
+  if (!l3?.available) return null;
+  const reportDomain = clean(report?.analysis?.userCapability?.currentDomain || "").toLowerCase();
+  const baselineLevel = clean(card?.targetLevel || "L1");
+  const baselineDifficulty = clean(card?.difficulty || "foundation");
+  // find a matching domain bucket (substring match either direction)
+  const matchedDomain = (l3.domains || []).find(d => {
+    const dName = clean(d.domain || "").toLowerCase();
+    return dName && (dName.includes(reportDomain) || reportDomain.includes(dName));
+  });
+  if (!matchedDomain) return null;
+  // aggregate stable high signals across the matched domain's dimensions
+  const dims = Object.entries(matchedDomain.dimensions || {});
+  const stableHigh = dims.filter(([, v]) => v?.stability === "stable" && Number(v?.score) >= 85);
+  const oneShotLow = dims.filter(([, v]) => v?.stability === "one_shot" && Number(v?.score) < 40);
+  if (stableHigh.length === 0) {
+    // No stable-high signal; if there's a one_shot low signal, attach a gentle
+    // note but do not change the difficulty label (weak prior).
+    if (oneShotLow.length > 0) {
+      return {
+        adjustedDifficulty: baselineDifficulty,
+        reason: "one_shot_low_in_matched_domain",
+        note: "（提示：你在该领域有一次性低分记录，可以先从基础概念开始组织答案。）"
+      };
+    }
+    return null;
+  }
+  // Stable high: upgrade one step
+  const upgrade = upgradeDifficulty(baselineLevel, baselineDifficulty);
+  return {
+    adjustedDifficulty: upgrade.difficulty,
+    adjustedLevel: upgrade.level,
+    reason: "stable_high_in_matched_domain",
+    matchedDomain: matchedDomain.domain,
+    note: "（提示：你在该领域已稳定展示较高能力，可以尝试从架构或迁移角度回答。）"
+  };
+}
+
+const LEVEL_ORDER = ["L0", "L1", "L2", "L3", "L4", "L5"];
+const DIFFICULTY_ORDER = ["foundation", "intermediate", "advanced"];
+
+function upgradeDifficulty(level, difficulty) {
+  const levelIdx = LEVEL_ORDER.indexOf(level);
+  const newLevel = levelIdx >= 0 && levelIdx < LEVEL_ORDER.length - 1
+    ? LEVEL_ORDER[levelIdx + 1]
+    : level;
+  const diffIdx = DIFFICULTY_ORDER.indexOf(difficulty);
+  const newDiff = diffIdx >= 0 && diffIdx < DIFFICULTY_ORDER.length - 1
+    ? DIFFICULTY_ORDER[diffIdx + 1]
+    : difficulty;
+  return { level: newLevel, difficulty: newDiff };
 }
 
 export function publicSession(session, { revealScaffold = false } = {}) {

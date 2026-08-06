@@ -2822,7 +2822,22 @@ const server = createServer(async (req, res) => {
             return;
           }
           const report = mvp0Store.getReport(reportId, user.id);
-          const session = await startClearanceSession({ report, cardId, researchFn: researchClearanceContext });
+          // ── 聚合用户历史能力三层快照，用于调整 clearance 初始难度 ──
+          let priorProfile = null;
+          try {
+            const historicalReports = mvp0Store.listReports(user.id);
+            const capabilityProfiles = repaymentStore.listCapabilityProfiles(user.id);
+            if (historicalReports.length > 0 || capabilityProfiles.length > 0) {
+              priorProfile = buildCapabilitySnapshot({
+                reports: historicalReports,
+                capabilityProfiles,
+                userId: user.id
+              });
+            }
+          } catch (snapshotError) {
+            console.warn(`Capability snapshot failed for clearance (user ${user.id}): ${snapshotError.message}`);
+          }
+          const session = await startClearanceSession({ report, cardId, researchFn: researchClearanceContext, priorProfile });
           session.userId = user.id;
           session.locale = report.locale || (payload.locale === "en" ? "en" : "zh-CN");
           await mvp1Store.saveSession(session);

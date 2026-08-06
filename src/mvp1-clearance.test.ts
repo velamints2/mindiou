@@ -124,4 +124,150 @@ describe("MVP-1 clearance session", () => {
     expect(result.status).toBe("no_valid_attempt");
     expect(result.remainingGaps.length).toBeGreaterThan(0);
   });
+
+  // ── Three-layer prior profile: difficulty adjustment ──
+
+  function makePrior({ l3Domains = [], l1Available = false } = {}) {
+    return {
+      schemaVersion: "capability_snapshot_v1",
+      collectedAt: "2026-08-06T00:00:00Z",
+      userId: "u1",
+      source: "capability_profile_v1+report_history",
+      rules: ["Material evidence in the current artifact always overrides this prior."],
+      layers: {
+        L1_ai_collaboration: { available: l1Available, dimensions: {}, note: "" },
+        L2_domain: { available: l3Domains.length > 0, domains: [] },
+        L3_knowledge_points: {
+          available: l3Domains.length > 0,
+          domains: l3Domains.map(d => ({
+            domain: d.domain,
+            dimensions: d.dimensions,
+            updatedAt: "2026-08-01T00:00:00Z"
+          }))
+        }
+      }
+    };
+  }
+
+  it("cold start (no priorProfile) leaves adjustedDifficulty null and does not modify the question", async () => {
+    const session = await startClearanceSession({ report, cardId: "card-1", researchFn: async () => research });
+    expect(session.adjustedDifficulty).toBeNull();
+    expect(session.priorProfileUsed).toBe(false);
+    expect(session.clearanceQuestion).not.toContain("提示");
+  });
+
+  it("ignores invalid priorProfile schema and behaves as cold start", async () => {
+    const session = await startClearanceSession({
+      report,
+      cardId: "card-1",
+      researchFn: async () => research,
+      priorProfile: { schemaVersion: "wrong" }
+    });
+    expect(session.priorProfileUsed).toBe(false);
+    expect(session.adjustedDifficulty).toBeNull();
+  });
+
+  it("upgrades difficulty when L3 has stable-high scores in a matching domain", async () => {
+    const prior = makePrior({
+      l3Domains: [{
+        domain: "G2 WebView networking",
+        dimensions: {
+          conceptualUnderstanding: { score: 90, level: "L4", stability: "stable", evidenceCount: 3 },
+          causalExplanation: { score: 88, level: "L4", stability: "stable", evidenceCount: 3 }
+        }
+      }],
+      l1Available: true
+    });
+    const session = await startClearanceSession({
+      report,
+      cardId: "card-1",
+      researchFn: async () => research,
+      priorProfile: prior
+    });
+    expect(session.priorProfileUsed).toBe(true);
+    expect(session.adjustedDifficulty).toBe("advanced"); // intermediate -> advanced
+    expect(session.clearanceQuestion).toContain("架构或迁移角度");
+  });
+
+  it("does not upgrade when L3 scores are only one_shot (weak prior)", async () => {
+    const prior = makePrior({
+      l3Domains: [{
+        domain: "G2 WebView networking",
+        dimensions: {
+          conceptualUnderstanding: { score: 90, level: "L4", stability: "one_shot", evidenceCount: 1 }
+        }
+      }]
+    });
+    const session = await startClearanceSession({
+      report,
+      cardId: "card-1",
+      researchFn: async () => research,
+      priorProfile: prior
+    });
+    expect(session.priorProfileUsed).toBe(true);
+    expect(session.adjustedDifficulty).toBeNull(); // no adjustment
+    expect(session.clearanceQuestion).not.toContain("架构或迁移角度");
+  });
+
+  it("attaches a gentle note (no label change) when L3 has one_shot low score in matching domain", async () => {
+    const prior = makePrior({
+      l3Domains: [{
+        domain: "G2 WebView networking",
+        dimensions: {
+          conceptualUnderstanding: { score: 25, level: "L1", stability: "one_shot", evidenceCount: 1 }
+        }
+      }]
+    });
+    const session = await startClearanceSession({
+      report,
+      cardId: "card-1",
+      researchFn: async () => research,
+      priorProfile: prior
+    });
+    expect(session.priorProfileUsed).toBe(true);
+    expect(session.adjustedDifficulty).toBe("intermediate"); // unchanged baseline
+    expect(session.clearanceQuestion).toContain("基础概念");
+  });
+
+  it("does not adjust when no domain matches (cannot infer across domains)", async () => {
+    const prior = makePrior({
+      l3Domains: [{
+        domain: "database migration",
+        dimensions: {
+          conceptualUnderstanding: { score: 95, level: "L5", stability: "stable", evidenceCount: 5 }
+        }
+      }]
+    });
+    const session = await startClearanceSession({
+      report,
+      cardId: "card-1",
+      researchFn: async () => research,
+      priorProfile: prior
+    });
+    expect(session.priorProfileUsed).toBe(true);
+    expect(session.adjustedDifficulty).toBeNull();
+    expect(session.clearanceQuestion).not.toContain("提示");
+  });
+
+  it("passes priorProfile availability to the research request", async () => {
+    const researchSpy = vi.fn().mockResolvedValue(research);
+    const prior = makePrior({
+      l3Domains: [{
+        domain: "G2 WebView networking",
+        dimensions: { conceptualUnderstanding: { score: 90, level: "L4", stability: "stable", evidenceCount: 3 } }
+      }],
+      l1Available: true
+    });
+    await startClearanceSession({
+      report,
+      cardId: "card-1",
+      researchFn: researchSpy,
+      priorProfile: prior
+    });
+    const request = researchSpy.mock.calls[0][0];
+    expect(request.priorProfile).toBeDefined();
+    expect(request.priorProfile.available.L1).toBe(true);
+    expect(request.priorProfile.available.L3).toBe(true);
+    expect(request.priorProfile.rules.length).toBeGreaterThan(0);
+  });
 });

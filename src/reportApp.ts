@@ -136,6 +136,52 @@ type ClearanceReport = {
   confusionResolutions?: ConfusionResolution[]
   corrections: unknown[]
   status: string
+  priorProfile?: CapabilitySnapshot
+}
+
+type CapabilitySnapshot = {
+  schemaVersion: string
+  collectedAt: string
+  userId: string | null
+  source: string
+  rules: string[]
+  layers: {
+    L1_ai_collaboration: {
+      available: boolean
+      dimensions: Record<string, {
+        inferredLevel: string
+        commonEvidenceStatus: string
+        avgConfidence: number
+        observationCount: number
+      }>
+      overallMode?: Record<string, number>
+      reportCount?: number
+      note?: string
+    }
+    L2_domain: {
+      available: boolean
+      domains: Array<{
+        domain: string
+        overallScore: number
+        stability: string
+        userVerifiedEvidenceCount: number
+        updatedAt: string | null
+      }>
+    }
+    L3_knowledge_points: {
+      available: boolean
+      domains: Array<{
+        domain: string
+        dimensions: Record<string, {
+          score: number
+          level: string
+          stability: string
+          evidenceCount: number
+        }>
+        updatedAt: string | null
+      }>
+    }
+  }
 }
 
 type TimelineStep = {
@@ -789,6 +835,9 @@ function renderReport(report: ClearanceReport): HTMLElement {
   if (report.analysis) {
     container.appendChild(renderCapabilityAnalysis(report.analysis))
   }
+  if (report.priorProfile) {
+    container.appendChild(renderPriorProfile(report.priorProfile))
+  }
   container.appendChild(renderSection('AI 替你完成了什么', report.sections.aiCompleted))
   container.appendChild(renderSection('你真正提供了什么', report.sections.userContributed))
   container.appendChild(renderOutsourced(report.sections.cognitiveProcessesOutsourced || []))
@@ -856,6 +905,106 @@ function renderCapabilityAnalysis(analysis: NonNullable<ClearanceReport['analysi
   }
 
   return section
+}
+
+/**
+ * Render the three-layer capability snapshot (prior profile). Shows what the
+ * system already knows about the user from history, with the explicit rule
+ * that material evidence in the current report overrides this prior.
+ */
+function renderPriorProfile(snapshot: CapabilitySnapshot): HTMLElement {
+  const section = el('div', 'report-section prior-profile-section')
+  section.appendChild(el('h2', undefined, '历史能力先验'))
+
+  const intro = el('p', 'prior-profile-intro',
+    '基于你的历史报告与清偿记录聚合的三层能力快照。本次材料证据优先于先验。')
+  section.appendChild(intro)
+
+  const l1 = snapshot.layers.L1_ai_collaboration
+  const l2 = snapshot.layers.L2_domain
+  const l3 = snapshot.layers.L3_knowledge_points
+
+  // ── L1: 通用 AI 协作能力（跨领域可迁移）──
+  const l1Block = el('div', 'prior-layer l1-layer')
+  l1Block.appendChild(el('h3', undefined, 'L1 通用 AI 协作能力（可跨领域迁移）'))
+  if (!l1.available) {
+    l1Block.appendChild(el('p', 'prior-empty', '暂无历史报告数据。'))
+  } else {
+    const meta = el('div', 'prior-meta')
+    if (l1.reportCount) {
+      meta.appendChild(el('span', 'capability-pill', `来自 ${l1.reportCount} 份报告`))
+    }
+    if (l1.note) {
+      meta.appendChild(el('span', 'capability-pill prior-note', l1.note))
+    }
+    l1Block.appendChild(meta)
+    const dims = el('div', 'capability-dims')
+    for (const [key, val] of Object.entries(l1.dimensions || {})) {
+      const label = DIMENSION_LABELS[key] || key
+      const status = EVIDENCE_STATUS_LABELS[val.commonEvidenceStatus] || val.commonEvidenceStatus
+      dims.appendChild(el('span', 'capability-dim',
+        `${label}: ${val.inferredLevel}（${status}，置信度 ${Math.round(val.avgConfidence * 100)}%，观察 ${val.observationCount} 次）`))
+    }
+    l1Block.appendChild(dims)
+  }
+  section.appendChild(l1Block)
+
+  // ── L2: 领域能力（不跨领域推断）──
+  const l2Block = el('div', 'prior-layer l2-layer')
+  l2Block.appendChild(el('h3', undefined, 'L2 领域能力（不跨领域推断）'))
+  if (!l2.available || l2.domains.length === 0) {
+    l2Block.appendChild(el('p', 'prior-empty', '暂无领域能力画像。'))
+  } else {
+    const list = el('div', 'prior-domain-list')
+    for (const d of l2.domains) {
+      const stabilityLabel = d.stability === 'stable' ? '稳定' : '一次性'
+      list.appendChild(el('span', 'capability-dim',
+        `${d.domain}: ${d.overallScore}（${stabilityLabel}，user_verified ${d.userVerifiedEvidenceCount} 条）`))
+    }
+    l2Block.appendChild(list)
+  }
+  section.appendChild(l2Block)
+
+  // ── L3: 具体知识点（费曼卡片训练层）──
+  const l3Block = el('div', 'prior-layer l3-layer')
+  l3Block.appendChild(el('h3', undefined, 'L3 具体知识点（费曼卡片训练层）'))
+  if (!l3.available || l3.domains.length === 0) {
+    l3Block.appendChild(el('p', 'prior-empty', '暂无知识点深度画像。'))
+  } else {
+    for (const d of l3.domains) {
+      const domainBlock = el('div', 'prior-knowledge-domain')
+      domainBlock.appendChild(el('p', 'prior-knowledge-domain-name', d.domain))
+      const dims = el('div', 'capability-dims')
+      for (const [dim, val] of Object.entries(d.dimensions || {})) {
+        const dimLabel = L3_DIMENSION_LABELS[dim] || dim
+        const stabilityLabel = val.stability === 'stable' ? '稳定' : '一次性'
+        dims.appendChild(el('span', `capability-dim ${val.stability === 'stable' ? 'stable' : 'one-shot'}`,
+          `${dimLabel}: ${val.score}/${val.level}（${stabilityLabel}，证据 ${val.evidenceCount} 条）`))
+      }
+      domainBlock.appendChild(dims)
+      l3Block.appendChild(domainBlock)
+    }
+  }
+  section.appendChild(l3Block)
+
+  // ── 规则说明 ──
+  if (Array.isArray(snapshot.rules) && snapshot.rules.length > 0) {
+    const rulesList = el('ul', 'prior-rules')
+    for (const rule of snapshot.rules.slice(0, 4)) {
+      rulesList.appendChild(el('li', undefined, rule))
+    }
+    section.appendChild(rulesList)
+  }
+
+  return section
+}
+
+const L3_DIMENSION_LABELS: Record<string, string> = {
+  conceptualUnderstanding: '概念理解',
+  causalExplanation: '因果解释',
+  practicalReproduction: '实践复现',
+  boundariesAndRisks: '边界与风险',
+  transferAbility: '迁移能力'
 }
 
 function renderSection(title: string, items: EvidenceItem[]): HTMLElement {
