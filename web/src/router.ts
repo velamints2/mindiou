@@ -38,7 +38,7 @@ export function isPublicRoute(route: Route): boolean {
 export function parseRoute(): Route {
   const hash = location.hash.replace(/^#\/?/, '')
   const parts = hash.split('/').filter(Boolean)
-  const path = parts[0] || ''
+  const path = (parts[0] || '').split('?')[0]
   const rest = parts.slice(1)
 
   switch (path) {

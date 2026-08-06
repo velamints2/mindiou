@@ -102,6 +102,12 @@ async function render(route: Route): Promise<void> {
     trackRoute('register')
     return
   }
+  // 邮箱验证页：公开路由，邮件链接跳转后无需登录态
+  if (route.name === 'verify-email') {
+    renderEmailVerificationPage(app, route.token, route.status)
+    trackRoute('verify-email')
+    return
+  }
 
   // 非公开路由需要服务端会话。刷新后本地标记丢失时，以 HttpOnly Cookie 为准恢复。
   if (!getAccessToken()) {
@@ -126,12 +132,6 @@ async function render(route: Route): Promise<void> {
   if (route.name === 'login') {
     const user = await fetchCurrentUser()
     navigate({ name: user?.emailVerified ? 'app' : 'verify-email' })
-    return
-  }
-  // 邮箱验证页：已登录用户可访问
-  if (route.name === 'verify-email') {
-    renderEmailVerificationPage(app, route.token, route.status)
-    trackRoute('verify-email')
     return
   }
   // 其他已登录路由：检查邮箱验证状态
