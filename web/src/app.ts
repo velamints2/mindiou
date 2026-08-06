@@ -130,7 +130,7 @@ async function render(route: Route): Promise<void> {
   }
   // 邮箱验证页：已登录用户可访问
   if (route.name === 'verify-email') {
-    renderEmailVerificationPage(app, route.token)
+    renderEmailVerificationPage(app, route.token, route.status)
     trackRoute('verify-email')
     return
   }

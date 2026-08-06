@@ -216,13 +216,31 @@ export function renderLoginPage(root: HTMLElement): void {
 
 // ── 邮箱验证页 ──
 
-export function renderEmailVerificationPage(root: HTMLElement, token?: string): void {
+export function renderEmailVerificationPage(root: HTMLElement, token?: string, status?: string): void {
   const page = el('div', 'page page-verify-email')
   page.appendChild(el('h1', 'brand-title', t('验证你的邮箱', 'Verify Your Email')))
 
+  if (status === 'success') {
+    page.appendChild(el('h1', 'brand-title', t('邮箱验证成功', 'Email Verified')))
+    page.appendChild(el('p', 'brand-subtitle', t('你的邮箱已验证成功，现在可以开始使用了。', 'Your email has been verified. You can now start using MindIOU.')))
+    const btn = el('button', 'btn btn-primary', t('进入工作区', 'Go to workspace')) as HTMLButtonElement
+    btn.onclick = () => navigate({ name: 'app' })
+    page.appendChild(btn)
+    root.appendChild(page)
+    return
+  }
+  if (status === 'failed') {
+    page.appendChild(el('h1', 'brand-title', t('验证失败', 'Verification Failed')))
+    page.appendChild(el('p', 'brand-subtitle', t('验证链接无效或已过期。', 'The verification link is invalid or has expired.')))
+    const btn = el('button', 'btn btn-primary', t('返回登录', 'Back to login')) as HTMLButtonElement
+    btn.onclick = () => navigate({ name: 'login' })
+    page.appendChild(btn)
+    root.appendChild(page)
+    return
+  }
   if (token) {
-    const status = el('p', 'login-status', t('正在验证…', 'Verifying…'))
-    page.appendChild(status)
+    const statusEl = el('p', 'login-status', t('正在验证…', 'Verifying…'))
+    page.appendChild(statusEl)
     root.appendChild(page)
     void (async () => {
       try {
@@ -257,8 +275,8 @@ export function renderEmailVerificationPage(root: HTMLElement, token?: string): 
   card.appendChild(el('h2', 'login-heading', t('请验证你的邮箱', 'Please Verify Your Email')))
   card.appendChild(el('p', 'login-desc', t('我们已向你的注册邮箱发送了一封验证邮件，请点击邮件中的链接完成验证。', 'We have sent a verification email to your registered email address. Please click the link in the email to complete verification.')))
 
-  const status = el('p', 'login-status')
-  card.appendChild(status)
+  const statusEl = el('p', 'login-status')
+  card.appendChild(statusEl)
 
   const resend = el('button', 'btn btn-secondary', t('重新发送验证邮件', 'Resend verification email')) as HTMLButtonElement
   let resendTimer: ReturnType<typeof setTimeout> | null = null
@@ -274,11 +292,11 @@ export function renderEmailVerificationPage(root: HTMLElement, token?: string): 
   }
   resend.onclick = async () => {
     resend.disabled = true
-    status.textContent = t('发送中…', 'Sending…')
+    statusEl.textContent = t('发送中…', 'Sending…')
     try {
       const result = await resendVerificationEmail()
       if (result.ok) {
-        status.textContent = t('验证邮件已发送，请检查你的邮箱。', 'Verification email sent. Please check your inbox.')
+        statusEl.textContent = t('验证邮件已发送，请检查你的邮箱。', 'Verification email sent. Please check your inbox.')
         resendCountdown = 60
         updateResendButton()
         resendTimer = setInterval(() => {
@@ -287,11 +305,11 @@ export function renderEmailVerificationPage(root: HTMLElement, token?: string): 
           if (resendCountdown <= 0 && resendTimer) { clearInterval(resendTimer); resendTimer = null }
         }, 1000)
       } else {
-        status.textContent = t('发送失败，请稍后重试。', 'Failed to send. Please try again later.')
+        statusEl.textContent = t('发送失败，请稍后重试。', 'Failed to send. Please try again later.')
         resend.disabled = false
       }
     } catch {
-      status.textContent = t('发送失败，请稍后重试。', 'Failed to send. Please try again later.')
+      statusEl.textContent = t('发送失败，请稍后重试。', 'Failed to send. Please try again later.')
       resend.disabled = false
     }
   }
@@ -303,9 +321,9 @@ export function renderEmailVerificationPage(root: HTMLElement, token?: string): 
     try {
       const user = await fetchCurrentUser()
       if (user?.emailVerified) { navigate({ name: 'app' }) }
-      else { status.textContent = t('邮箱尚未验证，请先完成验证。', 'Email not yet verified. Please complete verification first.'); refresh.disabled = false }
+      else { statusEl.textContent = t('邮箱尚未验证，请先完成验证。', 'Email not yet verified. Please complete verification first.'); refresh.disabled = false }
     } catch {
-      status.textContent = t('刷新失败，请稍后重试。', 'Refresh failed. Please try again later.')
+      statusEl.textContent = t('刷新失败，请稍后重试。', 'Refresh failed. Please try again later.')
       refresh.disabled = false
     }
   }

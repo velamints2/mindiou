@@ -670,7 +670,7 @@ function getPublicBaseUrl(req) {
 async function sendVerificationEmail(email, token, req) {
   const transporter = getMailTransporter();
   const baseUrl = getPublicBaseUrl(req);
-  const link = baseUrl + "/mindiou/#/verify-email?token=" + token;
+  const link = baseUrl + "/mindiou-api/api/auth/verify-email?token=" + token;
   if (!transporter) {
     console.warn("[email-verification] SMTP not configured. Link for " + email + ": " + link);
     return { sent: false, link };
@@ -2507,6 +2507,18 @@ const server = createServer(async (req, res) => {
       const user = requireAuth(req, res);
       if (!user) return;
       jsonResponse(res, 200, { ok: true, user });
+      return;
+    }
+    if (url.pathname === "/api/auth/verify-email" && req.method === "GET") {
+      const token = url.searchParams.get("token") || "";
+      const result = authStore.verifyEmailToken(token);
+      const baseUrl = getPublicBaseUrl(req);
+      if (result.ok) {
+        res.writeHead(302, { Location: baseUrl + "/mindiou/#/verify-email?status=success" });
+      } else {
+        res.writeHead(302, { Location: baseUrl + "/mindiou/#/verify-email?status=failed" });
+      }
+      res.end();
       return;
     }
     if (url.pathname === "/api/auth/verify-email" && req.method === "POST") {

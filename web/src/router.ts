@@ -27,7 +27,7 @@ export type Route =
   | { name: 'project'; projectId: string }
   | { name: 'work-item'; projectId: string; workItemId: string }
   | { name: 'agent-session'; sessionId: string }
-  | { name: 'verify-email'; token?: string }
+  | { name: 'verify-email'; token?: string; status?: string }
   | { name: 'not-found' }
 
 // 判断是否为公开路由（无需登录）
@@ -99,7 +99,7 @@ export function parseRoute(): Route {
     }
       return rest[0] ? { name: 'agent-session', sessionId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     case 'verify-email':
-      return { name: 'verify-email', token: new URLSearchParams(location.hash.split('?')[1] || '').get('token') || undefined }
+      const vp = new URLSearchParams(location.hash.split('?')[1] || ''); return { name: 'verify-email', token: vp.get('token') || undefined, status: vp.get('status') || undefined }
     default:
       return { name: 'not-found' }
   }
