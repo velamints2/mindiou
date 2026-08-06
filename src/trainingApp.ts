@@ -96,6 +96,115 @@ interface ReviewSubmitResponse {
   nextReviewAt: string
 }
 
+interface DebtIntelligenceAnalysisDTO {
+  id: string
+  cognitiveDebtId: string
+  domainPath: string[]
+  primaryGapMechanism: string
+  secondaryGapMechanisms: string[]
+  taskStage: string
+  rootCauses: string[]
+  riskTypes: string[]
+  transferValue: number
+  concepts: Array<{ key: string; displayName: string }>
+  prerequisiteConcepts: Array<{ key: string; displayName: string }>
+  classificationConfidence: number
+  evidence: Array<{ note: string; source: string }>
+  isUserCorrected: boolean
+  version: number
+  updatedAt: string
+}
+
+interface DebtIntelligenceResponse {
+  ok: boolean
+  analysis: DebtIntelligenceAnalysisDTO | null
+  versionCount: number
+}
+
+interface DebtRelationDTO {
+  id: string
+  sourceDebtId: string
+  targetDebtId: string
+  relationType: string
+  similarityScore: number
+  confidence: number
+  reason: string
+  status: string
+  direction: 'outgoing' | 'incoming'
+  otherDebt: { id: string; gapText: string; status: string; recurrenceCount: number } | null
+  createdAt: string
+}
+
+interface DebtRelationsResponse {
+  ok: boolean
+  relations: DebtRelationDTO[]
+}
+
+interface DebtClusterDTO {
+  id: string
+  title: string
+  description: string
+  clusterType: string
+  members: Array<{ cognitiveDebtId: string; gapText: string; status: string; recurrenceCount: number }>
+  masterySummary: {
+    memberCount: number
+    withProfileCount: number
+    statusCounts: Record<string, number>
+    averageMastery: { overallMastery: number }
+    totalRelapseCount: number
+  }
+}
+
+interface DebtClusterResponse {
+  ok: boolean
+  cluster: DebtClusterDTO | null
+}
+
+interface DebtSummaryDTO {
+  id: string
+  gapText: string
+  status: string
+  recurrenceCount: number
+}
+
+interface LearningRecommendationDTO {
+  id: string
+  recommendationType: string
+  primaryDebtId: string | null
+  relatedDebtIds: string[]
+  skillNodeId: string | null
+  recommendedTrainingStage: string | null
+  existingReviewTaskId: string | null
+  title: string
+  reason: string
+  priorityScore: number
+  estimatedMinutes: number
+  status: string
+  debtSummary: DebtSummaryDTO | null
+  reviewTask: ReviewTaskDTO | null
+  relatedDebtSummaries: DebtSummaryDTO[]
+  isWeeklyFocusRelated: boolean
+}
+
+interface TodayRecommendationsResponse {
+  ok: boolean
+  recommendations: LearningRecommendationDTO[]
+  weeklyFocus: LearningRecommendationDTO | null
+}
+
+const GAP_MECHANISM_OPTIONS = [
+  'concept_gap', 'mechanism_gap', 'rationale_gap', 'prerequisite_gap',
+  'verification_gap', 'boundary_gap', 'tradeoff_gap', 'dependency_gap',
+  'transfer_gap', 'implementation_gap', 'decision_gap', 'terminology_gap',
+  'process_gap'
+]
+
+const RISK_TYPE_OPTIONS = [
+  'no_material_risk', 'quality_risk', 'security_risk', 'privacy_risk',
+  'financial_risk', 'compliance_risk', 'reliability_risk', 'decision_risk',
+  'maintainability_risk', 'communication_risk'
+]
+
 const API_BASE = typeof location !== 'undefined'
   ? (location.pathname.startsWith('/mindiou/') ? '/mindiou-api' : (new URLSearchParams(location.search).get('api') || ''))
   : ''
@@ -201,6 +310,94 @@ function understandingLabel(level: string): string {
   return labels[level] || '正在补偿'
 }
 
+function domainRootLabel(root: string): string {
+  const labels: Record<string, string> = {
+    software_engineering: '软件工程',
+    product_management: '产品管理',
+    business_strategy: '商业战略',
+    marketing: '市场营销',
+    hardware_engineering: '硬件工程',
+    electronics: '电子',
+    mechanical_design: '机械设计',
+    artificial_intelligence: '人工智能',
+    data_analysis: '数据分析',
+    academic_research: '学术研究',
+    communication: '沟通表达',
+    project_management: '项目管理',
+    finance: '金融财务',
+    legal: '法律合规'
+  }
+  return labels[root] || root
+}
+
+function gapMechanismLabel(mechanism: string): string {
+  const labels: Record<string, string> = {
+    concept_gap: '概念缺口',
+    mechanism_gap: '机制缺口',
+    rationale_gap: '原理缺口',
+    prerequisite_gap: '前置知识缺口',
+    verification_gap: '验证缺口',
+    boundary_gap: '边界条件缺口',
+    tradeoff_gap: '权衡缺口',
+    dependency_gap: '依赖关系缺口',
+    transfer_gap: '迁移缺口',
+    implementation_gap: '实现细节缺口',
+    decision_gap: '决策依据缺口',
+    terminology_gap: '术语缺口',
+    process_gap: '流程缺口'
+  }
+  return labels[mechanism] || mechanism
+}
+
+function intelTaskStageLabel(stage: string): string {
+  const labels: Record<string, string> = {
+    problem_definition: '问题定义',
+    information_collection: '信息收集',
+    planning: '规划',
+    solution_selection: '方案选择',
+    execution: '执行',
+    debugging: '调试排错',
+    evaluation: '评估',
+    decision_making: '决策',
+    communication: '沟通',
+    reflection: '复盘'
+  }
+  return labels[stage] || stage
+}
+
+function rootCauseLabel(cause: string): string {
+  const labels: Record<string, string> = {
+    missing_prerequisite: '缺少前置知识',
+    accepted_ai_output_directly: '直接接受了 AI 输出',
+    time_pressure: '时间压力',
+    tool_opacity: '工具黑盒',
+    insufficient_domain_experience: '领域经验不足',
+    skipped_validation: '跳过了验证',
+    unclear_goal: '目标不清',
+    over_complexity: '复杂度过高',
+    fragmented_knowledge: '知识碎片化',
+    false_familiarity: '似懂非懂',
+    unknown: '原因未知'
+  }
+  return labels[cause] || cause
+}
+
+function riskTypeLabel(risk: string): string {
+  const labels: Record<string, string> = {
+    no_material_risk: '无实质风险',
+    quality_risk: '质量风险',
+    security_risk: '安全风险',
+    privacy_risk: '隐私风险',
+    financial_risk: '财务风险',
+    compliance_risk: '合规风险',
+    reliability_risk: '可靠性风险',
+    decision_risk: '决策风险',
+    maintainability_risk: '可维护性风险',
+    communication_risk: '沟通风险'
+  }
+  return labels[risk] || risk
+}
+
 function estimatedMinutes(taskType: string): number {
   const estimates: Record<string, number> = {
     feynman_explanation: 3,
@@ -213,6 +410,26 @@ function estimatedMinutes(taskType: string): number {
   return estimates[taskType] || 3
 }
 
+function recommendationTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    due_review: '到期复训',
+    prerequisite_training: '前置知识',
+    cluster_consolidation: '问题簇巩固',
+    transfer_training: '能力迁移',
+    real_work_validation: '高风险验证',
+    weekly_focus: '本周学习重点'
+  }
+  return labels[type] || type
+}
+
+function skillNodeLabel(skillNodeId?: string | null): string {
+  if (!skillNodeId) return '未分类'
+  const segments = skillNodeId.split('.').filter(Boolean)
+  if (segments.length === 0) return '未分类'
+  const [root, ...rest] = segments
+  return [domainRootLabel(root), ...rest].join(' / ')
+}
+
 export async function renderTodayReview(container: HTMLElement): Promise<void> {
   clear(container)
   const header = el('div', 'training-header')
@@ -223,16 +440,58 @@ export async function renderTodayReview(container: HTMLElement): Promise<void> {
   container.appendChild(loading)
 
   try {
-    const res = await apiFetch('/api/training/today')
-    if (!res.ok) throw await readError(res)
-    const data = await res.json()
+    // 推荐编排与到期复训并行加载；推荐失败只降级提示，不影响复训主流程
+    const [todayRes, recRes] = await Promise.all([
+      apiFetch('/api/training/today'),
+      apiFetch('/api/learning-recommendations/today')
+    ])
+    if (!todayRes.ok) throw await readError(todayRes)
+    const data = await todayRes.json()
+    let recData: TodayRecommendationsResponse | null = null
+    let recLoadError: string | null = null
+    if (recRes.ok) {
+      recData = await recRes.json()
+    } else {
+      recLoadError = (await readError(recRes)).message
+    }
     clear(container)
     container.appendChild(header)
 
+    const recommendations = recData?.recommendations || []
+    const weeklyFocus = recData?.weeklyFocus || null
+
+    if (weeklyFocus) {
+      const banner = el('div', 'weekly-focus-banner')
+      banner.appendChild(el('p', 'weekly-focus-title', weeklyFocus.title))
+      banner.appendChild(el('p', 'weekly-focus-reason', weeklyFocus.reason))
+      const metaParts: string[] = []
+      if (weeklyFocus.relatedDebtSummaries.length > 0) metaParts.push(`${weeklyFocus.relatedDebtSummaries.length} 条相关欠条`)
+      if (weeklyFocus.estimatedMinutes > 0) metaParts.push(`预计 ${weeklyFocus.estimatedMinutes} 分钟`)
+      if (metaParts.length > 0) banner.appendChild(el('p', 'weekly-focus-meta', metaParts.join(' · ')))
+      container.appendChild(banner)
+    }
+
+    if (recommendations.length > 0) {
+      const recSection = el('div', 'rec-section')
+      recSection.appendChild(el('h2', 'rec-heading', '今日推荐'))
+      const recList = el('div', 'rec-list')
+      for (const rec of recommendations) {
+        recList.appendChild(buildRecommendationCard(container, rec))
+      }
+      recSection.appendChild(recList)
+      container.appendChild(recSection)
+    } else if (recLoadError) {
+      container.appendChild(el('div', 'rec-notice', `学习推荐暂不可用：${recLoadError}（复训任务不受影响）`))
+    }
+
     if (data.totalDue === 0) {
       const empty = el('div', 'training-empty')
-      empty.appendChild(el('p', undefined, '今日没有到期的复训任务。'))
-      empty.appendChild(el('p', 'training-hint', '完成新的认知欠条训练后，复训任务会自动出现在这里。'))
+      if (recommendations.length > 0) {
+        empty.appendChild(el('p', 'training-hint', '今日没有到期的复训任务，也可以从上方推荐开始训练。'))
+      } else {
+        empty.appendChild(el('p', undefined, '今日没有到期的复训任务。'))
+        empty.appendChild(el('p', 'training-hint', '完成新的认知欠条训练后，复训任务会自动出现在这里。'))
+      }
       container.appendChild(empty)
       return
     }
@@ -292,6 +551,113 @@ export async function renderTodayReview(container: HTMLElement): Promise<void> {
     retryBtn.onclick = () => renderTodayReview(container)
     errBox.appendChild(retryBtn)
     container.appendChild(errBox)
+  }
+}
+
+function buildRecommendationCard(container: HTMLElement, rec: LearningRecommendationDTO): HTMLElement {
+  const item = el('div', 'rec-item')
+
+  const head = el('div', 'rec-head')
+  head.appendChild(el('span', 'rec-type', recommendationTypeLabel(rec.recommendationType)))
+  if (rec.isWeeklyFocusRelated) head.appendChild(el('span', 'rec-tag rec-tag-focus', '本周学习重点'))
+  if (rec.debtSummary?.status === 'relapsed') {
+    head.appendChild(el('span', 'rec-tag rec-tag-relapse', '复发问题'))
+  } else if ((rec.debtSummary?.recurrenceCount || 0) > 0) {
+    head.appendChild(el('span', 'rec-tag rec-tag-relapse', `重复出现 ${(rec.debtSummary?.recurrenceCount || 0) + 1} 次`))
+  }
+  if (rec.recommendationType === 'prerequisite_training' && rec.relatedDebtIds.length > 0) {
+    head.appendChild(el('span', 'rec-tag rec-tag-blocking', `阻塞 ${rec.relatedDebtIds.length} 条其他欠条`))
+  }
+  item.appendChild(head)
+
+  item.appendChild(el('p', 'rec-title', rec.title))
+  item.appendChild(el('p', 'rec-reason', rec.reason))
+
+  const metaParts = [
+    `能力主题：${skillNodeLabel(rec.skillNodeId)}`,
+    rec.recommendedTrainingStage ? `推荐阶段：${stageLabel(rec.recommendedTrainingStage)}` : '',
+    `预计 ${rec.estimatedMinutes} 分钟`
+  ].filter(Boolean)
+  item.appendChild(el('p', 'rec-meta', metaParts.join(' · ')))
+
+  const actions = el('div', 'rec-actions')
+  const isAccepted = rec.status === 'accepted'
+  const acceptBtn = el('button', 'btn btn-primary btn-small', isAccepted ? '继续训练' : '开始训练')
+  acceptBtn.onclick = () => {
+    if (isAccepted) void continueRecommendationAction(container, rec, acceptBtn)
+    else void acceptRecommendationAction(container, rec, acceptBtn)
+  }
+  const skipBtn = el('button', 'btn btn-secondary btn-small', '跳过')
+  skipBtn.onclick = () => { void skipRecommendationAction(container, rec, skipBtn) }
+  actions.appendChild(acceptBtn)
+  actions.appendChild(skipBtn)
+  item.appendChild(actions)
+  return item
+}
+
+// 接受推荐：复用现有 review start/submit 链路，不新建并行流程
+async function acceptRecommendationAction(
+  container: HTMLElement,
+  rec: LearningRecommendationDTO,
+  button: HTMLButtonElement
+): Promise<void> {
+  button.disabled = true
+  button.textContent = '正在进入…'
+  try {
+    const res = await apiFetch(`/api/learning-recommendations/${encodeURIComponent(rec.id)}/accept`, {
+      method: 'POST', body: '{}'
+    })
+    if (!res.ok) throw await readError(res)
+    const data = await res.json()
+    if (data.reviewTask) {
+      await startReview(container, [data.reviewTask as ReviewTaskDTO])
+    } else {
+      await renderTodayReview(container)
+    }
+  } catch (error) {
+    button.disabled = false
+    button.textContent = '开始训练'
+    alert(`无法开始训练：${(error as Error).message}`)
+  }
+}
+
+// 已接受推荐：直接进入 accept 时创建的复训任务，不重复 accept（避免 409）
+async function continueRecommendationAction(
+  container: HTMLElement,
+  rec: LearningRecommendationDTO,
+  button: HTMLButtonElement
+): Promise<void> {
+  if (!rec.reviewTask) {
+    alert('关联的复训任务不可用，请刷新后重试')
+    await renderTodayReview(container)
+    return
+  }
+  button.disabled = true
+  button.textContent = '正在进入…'
+  try {
+    await startReview(container, [rec.reviewTask])
+  } catch (error) {
+    button.disabled = false
+    button.textContent = '继续训练'
+    alert(`无法继续训练：${(error as Error).message}`)
+  }
+}
+
+async function skipRecommendationAction(
+  container: HTMLElement,
+  rec: LearningRecommendationDTO,
+  button: HTMLButtonElement
+): Promise<void> {
+  button.disabled = true
+  try {
+    const res = await apiFetch(`/api/learning-recommendations/${encodeURIComponent(rec.id)}/skip`, {
+      method: 'POST', body: '{}'
+    })
+    if (!res.ok) throw await readError(res)
+    await renderTodayReview(container)
+  } catch (error) {
+    button.disabled = false
+    alert(`操作失败：${(error as Error).message}`)
   }
 }
 
@@ -431,6 +797,12 @@ export async function renderDebtDetail(container: HTMLElement, debtId: string): 
       container.appendChild(evBox)
     }
 
+    // 智能分类独立加载，失败不影响详情页其余区块
+    renderIntelligencePanel(container, debtId)
+
+    // 关联欠条与所属簇独立加载，失败不影响其余区块
+    renderRelationsPanel(container, debtId)
+
     if (data.attempts.length > 0 || data.reviews.length > 0) {
       const timeline = el('div', 'timeline-panel')
       timeline.appendChild(el('h2', undefined, '训练历史'))
@@ -479,6 +851,256 @@ export async function renderDebtDetail(container: HTMLElement, debtId: string): 
     retryBtn.onclick = () => renderDebtDetail(container, debtId)
     errBox.appendChild(retryBtn)
     container.appendChild(errBox)
+  }
+}
+
+async function renderIntelligencePanel(container: HTMLElement, debtId: string): Promise<void> {
+  const panel = el('div', 'intelligence-panel')
+  panel.appendChild(el('h2', undefined, '智能分类'))
+  container.appendChild(panel)
+
+  let data: DebtIntelligenceResponse
+  try {
+    const res = await apiFetch(`/api/training/debts/${encodeURIComponent(debtId)}/intelligence`)
+    if (!res.ok) throw await readError(res)
+    data = await res.json()
+  } catch {
+    panel.appendChild(el('p', 'intel-empty', '分类进行中或暂不可用'))
+    return
+  }
+  const analysis = data.analysis
+  if (!analysis) {
+    panel.appendChild(el('p', 'intel-empty', '分类进行中或暂不可用'))
+    return
+  }
+
+  const grid = el('div', 'intel-grid')
+  const addRow = (label: string, value: string) => {
+    const row = el('div', 'intel-row')
+    row.appendChild(el('span', 'intel-label', label))
+    row.appendChild(el('span', 'intel-value', value))
+    grid.appendChild(row)
+  }
+  addRow('知识领域', analysis.domainPath.map((seg, i) => i === 0 ? domainRootLabel(seg) : seg).join(' / '))
+  addRow('欠条机制', [analysis.primaryGapMechanism, ...analysis.secondaryGapMechanisms].map(gapMechanismLabel).join('、'))
+  addRow('任务阶段', intelTaskStageLabel(analysis.taskStage))
+  addRow('根因', analysis.rootCauses.map(rootCauseLabel).join('、'))
+  addRow('风险', analysis.riskTypes.map(riskTypeLabel).join('、'))
+  addRow('迁移价值', `${analysis.transferValue} / 5`)
+  if (analysis.concepts.length > 0) {
+    addRow('关键概念', analysis.concepts.map(c => c.displayName).join('、'))
+  }
+  if (analysis.prerequisiteConcepts.length > 0) {
+    addRow('前置概念', analysis.prerequisiteConcepts.map(c => c.displayName).join('、'))
+  }
+  addRow('置信度', `${Math.round(analysis.classificationConfidence * 100)}%`)
+  panel.appendChild(grid)
+  panel.appendChild(el('p', 'intel-meta',
+    `版本 v${analysis.version}${data.versionCount > 1 ? `（共 ${data.versionCount} 个版本）` : ''} · ${analysis.isUserCorrected ? '经人工纠正' : 'AI 自动生成'} · 更新于 ${formatDate(analysis.updatedAt)}`))
+
+  renderCorrectionForm(panel, container, debtId, analysis)
+}
+
+function renderCorrectionForm(
+  panel: HTMLElement,
+  container: HTMLElement,
+  debtId: string,
+  analysis: DebtIntelligenceAnalysisDTO
+): void {
+  const toggleBtn = el('button', 'btn btn-small btn-secondary', '纠正分类')
+  panel.appendChild(toggleBtn)
+  const form = el('div', 'intel-form')
+  form.style.display = 'none'
+  panel.appendChild(form)
+  toggleBtn.onclick = () => {
+    form.style.display = form.style.display === 'none' ? 'block' : 'none'
+  }
+
+  const mechLabel = el('p', 'intel-form-label', '欠条机制')
+  const mechSelect = el('select', 'intel-select') as HTMLSelectElement
+  for (const option of GAP_MECHANISM_OPTIONS) {
+    const opt = el('option', undefined, gapMechanismLabel(option)) as HTMLOptionElement
+    opt.value = option
+    if (option === analysis.primaryGapMechanism) opt.selected = true
+    mechSelect.appendChild(opt)
+  }
+  form.appendChild(mechLabel)
+  form.appendChild(mechSelect)
+
+  form.appendChild(el('p', 'intel-form-label', '风险（可多选）'))
+  const riskBoxes: HTMLInputElement[] = []
+  const riskWrap = el('div', 'intel-risk-options')
+  for (const option of RISK_TYPE_OPTIONS) {
+    const item = el('label', 'intel-risk-option')
+    const checkbox = el('input') as HTMLInputElement
+    checkbox.type = 'checkbox'
+    checkbox.value = option
+    checkbox.checked = analysis.riskTypes.includes(option)
+    item.appendChild(checkbox)
+    item.appendChild(el('span', undefined, riskTypeLabel(option)))
+    riskWrap.appendChild(item)
+    riskBoxes.push(checkbox)
+  }
+  form.appendChild(riskWrap)
+
+  form.appendChild(el('p', 'intel-form-label', '迁移价值（1 = 仅当前任务，5 = 可广泛迁移）'))
+  const transferSelect = el('select', 'intel-select') as HTMLSelectElement
+  for (let value = 1; value <= 5; value++) {
+    const opt = el('option', undefined, String(value)) as HTMLOptionElement
+    opt.value = String(value)
+    if (value === analysis.transferValue) opt.selected = true
+    transferSelect.appendChild(opt)
+  }
+  form.appendChild(transferSelect)
+
+  const formError = el('p', 'intel-form-error')
+  form.appendChild(formError)
+  const submitBtn = el('button', 'btn btn-primary btn-small', '保存纠正')
+  form.appendChild(submitBtn)
+
+  submitBtn.onclick = async () => {
+    const riskTypes = riskBoxes.filter(box => box.checked).map(box => box.value)
+    if (riskTypes.length === 0) {
+      formError.textContent = '请至少选择一种风险（无实质风险时选“无实质风险”）'
+      return
+    }
+    submitBtn.disabled = true
+    formError.textContent = ''
+    try {
+      const res = await apiFetch(`/api/training/debts/${encodeURIComponent(debtId)}/intelligence`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          primaryGapMechanism: mechSelect.value,
+          riskTypes,
+          transferValue: Number(transferSelect.value)
+        })
+      })
+      if (!res.ok) throw await readError(res)
+      await renderDebtDetail(container, debtId)
+    } catch (error) {
+      submitBtn.disabled = false
+      formError.textContent = `保存失败：${(error as Error).message}`
+    }
+  }
+}
+
+function relationTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    same_concept: '同一概念',
+    similar_gap: '相似缺口',
+    recurrence: '复发',
+    prerequisite_of: '前置知识',
+    caused_by: '部分导致',
+    blocks: '阻碍清偿',
+    transfer_variant: '迁移变体',
+    same_project: '同项目',
+    same_cognitive_pattern: '同一认知模式'
+  }
+  return labels[type] || type
+}
+
+function relationStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    auto_confirmed: '已自动关联',
+    pending_confirmation: '待你确认',
+    user_confirmed: '已确认'
+  }
+  return labels[status] || status
+}
+
+function clusterTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    same_concept: '同概念簇',
+    recurring_problem: '复发问题簇',
+    cognitive_pattern: '认知模式簇',
+    learning_path: '学习路径簇'
+  }
+  return labels[type] || type
+}
+
+// 关联欠条区块：所属簇行 + 关系列表（含确认/拒绝）。独立加载，失败只在本区块内提示。
+async function renderRelationsPanel(container: HTMLElement, debtId: string): Promise<void> {
+  const panel = el('div', 'evidence-panel')
+  panel.appendChild(el('h2', undefined, '关联欠条'))
+  container.appendChild(panel)
+  try {
+    const [relationsRes, clusterRes] = await Promise.all([
+      apiFetch(`/api/training/debts/${encodeURIComponent(debtId)}/relations`),
+      apiFetch(`/api/training/debts/${encodeURIComponent(debtId)}/cluster`)
+    ])
+    if (!relationsRes.ok) throw await readError(relationsRes)
+    if (!clusterRes.ok) throw await readError(clusterRes)
+    const relationsData: DebtRelationsResponse = await relationsRes.json()
+    const clusterData: DebtClusterResponse = await clusterRes.json()
+
+    if (clusterData.cluster) {
+      const cluster = clusterData.cluster
+      const row = el('div', 'intel-row')
+      row.appendChild(el('span', 'intel-label', '所属欠条簇'))
+      const masteredCount = cluster.masterySummary.statusCounts.mastered || 0
+      row.appendChild(el('span', 'intel-value',
+        `${cluster.title}（${clusterTypeLabel(cluster.clusterType)}，${cluster.masterySummary.memberCount} 张，已掌握 ${masteredCount} 张，平均掌握度 ${cluster.masterySummary.averageMastery.overallMastery}）`
+      ))
+      panel.appendChild(row)
+    }
+
+    if (relationsData.relations.length === 0) {
+      if (!clusterData.cluster) {
+        panel.appendChild(el('p', 'intel-empty', '暂无关联欠条'))
+      }
+      return
+    }
+
+    const list = el('div', 'intel-grid')
+    for (const relation of relationsData.relations) {
+      const item = el('div', 'intel-row')
+      const otherGap = relation.otherDebt?.gapText || '（对方欠条已删除）'
+      const text = el('span', 'intel-value',
+        `${relationTypeLabel(relation.relationType)} · ${otherGap} · 置信度 ${Math.round(relation.confidence * 100)}% · ${relationStatusLabel(relation.status)}`
+      )
+      if (relation.otherDebt) {
+        text.style.cursor = 'pointer'
+        text.style.textDecoration = 'underline'
+        const otherDebtId = relation.otherDebt.id
+        text.onclick = () => renderDebtDetail(container, otherDebtId)
+      }
+      item.appendChild(text)
+
+      if (relation.status === 'pending_confirmation') {
+        const confirmBtn = el('button', 'btn btn-small btn-secondary', '确认')
+        const rejectBtn = el('button', 'btn btn-small btn-secondary', '拒绝')
+        const act = async (action: 'confirm' | 'reject') => {
+          confirmBtn.disabled = true
+          rejectBtn.disabled = true
+          try {
+            const res = await apiFetch(
+              `/api/training/debts/${encodeURIComponent(debtId)}/relations/${encodeURIComponent(relation.id)}/${action}`,
+              { method: 'POST', body: '{}' }
+            )
+            if (!res.ok) throw await readError(res)
+            await renderDebtDetail(container, debtId)
+          } catch (error) {
+            confirmBtn.disabled = false
+            rejectBtn.disabled = false
+            panel.appendChild(el('p', 'intel-form-error', `操作失败：${(error as Error).message}`))
+          }
+        }
+        confirmBtn.onclick = () => act('confirm')
+        rejectBtn.onclick = () => act('reject')
+        item.appendChild(confirmBtn)
+        item.appendChild(rejectBtn)
+      }
+      list.appendChild(item)
+      if (relation.reason) {
+        const reasonRow = el('div', 'intel-row')
+        reasonRow.appendChild(el('span', 'intel-label', ''))
+        reasonRow.appendChild(el('span', 'intel-meta', relation.reason))
+        list.appendChild(reasonRow)
+      }
+    }
+    panel.appendChild(list)
+  } catch (error) {
+    panel.appendChild(el('p', 'intel-empty', `关联信息暂不可用：${(error as Error).message}`))
   }
 }
 

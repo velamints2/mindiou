@@ -26,6 +26,27 @@ import {
   ensureLearnerFacingLanguage
 } from "./mvp1-demo-fallback.js";
 import { createTrainingStore } from "./training-store.js";
+import { createDebtIntelligenceStore } from "./debt-intelligence-store.js";
+import {
+  classifyAndSave,
+  applyUserCorrection,
+  backfillDebtIntelligence
+} from "./debt-intelligence.js";
+import { createConceptGraphStore } from "./concept-graph-store.js";
+import {
+  detectRelations,
+  confirmRelation,
+  rejectRelation,
+  syncConceptsFromAnalysis,
+  deriveClusterMasterySummary
+} from "./debt-relations.js";
+import { createCognitiveProfileStore } from "./cognitive-profile-store.js";
+import {
+  computeProfileAggregates,
+  generateInsights,
+  generatePeriodicSnapshots,
+  buildAndSaveSnapshot
+} from "./cognitive-profile.js";
 import {
   createCognitiveDebt,
   updateMasteryProfile,
@@ -98,6 +119,19 @@ import {
 } from "./project-ownership.js";
 import { generateModuleRecommendation, generateProjectRecommendations } from "./learning-orchestrator.js";
 import { seedOwnershipData } from "./ownership-seed.js";
+import { createLearningOrchestratorStore } from "./learning-orchestrator-store.js";
+import {
+  getTodayRecommendations,
+  getWeeklyFocus,
+  acceptRecommendation,
+  skipRecommendation
+} from "./learning-orchestrator.js";
+import { createCognitiveReportsStore } from "./cognitive-reports-store.js";
+import {
+  getLatestWeeklyReport,
+  getLatestMonthlyReport,
+  generateWeeklyReport
+} from "./cognitive-reports.js";
 import { reportEnvValidation } from "./env-validation.js";
 
 // 启动期环境验证：值非法时打印变量级错误并退出（绝不打印值）。
@@ -193,6 +227,22 @@ try {
 } catch (seedError) {
   console.warn(`Ownership seed failed (non-blocking): ${seedError.message}`);
 }
+const debtIntelligenceDisabled = process.env.DEBT_INTELLIGENCE_DISABLED === "1";
+const debtIntelligenceStorePath = process.env.DEBT_INTELLIGENCE_STORE_PATH || "tmp/debt-intelligence-store.json";
+const debtIntelligenceStore = createDebtIntelligenceStore(debtIntelligenceStorePath);
+await debtIntelligenceStore.load();
+const conceptGraphStorePath = process.env.CONCEPT_GRAPH_STORE_PATH || "tmp/concept-graph-store.json";
+const conceptGraphStore = createConceptGraphStore(conceptGraphStorePath);
+await conceptGraphStore.load();
+const cognitiveProfileStorePath = process.env.COGNITIVE_PROFILE_STORE_PATH || "tmp/cognitive-profile-store.json";
+const cognitiveProfileStore = createCognitiveProfileStore(cognitiveProfileStorePath);
+await cognitiveProfileStore.load();
+const learningOrchestratorStorePath = process.env.LEARNING_ORCHESTRATOR_STORE_PATH || "tmp/learning-orchestrator-store.json";
+const learningOrchestratorStore = createLearningOrchestratorStore(learningOrchestratorStorePath);
+await learningOrchestratorStore.load();
+const cognitiveReportsStorePath = process.env.COGNITIVE_REPORTS_STORE_PATH || "tmp/cognitive-reports-store.json";
+const cognitiveReportsStore = createCognitiveReportsStore(cognitiveReportsStorePath);
+await cognitiveReportsStore.load();
 
 const learningCoachSystemPrompt = [
   "You are Learn Coach, a rigorous but patient AI teacher for smart glasses including Even G2 and Rokid AIUI devices.",
@@ -1325,6 +1375,130 @@ function classifyRepaymentError(error) {
   if (/http\s*\d|openai http/i.test(message)) return "http";
   if (/json|parse/i.test(message)) return "parse";
   return "unknown";
+}
+
+// ── 认知欠条智能分类（Phase 1）：异步触发，绝不阻塞主流程 ──
+
+function buildDebtReportContext(debt, reportId) {
+  const rid = reportId || debt.reportId
+    || (Array.isArray(debt.sourceReports) ? debt.sourceReports[debt.sourceReports.length - 1] : null);
+  if (!rid) return null;
+  try {
+    const report = mvp0Store.getReport(rid, debt.userId);
+    if (!report) return null;
+    const gaps = Array.isArray(report.sections?.dangerousGaps) ? report.sections.dangerousGaps : [];
+    const gapText = clean(debt.gapText || "").toLowerCase();
+    const gap = gaps.find(item => clean(item?.gap || "").toLowerCase() === gapText) || gaps[0] || null;
+    const cards = Array.isArray(report.sections?.feynmanCards) ? report.sections.feynmanCards : [];
+    const card = cards.find(item => item?.id && item.id === debt.cardId) || null;
+    return {
+      artifactType: clean(report.input?.artifactType || report.analysis?.artifactKind || ""),
+      reportGap: gap ? {
+        title: clean(gap.title || "").slice(0, 200),
+        gap: clean(gap.gap || "").slice(0, 500),
+        underlyingCapability: clean(gap.underlyingCapability || "").slice(0, 200),
+        evidence: clean(gap.evidence || "").slice(0, 500)
+      } : null,
+      reportCard: card ? {
+        target: clean(card.target || "").slice(0, 200),
+        prompt: clean(card.prompt || "").slice(0, 300)
+      } : null
+    };
+  } catch {
+    return null;
+  }
+}
+
+function scheduleDebtIntelligence(debt, { reportId, trigger = "auto" } = {}) {
+  if (debtIntelligenceDisabled || !debt?.id) return;
+  setImmediate(() => {
+    (async () => {
+      if (!aiApiKey || disableAi) {
+        const now = new Date().toISOString();
+        await debtIntelligenceStore.saveAnalysisRun({
+          id: crypto.randomUUID(),
+          cognitiveDebtId: debt.id,
+          userId: debt.userId || "demo-user",
+          trigger,
+          status: "skipped",
+          attemptCount: 0,
+          errorMessage: disableAi ? "SPIRAL_DISABLE_AI=1" : "AI_API_KEY is not set",
+          startedAt: now,
+          finishedAt: now
+        });
+        return;
+      }
+      const result = await classifyAndSave({
+        store: debtIntelligenceStore,
+        debt,
+        reportContext: buildDebtReportContext(debt, reportId),
+        chatFn: chatJson,
+        modelName: chatModel,
+        trigger
+      });
+      if (!result.ok && !result.skipped) {
+        console.warn(`Debt intelligence classification failed for ${debt.id}: ${result.error}`);
+      }
+      if (result.ok && !result.skipped) {
+        await scheduleDebtRelationDetection(debt);
+      }
+    })().catch(error => {
+      console.warn(`Debt intelligence task failed for ${debt.id}: ${error.message}`);
+    });
+  });
+}
+
+// 分类成功后：同步概念节点 → 对该欠条做增量关系识别（幂等）。
+// 识别失败只记录日志与 analysisRun，绝不影响欠条主流程。
+async function scheduleDebtRelationDetection(debt) {
+  try {
+    const analysis = debtIntelligenceStore.getCurrentAnalysis(debt.id);
+    if (analysis) {
+      await syncConceptsFromAnalysis({ graphStore: conceptGraphStore, analysis });
+    }
+    await detectRelations({
+      graphStore: conceptGraphStore,
+      intelligenceStore: debtIntelligenceStore,
+      trainingStore,
+      userId: debt.userId || "demo-user",
+      focusDebtId: debt.id,
+      chatFn: chatJson
+    });
+  } catch (error) {
+    console.warn(`Debt relation detection failed for ${debt.id}: ${error.message}`);
+  }
+}
+
+// 簇响应载荷：成员欠条摘要 + 从成员画像派生的掌握度汇总（不存独立六维）。
+function buildClusterDetailPayload(cluster, userId) {
+  const members = conceptGraphStore.listDebtClusterMembers({ clusterId: cluster.id });
+  const debtsById = new Map();
+  const profilesByDebtId = new Map();
+  const memberItems = [];
+  for (const member of members) {
+    let debt = null;
+    try {
+      debt = trainingStore.getCognitiveDebt(member.cognitiveDebtId, userId);
+    } catch {
+      continue;
+    }
+    debtsById.set(debt.id, debt);
+    const profile = trainingStore.getMasteryProfile(debt.id);
+    if (profile) profilesByDebtId.set(debt.id, profile);
+    memberItems.push({
+      cognitiveDebtId: debt.id,
+      gapText: debt.gapText,
+      status: debt.status,
+      recurrenceCount: debt.recurrenceCount,
+      membershipConfidence: member.membershipConfidence
+    });
+  }
+  const masterySummary = deriveClusterMasterySummary({
+    memberDebtIds: [...debtsById.keys()],
+    debtsById,
+    profilesByDebtId
+  });
+  return { ...cluster, members: memberItems, masterySummary };
 }
 
 async function analyzeClearanceAnswer(input) {
@@ -2734,8 +2908,17 @@ const server = createServer(async (req, res) => {
     const mvp0CardAnswerMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)\/cards\/([^/]+)\/answer$/);
     const mvp0CorrectionMatch = url.pathname.match(/^\/api\/mvp0\/reports\/([^/]+)\/corrections$/);
     const trainingDebtMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)$/);
+    const trainingDebtIntelligenceMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/intelligence$/);
+    const trainingDebtReanalyzeMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/intelligence\/reanalyze$/);
+    const trainingDebtRelationsMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/relations$/);
+    const trainingDebtRelationConfirmMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/relations\/([^/]+)\/confirm$/);
+    const trainingDebtRelationRejectMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/relations\/([^/]+)\/reject$/);
+    const trainingDebtClusterMatch = url.pathname.match(/^\/api\/training\/debts\/([^/]+)\/cluster$/);
+    const trainingClusterMatch = url.pathname.match(/^\/api\/training\/clusters\/([^/]+)$/);
+    const profileInsightEvidenceMatch = url.pathname.match(/^\/api\/cognitive-profile\/insights\/([^/]+)\/evidence$/);
     const trainingReviewStartMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/start$/);
     const trainingReviewSubmitMatch = url.pathname.match(/^\/api\/training\/reviews\/([^/]+)\/submit$/);
+    const learningRecommendationActionMatch = url.pathname.match(/^\/api\/learning-recommendations\/([^/]+)\/(accept|skip)$/);
     const isWebMvpRoute =
       (req.method === "GET" && (url.pathname === "/api/dashboard" || url.pathname === "/api/mvp0/reports" || mvp1SessionMatch || mvp0ReportMatch)) ||
       (req.method === "POST" && (
@@ -2971,6 +3154,8 @@ const server = createServer(async (req, res) => {
             userId: user.id
           });
           await trainingStore.saveReviewTask(reviewTask);
+          // 异步触发智能分类，不阻塞会话结束响应
+          scheduleDebtIntelligence(debt, { reportId: session.reportId });
         } catch (trainingError) {
           console.warn(`Training system integration failed for session ${session.id}: ${trainingError.message}`);
         }
@@ -3074,6 +3259,8 @@ const server = createServer(async (req, res) => {
                 gapEvidence: String(gap.evidence || "").slice(0, 1000)
               });
               await trainingStore.saveCognitiveDebt(newDebt);
+              // 异步触发智能分类，不阻塞报告响应
+              scheduleDebtIntelligence(newDebt, { reportId: saved.id });
             }
           }
         } catch (debtError) {
@@ -3591,6 +3778,241 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── 认知欠条智能分类：查询当前生效版本 ──
+    if (req.method === "GET" && trainingDebtIntelligenceMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtIntelligenceMatch[1]);
+      try {
+        trainingStore.getCognitiveDebt(debtId, userId);
+        const analysis = debtIntelligenceStore.getCurrentAnalysis(debtId);
+        jsonResponse(res, 200, {
+          ok: true,
+          analysis,
+          versionCount: debtIntelligenceStore.countAnalyses(debtId)
+        });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    // ── 欠条关系与欠条簇（Phase 2）：查询 ──
+
+    if (req.method === "GET" && trainingDebtRelationsMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtRelationsMatch[1]);
+      try {
+        trainingStore.getCognitiveDebt(debtId, userId);
+        const relations = conceptGraphStore.listDebtRelations({ userId, cognitiveDebtId: debtId })
+          .filter(item => item.status !== "user_rejected")
+          .map(item => {
+            const otherDebtId = item.sourceDebtId === debtId ? item.targetDebtId : item.sourceDebtId;
+            let otherDebt = null;
+            try {
+              const debt = trainingStore.getCognitiveDebt(otherDebtId, userId);
+              otherDebt = {
+                id: debt.id,
+                gapText: debt.gapText,
+                status: debt.status,
+                recurrenceCount: debt.recurrenceCount
+              };
+            } catch { /* 对方欠条已删除时保留 null */ }
+            return { ...item, direction: item.sourceDebtId === debtId ? "outgoing" : "incoming", otherDebt };
+          });
+        jsonResponse(res, 200, { ok: true, relations });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && trainingDebtClusterMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtClusterMatch[1]);
+      try {
+        trainingStore.getCognitiveDebt(debtId, userId);
+        const membership = conceptGraphStore.listDebtClusterMembers({ cognitiveDebtId: debtId })[0] || null;
+        const cluster = membership ? conceptGraphStore.getDebtCluster(membership.clusterId) : null;
+        jsonResponse(res, 200, {
+          ok: true,
+          cluster: cluster ? buildClusterDetailPayload(cluster, userId) : null
+        });
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/training/clusters") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const clusters = conceptGraphStore.listDebtClusters(userId)
+        .map(cluster => buildClusterDetailPayload(cluster, userId));
+      jsonResponse(res, 200, { ok: true, clusters });
+      return;
+    }
+
+    if (req.method === "GET" && trainingClusterMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const clusterId = decodeURIComponent(trainingClusterMatch[1]);
+      const cluster = conceptGraphStore.getDebtCluster(clusterId);
+      if (!cluster || cluster.userId !== userId) {
+        jsonResponse(res, 404, { ok: false, error: `Debt cluster not found: ${clusterId}` });
+        return;
+      }
+      jsonResponse(res, 200, { ok: true, cluster: buildClusterDetailPayload(cluster, userId) });
+      return;
+    }
+
+    // ── 用户长期认知画像（Phase 3）──
+    // 聚合全部读时计算（删除欠条后重算即生效）；结论记录按周期幂等刷新，
+    // 确定性文案直接生成，模型仅在手动快照时对已算好的结论做措辞润色。
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/summary") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const rawPeriodDays = url.searchParams.get("periodDays");
+      const requestedDays = rawPeriodDays === null ? NaN : Number(rawPeriodDays);
+      const periodDays = Number.isFinite(requestedDays)
+        ? Math.min(90, Math.max(7, Math.round(requestedDays)))
+        : 30;
+      const aggregates = computeProfileAggregates({
+        userId,
+        trainingStore,
+        intelligenceStore: debtIntelligenceStore,
+        profileStore: cognitiveProfileStore,
+        periodDays
+      });
+      const { insights, aiEnhanced } = await generateInsights({
+        userId,
+        skills: aggregates.skills,
+        gapPatterns: aggregates.patterns,
+        learningBehavior: aggregates.learningBehavior,
+        risks: aggregates.risks,
+        periodStart: aggregates.patterns.periodStart,
+        periodEnd: aggregates.patterns.periodEnd,
+        store: cognitiveProfileStore
+      });
+      jsonResponse(res, 200, {
+        ok: true,
+        periodDays,
+        calculationVersion: insights[0]?.calculationVersion || null,
+        skills: aggregates.skills,
+        patterns: aggregates.patterns,
+        learning: aggregates.learningBehavior,
+        risks: aggregates.risks,
+        insights,
+        aiEnhanced
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/skills") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const aggregates = computeProfileAggregates({
+        userId, trainingStore, intelligenceStore: debtIntelligenceStore, profileStore: cognitiveProfileStore
+      });
+      jsonResponse(res, 200, { ok: true, ...aggregates.skills });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/patterns") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const rawPeriodDays = url.searchParams.get("periodDays");
+      const requestedDays = rawPeriodDays === null ? NaN : Number(rawPeriodDays);
+      const periodDays = Number.isFinite(requestedDays)
+        ? Math.min(90, Math.max(7, Math.round(requestedDays)))
+        : 30;
+      const aggregates = computeProfileAggregates({
+        userId, trainingStore, intelligenceStore: debtIntelligenceStore, profileStore: cognitiveProfileStore, periodDays
+      });
+      jsonResponse(res, 200, { ok: true, ...aggregates.patterns });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/learning") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const aggregates = computeProfileAggregates({
+        userId, trainingStore, intelligenceStore: debtIntelligenceStore, profileStore: cognitiveProfileStore
+      });
+      jsonResponse(res, 200, { ok: true, ...aggregates.learning });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/risks") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const aggregates = computeProfileAggregates({
+        userId, trainingStore, intelligenceStore: debtIntelligenceStore, profileStore: cognitiveProfileStore
+      });
+      jsonResponse(res, 200, { ok: true, ...aggregates.risks });
+      return;
+    }
+
+    if (req.method === "GET" && profileInsightEvidenceMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const insightId = decodeURIComponent(profileInsightEvidenceMatch[1]);
+      const insight = cognitiveProfileStore.getInsight(insightId, userId);
+      if (!insight) {
+        jsonResponse(res, 404, { ok: false, error: `Insight not found: ${insightId}` });
+        return;
+      }
+      const debts = [];
+      for (const debtId of insight.evidenceDebtIds) {
+        try {
+          const debt = trainingStore.getCognitiveDebt(debtId, userId);
+          debts.push({
+            id: debt.id,
+            gapText: debt.gapText,
+            status: debt.status,
+            recurrenceCount: debt.recurrenceCount,
+            createdAt: debt.createdAt
+          });
+        } catch { /* 欠条已删除：证据留空但结论仍可追溯 */ }
+      }
+      const attemptIdSet = new Set(insight.evidenceAttemptIds);
+      const attempts = attemptIdSet.size > 0
+        ? trainingStore.listAttempts(userId)
+          .filter(attempt => attemptIdSet.has(attempt.id))
+          .map(attempt => ({
+            id: attempt.id,
+            cognitiveDebtId: attempt.cognitiveDebtId,
+            trainingStage: attempt.trainingStage,
+            passed: Boolean(attempt.evaluation?.passed),
+            overallScore: Number.isFinite(Number(attempt.evaluation?.overallScore))
+              ? Number(attempt.evaluation.overallScore)
+              : null,
+            completedAt: attempt.completedAt || null
+          }))
+        : [];
+      const clusters = insight.evidenceClusterIds
+        .map(clusterId => conceptGraphStore.getDebtCluster(clusterId))
+        .filter(cluster => cluster && cluster.userId === userId)
+        .map(cluster => ({ id: cluster.id, title: cluster.title || cluster.id, clusterType: cluster.clusterType }));
+      jsonResponse(res, 200, { ok: true, insight, evidence: { debts, attempts, clusters } });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-profile/snapshots") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const snapshotType = clean(url.searchParams.get("type") || "");
+      const snapshots = cognitiveProfileStore.listSnapshots(
+        userId,
+        snapshotType ? { snapshotType } : {}
+      );
+      jsonResponse(res, 200, { ok: true, snapshots });
+      return;
+    }
+
     const mvp0DraftMatch = url.pathname.match(/^\/api\/mvp0\/drafts\/([^/]+)$/);
     const isDraftOrTimelineRoute =
       url.pathname === "/api/mvp0/drafts" ||
@@ -3615,7 +4037,118 @@ const server = createServer(async (req, res) => {
       }
     } // close isDraftOrTimelineRoute
 
-    // 所有权地图的 GET 路由需要绕过 405 门禁
+// ── 下一步学习编排（Phase 4）：今日推荐 / 每周重点（GET，必须在方法闸门之前） ──
+
+    if (req.method === "GET" && url.pathname === "/api/learning-recommendations/today") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const result = await getTodayRecommendations(userId, {
+          store: learningOrchestratorStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          graphStore: conceptGraphStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        logEvent("error", "learning_recommendations_today_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "学习推荐生成失败，请稍后重试" });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/learning-recommendations/weekly-focus") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const result = await getWeeklyFocus(userId, {
+          store: learningOrchestratorStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          graphStore: conceptGraphStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        logEvent("error", "learning_weekly_focus_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "每周学习重点生成失败，请稍后重试" });
+      }
+      return;
+    }
+
+    // ── 周期性认知报告（Phase 5）：周报 / 月报（GET，必须在方法闸门之前） ──
+    // 读时生成、同周期幂等；历史报告只增不改。
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-reports/weekly/latest") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const result = await getLatestWeeklyReport(userId, {
+          store: cognitiveReportsStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          profileStore: cognitiveProfileStore,
+          graphStore: conceptGraphStore,
+          orchestratorStore: learningOrchestratorStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        logEvent("error", "cognitive_reports_weekly_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "认知周报生成失败，请稍后重试" });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-reports/monthly/latest") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const result = await getLatestMonthlyReport(userId, {
+          store: cognitiveReportsStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          profileStore: cognitiveProfileStore,
+          graphStore: conceptGraphStore,
+          orchestratorStore: learningOrchestratorStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, ...result });
+      } catch (error) {
+        logEvent("error", "cognitive_reports_monthly_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "认知月报生成失败，请稍后重试" });
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cognitive-reports/history") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const reportType = clean(url.searchParams.get("type") || "");
+      if (!["weekly", "monthly"].includes(reportType)) {
+        jsonResponse(res, 400, { ok: false, error: "type must be weekly or monthly" });
+        return;
+      }
+      // 注意：缺省参数时 Number(null) === 0，会把默认 limit 压成 1，必须先判空
+      const limitParam = url.searchParams.get("limit");
+      const rawLimit = limitParam === null || limitParam === "" ? NaN : Number(limitParam);
+      const limit = Number.isFinite(rawLimit) ? Math.min(52, Math.max(1, Math.round(rawLimit))) : 12;
+      const offsetParam = url.searchParams.get("offset");
+      const rawOffset = offsetParam === null || offsetParam === "" ? NaN : Number(offsetParam);
+      const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.round(rawOffset)) : 0;
+      const all = cognitiveReportsStore.listReports(userId, { reportType });
+      jsonResponse(res, 200, {
+        ok: true,
+        reportType,
+        total: all.length,
+        limit,
+        offset,
+        reports: all.slice(offset, offset + limit)
+      });
+      return;
+    }
+
     const isOwnershipRoute = url.pathname.startsWith("/api/projects");
     if (!isOwnershipRoute && req.method !== "POST" && req.method !== "PATCH") {
       jsonResponse(res, 405, { ok: false, error: "Method not allowed", requestId });
@@ -3623,6 +4156,236 @@ const server = createServer(async (req, res) => {
     }
     if (url.pathname === "/api/mvp0/timelines") requireJsonRequest(req);
     const payload = (req.method === "POST" || req.method === "PATCH") ? parseJson(await readBody(req)) : {};
+
+    // ── 认知欠条智能分类：回填 / 重新分类 / 人工纠正 ──
+
+    if (req.method === "POST" && url.pathname === "/api/training/intelligence/backfill") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      if (debtIntelligenceDisabled) {
+        jsonResponse(res, 503, { ok: false, error: "Debt intelligence is disabled (DEBT_INTELLIGENCE_DISABLED=1)" });
+        return;
+      }
+      if (!aiApiKey || disableAi) {
+        jsonResponse(res, 503, { ok: false, error: "Debt intelligence requires an active AI configuration" });
+        return;
+      }
+      const debts = trainingStore.listCognitiveDebts(user.id);
+      const result = await backfillDebtIntelligence({
+        store: debtIntelligenceStore,
+        debts,
+        chatFn: chatJson,
+        modelName: chatModel,
+        batchSize: payload.batchSize,
+        offset: payload.offset ?? payload.cursor,
+        reportContextFor: debt => buildDebtReportContext(debt)
+      });
+      jsonResponse(res, 200, { ok: true, ...result });
+      return;
+    }
+
+    // ── 认知画像（Phase 3）：手动生成当日快照 + 幂等刷新结论（可经模型润色措辞） ──
+
+    if (req.method === "POST" && url.pathname === "/api/cognitive-profile/snapshots") {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const aggregates = computeProfileAggregates({
+        userId,
+        trainingStore,
+        intelligenceStore: debtIntelligenceStore,
+        profileStore: cognitiveProfileStore
+      });
+      const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+      const insightResult = await generateInsights({
+        userId,
+        skills: aggregates.skills,
+        gapPatterns: aggregates.patterns,
+        learningBehavior: aggregates.learningBehavior,
+        risks: aggregates.risks,
+        periodStart: aggregates.patterns.periodStart,
+        periodEnd: aggregates.patterns.periodEnd,
+        store: cognitiveProfileStore,
+        chatFn
+      });
+      const snapshotResult = await buildAndSaveSnapshot({
+        profileStore: cognitiveProfileStore,
+        trainingStore,
+        intelligenceStore: debtIntelligenceStore,
+        userId,
+        snapshotType: "manual"
+      });
+      jsonResponse(res, snapshotResult.created ? 201 : 200, {
+        ok: true,
+        created: snapshotResult.created,
+        snapshot: snapshotResult.snapshot,
+        insightCount: insightResult.insights.length,
+        aiEnhanced: insightResult.aiEnhanced
+      });
+      return;
+    }
+
+    // ── 周期性认知报告（Phase 5）：手动生成本周期周报（幂等重算替换） ──
+
+    if (req.method === "POST" && url.pathname === "/api/cognitive-reports/weekly/generate") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      try {
+        const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
+        const report = await generateWeeklyReport(user.id, {
+          store: cognitiveReportsStore,
+          trainingStore,
+          intelligenceStore: debtIntelligenceStore,
+          profileStore: cognitiveProfileStore,
+          graphStore: conceptGraphStore,
+          orchestratorStore: learningOrchestratorStore
+        }, { chatFn });
+        jsonResponse(res, 200, { ok: true, report });
+      } catch (error) {
+        logEvent("error", "cognitive_reports_weekly_generate_failed", { requestId, error: error.message });
+        jsonResponse(res, 500, { ok: false, error: "认知周报生成失败，请稍后重试" });
+      }
+      return;
+    }
+
+    // ── 欠条关系（Phase 2）：手动全量扫描（幂等，复用 detectRelations 编排） ──
+
+    if (req.method === "POST" && url.pathname === "/api/training/relations/scan") {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      if (debtIntelligenceDisabled) {
+        jsonResponse(res, 503, { ok: false, error: "Debt intelligence is disabled (DEBT_INTELLIGENCE_DISABLED=1)" });
+        return;
+      }
+      if (!aiApiKey || disableAi) {
+        jsonResponse(res, 503, { ok: false, error: "Debt relation scan requires an active AI configuration" });
+        return;
+      }
+      const result = await detectRelations({
+        graphStore: conceptGraphStore,
+        intelligenceStore: debtIntelligenceStore,
+        trainingStore,
+        userId: user.id,
+        chatFn: chatJson,
+        trigger: "manual_scan"
+      });
+      jsonResponse(res, 200, {
+        ok: true,
+        pairsConsidered: result.pairsConsidered,
+        created: result.created,
+        pending: result.pending,
+        ...(result.skipped ? { skipped: result.skipped } : {})
+      });
+      return;
+    }
+
+    if (req.method === "POST" && trainingDebtReanalyzeMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtReanalyzeMatch[1]);
+      let debt;
+      try {
+        debt = trainingStore.getCognitiveDebt(debtId, userId);
+      } catch (error) {
+        jsonResponse(res, 404, { ok: false, error: error.message });
+        return;
+      }
+      const current = debtIntelligenceStore.getCurrentAnalysis(debtId);
+      if (current?.isUserCorrected) {
+        jsonResponse(res, 409, {
+          ok: false,
+          error: "该欠条分类已被人工纠正，自动重新分类已锁定；如需更新请直接修改纠正内容"
+        });
+        return;
+      }
+      if (debtIntelligenceDisabled) {
+        jsonResponse(res, 503, { ok: false, error: "Debt intelligence is disabled (DEBT_INTELLIGENCE_DISABLED=1)" });
+        return;
+      }
+      if (!aiApiKey || disableAi) {
+        jsonResponse(res, 503, { ok: false, error: "Debt intelligence requires an active AI configuration" });
+        return;
+      }
+      scheduleDebtIntelligence(debt, { trigger: "reanalyze" });
+      jsonResponse(res, 202, { ok: true, scheduled: true });
+      return;
+    }
+
+    if (req.method === "PATCH" && trainingDebtIntelligenceMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtIntelligenceMatch[1]);
+      try {
+        const debt = trainingStore.getCognitiveDebt(debtId, userId);
+        const analysis = await applyUserCorrection({
+          store: debtIntelligenceStore,
+          debt,
+          patch: payload,
+          modelName: chatModel
+        });
+        jsonResponse(res, 200, {
+          ok: true,
+          analysis,
+          versionCount: debtIntelligenceStore.countAnalyses(debtId)
+        });
+      } catch (error) {
+        const status = /not found/i.test(String(error.message)) ? 404 : 400;
+        jsonResponse(res, status, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    // ── 欠条关系（Phase 2）：用户确认 / 拒绝 ──
+
+    if (req.method === "POST" && trainingDebtRelationConfirmMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtRelationConfirmMatch[1]);
+      const relationId = decodeURIComponent(trainingDebtRelationConfirmMatch[2]);
+      try {
+        const result = await confirmRelation({
+          graphStore: conceptGraphStore,
+          trainingStore,
+          userId,
+          debtId,
+          relationId
+        });
+        jsonResponse(res, 200, {
+          ok: true,
+          relation: result.relation,
+          relapse: result.relapse,
+          alreadyConfirmed: Boolean(result.alreadyConfirmed)
+        });
+      } catch (error) {
+        const status = error.statusCode || (/not found/i.test(String(error.message)) ? 404 : 400);
+        jsonResponse(res, status, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && trainingDebtRelationRejectMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const debtId = decodeURIComponent(trainingDebtRelationRejectMatch[1]);
+      const relationId = decodeURIComponent(trainingDebtRelationRejectMatch[2]);
+      try {
+        const result = await rejectRelation({
+          graphStore: conceptGraphStore,
+          trainingStore,
+          userId,
+          debtId,
+          relationId
+        });
+        jsonResponse(res, 200, {
+          ok: true,
+          relation: result.relation,
+          alreadyRejected: Boolean(result.alreadyRejected)
+        });
+      } catch (error) {
+        const status = error.statusCode || (/not found/i.test(String(error.message)) ? 404 : 400);
+        jsonResponse(res, status, { ok: false, error: error.message });
+      }
+      return;
+    }
 
     // ── Training system: review start and submit ──
     if (trainingReviewStartMatch && req.method === "POST") {
@@ -3922,6 +4685,38 @@ const server = createServer(async (req, res) => {
         });
       } catch (error) {
         jsonResponse(res, 400, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    // ── 下一步学习编排（Phase 4）：接受 / 跳过 ──
+
+    if (req.method === "POST" && learningRecommendationActionMatch) {
+      const user = getOptionalUser(req);
+      const userId = user?.id || "demo-user";
+      const recommendationId = decodeURIComponent(learningRecommendationActionMatch[1]);
+      const action = learningRecommendationActionMatch[2];
+      try {
+        if (action === "accept") {
+          const result = await acceptRecommendation({
+            store: learningOrchestratorStore,
+            trainingStore,
+            userId,
+            recommendationId
+          });
+          jsonResponse(res, 200, { ok: true, ...result });
+        } else {
+          const result = await skipRecommendation({
+            store: learningOrchestratorStore,
+            userId,
+            recommendationId,
+            skipReason: payload.skipReason
+          });
+          jsonResponse(res, 200, { ok: true, ...result });
+        }
+      } catch (error) {
+        const status = error.statusCode || (/not found/i.test(String(error.message)) ? 404 : 400);
+        jsonResponse(res, status, { ok: false, error: error.message });
       }
       return;
     }
@@ -4257,6 +5052,39 @@ const server = createServer(async (req, res) => {
     });
   }
 });
+
+// ── 认知画像周/月定时快照（Phase 3）──
+// 幂等：同一周期已存在则跳过；单用户失败仅记录日志，不影响其他用户。
+// COGNITIVE_PROFILE_SNAPSHOT_INTERVAL_MS 可覆盖检查间隔，设为 0 可完全关闭
+// （测试环境关闭以保证确定性）。
+const profileSnapshotIntervalMs = Number(process.env.COGNITIVE_PROFILE_SNAPSHOT_INTERVAL_MS || 6 * 60 * 60 * 1000);
+async function runPeriodicProfileSnapshots() {
+  try {
+    const result = await generatePeriodicSnapshots({
+      profileStore: cognitiveProfileStore,
+      trainingStore,
+      intelligenceStore: debtIntelligenceStore
+    });
+    if (result.created > 0 || result.errors.length > 0) {
+      logEvent(result.errors.length > 0 ? "warn" : "info", "cognitive_profile_snapshots", {
+        users: result.users,
+        created: result.created,
+        skipped: result.skipped,
+        errors: result.errors.length
+      });
+    }
+  } catch (error) {
+    logEvent("warn", "cognitive_profile_snapshots_failed", {
+      error: String(error?.message || error).slice(0, 300)
+    });
+  }
+}
+if (Number.isFinite(profileSnapshotIntervalMs) && profileSnapshotIntervalMs > 0) {
+  const profileSnapshotTimer = setInterval(runPeriodicProfileSnapshots, profileSnapshotIntervalMs);
+  profileSnapshotTimer.unref();
+  const profileSnapshotBootTimer = setTimeout(runPeriodicProfileSnapshots, 15000);
+  profileSnapshotBootTimer.unref();
+}
 
 server.listen(port, host, () => {
   console.log(`G2 learning API listening on http://${host}:${port} using ${learningStorePath}`);
