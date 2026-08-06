@@ -1632,6 +1632,95 @@ html[lang="en"] .input-hint::before {
   width: 100%;
 }
 
+/* ── 三层能力快照（历史能力先验）── */
+
+.prior-profile-section {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  margin-bottom: 24px;
+}
+
+.prior-layer {
+  margin-bottom: 14px;
+  padding: 12px;
+  border-left: 3px solid var(--border);
+  border-radius: 0 6px 6px 0;
+  background: var(--bg);
+}
+
+.prior-l1 { border-left-color: #3b82f6; }
+.prior-l2 { border-left-color: #10b981; }
+.prior-l3 { border-left-color: #8b5cf6; }
+
+.prior-layer-heading {
+  margin: 0 0 8px 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.prior-meta {
+  margin: 0 0 8px 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.prior-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
+.prior-dims {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.prior-dim {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.prior-dim.is-stable {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.08);
+  color: #047857;
+}
+
+.prior-dim.is-one-shot {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.prior-knowledge-domain {
+  margin-bottom: 8px;
+}
+
+.prior-knowledge-domain-name {
+  margin: 0 0 6px 0;
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.prior-rules {
+  margin: 10px 0 0 0;
+  padding-left: 20px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
 /* Next actions and confusion receipt */
 .action-item {
   display: grid;

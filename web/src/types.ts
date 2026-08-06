@@ -96,6 +96,54 @@ export type ClearanceReport = {
     error?: string
     failedStep?: string
   }
+  priorProfile?: CapabilitySnapshot
+}
+
+// ── 三层能力快照（报告生成时聚合的历史能力先验）──
+
+export type CapabilitySnapshot = {
+  schemaVersion: string
+  collectedAt: string
+  userId: string | null
+  source: string
+  rules: string[]
+  layers: {
+    L1_ai_collaboration: {
+      available: boolean
+      dimensions: Record<string, {
+        inferredLevel: string
+        commonEvidenceStatus: string
+        avgConfidence: number
+        observationCount: number
+      }>
+      overallMode?: Record<string, number>
+      reportCount?: number
+      note?: string
+    }
+    L2_domain: {
+      available: boolean
+      domains: Array<{
+        domain: string
+        overallScore: number
+        stability: string
+        userVerifiedEvidenceCount: number
+        updatedAt: string | null
+      }>
+    }
+    L3_knowledge_points: {
+      available: boolean
+      domains: Array<{
+        domain: string
+        dimensions: Record<string, {
+          score: number
+          level: string
+          stability: string
+          evidenceCount: number
+        }>
+        updatedAt: string | null
+      }>
+    }
+  }
 }
 
 // ── 时间线草稿相关（三段式第二段） ──

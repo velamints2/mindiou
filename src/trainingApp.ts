@@ -1,4 +1,11 @@
 /**
+ * ⚠️ DEPRECATED — 旧训练系统前端（training.html 入口）
+ *
+ * 该文件属于已废弃的旧多页前端，不再维护。当前产品前端是
+ * web/src/ 下的 SPA（入口 https://demo.mindiou.top/mindiou/index.html#/app）。
+ * 训练路由请前往 web/src/（router.ts 的 'training' 路由）。
+ * 新功能不要加到这里。
+ *
  * 训练系统前端应用
  * 今日复训入口 + 认知欠条详情 + 历史时间线
  */

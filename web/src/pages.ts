@@ -37,6 +37,7 @@ import type { DeviceTokenInfo, GenesisIdentity } from './api'
 import { renderSiteFooter } from './navigation'
 import { isEnglish, t } from './i18n'
 import type {
+  CapabilitySnapshot,
   ClearanceReport,
   ClearanceSession,
   Confusion,
@@ -740,6 +741,11 @@ export async function renderReportPage(root: HTMLElement, reportId: string): Pro
     page.appendChild(notice)
   }
 
+  // 历史能力先验（三层能力快照，本次材料证据优先）
+  if (report.priorProfile) {
+    page.appendChild(renderPriorProfile(report.priorProfile))
+  }
+
   // 第 1 部分：AI 完成了什么
   page.appendChild(renderSection('一、AI 完成了什么', 'ai-completed',
     report.sections.aiCompleted.map(item => evidenceItem(item.item, item.evidence))))
@@ -781,6 +787,103 @@ export async function renderReportPage(root: HTMLElement, reportId: string): Pro
   if (report.confusionResolutions?.length) {
     page.appendChild(renderConfusionResolutions(report.confusionResolutions))
   }
+}
+
+/**
+ * 渲染三层能力快照（历史能力先验）。本次材料证据优先于先验。
+ */
+function renderPriorProfile(snapshot: CapabilitySnapshot): HTMLElement {
+  const section = el('section', 'section prior-profile-section')
+  section.appendChild(el('h2', 'section-heading', '历史能力先验'))
+  section.appendChild(el('p', 'section-desc',
+    '基于你的历史报告与清偿记录聚合的三层能力快照。本次材料证据优先于先验。'))
+
+  const l1 = snapshot.layers.L1_ai_collaboration
+  const l2 = snapshot.layers.L2_domain
+  const l3 = snapshot.layers.L3_knowledge_points
+
+  // L1 通用 AI 协作能力（可跨领域迁移）
+  const l1Block = el('div', 'prior-layer prior-l1')
+  l1Block.appendChild(el('h3', 'prior-layer-heading', 'L1 通用 AI 协作能力（可跨领域迁移）'))
+  if (!l1.available) {
+    l1Block.appendChild(el('p', 'prior-empty', '暂无历史报告数据。'))
+  } else {
+    if (l1.reportCount) {
+      l1Block.appendChild(el('p', 'prior-meta', `来自 ${l1.reportCount} 份历史报告`))
+    }
+    const dims = el('div', 'prior-dims')
+    for (const [key, val] of Object.entries(l1.dimensions || {})) {
+      const label = L1_DIM_LABELS[key] || key
+      dims.appendChild(el('span', 'prior-dim',
+        `${label}: ${val.inferredLevel}（${val.commonEvidenceStatus}，置信度 ${Math.round(val.avgConfidence * 100)}%，观察 ${val.observationCount} 次）`))
+    }
+    l1Block.appendChild(dims)
+  }
+  section.appendChild(l1Block)
+
+  // L2 领域能力（不跨领域推断）
+  const l2Block = el('div', 'prior-layer prior-l2')
+  l2Block.appendChild(el('h3', 'prior-layer-heading', 'L2 领域能力（不跨领域推断）'))
+  if (!l2.available || l2.domains.length === 0) {
+    l2Block.appendChild(el('p', 'prior-empty', '暂无领域能力画像。'))
+  } else {
+    const dims = el('div', 'prior-dims')
+    for (const d of l2.domains) {
+      const stabilityLabel = d.stability === 'stable' ? '稳定' : '一次性'
+      dims.appendChild(el('span', 'prior-dim',
+        `${d.domain}: ${d.overallScore}（${stabilityLabel}，user_verified ${d.userVerifiedEvidenceCount} 条）`))
+    }
+    l2Block.appendChild(dims)
+  }
+  section.appendChild(l2Block)
+
+  // L3 具体知识点（费曼卡片训练层）
+  const l3Block = el('div', 'prior-layer prior-l3')
+  l3Block.appendChild(el('h3', 'prior-layer-heading', 'L3 具体知识点（费曼卡片训练层）'))
+  if (!l3.available || l3.domains.length === 0) {
+    l3Block.appendChild(el('p', 'prior-empty', '暂无知识点深度画像。'))
+  } else {
+    for (const d of l3.domains) {
+      const domainBlock = el('div', 'prior-knowledge-domain')
+      domainBlock.appendChild(el('p', 'prior-knowledge-domain-name', d.domain))
+      const dims = el('div', 'prior-dims')
+      for (const [dim, val] of Object.entries(d.dimensions || {})) {
+        const dimLabel = L3_DIM_LABELS[dim] || dim
+        const stabilityLabel = val.stability === 'stable' ? '稳定' : '一次性'
+        dims.appendChild(el('span', `prior-dim ${val.stability === 'stable' ? 'is-stable' : 'is-one-shot'}`,
+          `${dimLabel}: ${val.score}/${val.level}（${stabilityLabel}，证据 ${val.evidenceCount} 条）`))
+      }
+      domainBlock.appendChild(dims)
+      l3Block.appendChild(domainBlock)
+    }
+  }
+  section.appendChild(l3Block)
+
+  if (Array.isArray(snapshot.rules) && snapshot.rules.length > 0) {
+    const rules = el('ul', 'prior-rules')
+    for (const rule of snapshot.rules.slice(0, 4)) {
+      rules.appendChild(el('li', undefined, rule))
+    }
+    section.appendChild(rules)
+  }
+
+  return section
+}
+
+const L1_DIM_LABELS: Record<string, string> = {
+  productProblemFraming: '问题定义',
+  aiAgentSteering: 'AI 指挥',
+  systemMentalModel: '系统心智模型',
+  technicalDecisionComprehension: '技术决策理解',
+  validationAndQualityJudgment: '验证与质量判断'
+}
+
+const L3_DIM_LABELS: Record<string, string> = {
+  conceptualUnderstanding: '概念理解',
+  causalExplanation: '因果解释',
+  practicalReproduction: '实践复现',
+  boundariesAndRisks: '边界与风险',
+  transferAbility: '迁移能力'
 }
 
 function renderConfusionResolutions(resolutions: ConfusionResolution[]): HTMLElement {
