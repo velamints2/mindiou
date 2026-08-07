@@ -144,6 +144,32 @@ console.log(`[fill] 验证今日到期 review tasks: ${dueReviews.length} 条`);
 // ── 项目记忆数据 ──
 const PROJECT_ID = "mindiou-web";
 
+// 7.5 创建功能任务（幂等：按标题去重），供项目结构树分组
+// sessionsData 中的 workItemId 是提示键，映射到真实 work item id
+const mainWorkItemsData = [
+  { hint: "wi-auth", title: "登录与鉴权", summary: "注册登录、HttpOnly Cookie 会话与令牌撤销", type: "security", status: "verified" },
+  { hint: "wi-redeem", title: "激活码兑换", summary: "条件更新与唯一约束防并发重复兑换", type: "feature", status: "verified" },
+  { hint: "wi-migration", title: "SQLite 迁移", summary: "JSON 持久化迁移到 SQLite WAL 模式", type: "refactor", status: "verified" }
+];
+const mainWorkItemIdByHint = new Map();
+{
+  const existingMainWorkItems = projectMemoryStore.listWorkItems(PROJECT_ID, userId);
+  for (const wi of mainWorkItemsData) {
+    const found = existingMainWorkItems.find(w => w.title === wi.title);
+    if (found) { mainWorkItemIdByHint.set(wi.hint, found.id); continue; }
+    const created = projectMemoryStore.createWorkItem({
+      projectId: PROJECT_ID,
+      title: wi.title,
+      summary: wi.summary,
+      type: wi.type,
+      status: wi.status,
+      source: "user_created"
+    }, userId);
+    mainWorkItemIdByHint.set(wi.hint, created.id);
+    console.log(`[fill] 已创建功能任务: ${wi.title}`);
+  }
+}
+
 // 8. 创建 Agent Sessions（幂等：按 sourceFingerprint 去重）
 const sessionsData = [
   {
@@ -215,6 +241,16 @@ for (const sd of sessionsData) {
   createdSessions.push(session);
 }
 
+// 8.5 关联 session ↔ workItem（幂等 upsert），供结构树按功能任务分组
+createdSessions.forEach((session, index) => {
+  const hint = sessionsData[index]?.workItemId;
+  const workItemId = hint ? mainWorkItemIdByHint.get(hint) : null;
+  if (!workItemId) return;
+  try {
+    projectMemoryStore.linkSessionWorkItem(session.id, workItemId, { relation: "continued", source: "manual", confidence: 1 }, userId);
+  } catch { /* 关联已存在则忽略 */ }
+});
+
 // 9. 创建 Artifacts（幂等：按 artifactKey 自动 upsert）
 const artifactsData = [
   {
@@ -273,6 +309,16 @@ for (const ad of artifactsData) {
     } catch (err) {
       // 关联已存在则忽略
     }
+    // 关联 workItem 和 artifact（沿 session 的 workItem 归属）
+    const workItemId = mainWorkItemIdByHint.get(sessionsData[ad.sessionId]?.workItemId);
+    if (workItemId) {
+      try {
+        projectMemoryStore.linkWorkItemArtifact(workItemId, artifact.id, {
+          relation: ad.relation,
+          sourceSessionId: createdSessions[ad.sessionId].id
+        }, userId);
+      } catch { /* 关联已存在则忽略 */ }
+    }
   }
 }
 
@@ -329,6 +375,7 @@ for (const dd of decisionsData) {
   const decision = projectMemoryStore.createDecision({
     projectId: PROJECT_ID,
     sessionId: createdSessions[dd.sessionId]?.id || null,
+    workItemId: mainWorkItemIdByHint.get(sessionsData[dd.sessionId]?.workItemId) || null,
     title: dd.title,
     decision: dd.decision,
     rationale: dd.rationale,
@@ -369,7 +416,8 @@ const extraProjects = [
         implementationSummary: "实现单屏问题卡片 + 大字排版，切卡前清空旧反馈文本",
         outcomeSummary: "视口渲染完成，但未在真实眼镜上验证麦克风与手势延迟",
         keyTopics: ["G2", "固定视口", "清偿卡片"],
-        technologies: ["EvenHub SDK", "WebView"]
+        technologies: ["EvenHub SDK", "WebView"],
+        workItemIndex: 0
       },
       {
         sourceFingerprint: "demo-session-glasses-voice",
@@ -381,7 +429,8 @@ const extraProjects = [
         implementationSummary: "复用现有 STT 接口，短指令走导航、长语音走答案提交",
         outcomeSummary: "链路打通，但网络路由依赖手机伴侣，弱网表现未验证",
         keyTopics: ["STT", "语音作答", "指令导航"],
-        technologies: ["WebRTC", "STT API"]
+        technologies: ["WebRTC", "STT API"],
+        workItemIndex: 1
       }
     ],
     artifacts: [
@@ -422,7 +471,8 @@ const extraProjects = [
         implementationSummary: "实现 review-scheduler，依据掌握度与上次练习时间计算 nextReviewAt",
         outcomeSummary: "调度逻辑完成并接入今日复训页，间隔参数未做个体化校准",
         keyTopics: ["遗忘曲线", "间隔重复", "任务调度"],
-        technologies: ["Node.js", "SQLite"]
+        technologies: ["Node.js", "SQLite"],
+        workItemIndex: 0
       }
     ],
     artifacts: [
@@ -501,6 +551,16 @@ for (const pd of extraProjects) {
     projectSessions.push(session);
   }
 
+  // 关联 session ↔ workItem（幂等 upsert），供结构树按功能任务分组
+  projectSessions.forEach((session, index) => {
+    const workItemIndex = pd.sessions[index]?.workItemIndex;
+    const workItemId = workItemIndex != null ? workItemIds[workItemIndex] : null;
+    if (!workItemId) return;
+    try {
+      projectMemoryStore.linkSessionWorkItem(session.id, workItemId, { relation: "continued", source: "manual", confidence: 1 }, userId);
+    } catch { /* 关联已存在则忽略 */ }
+  });
+
   for (const ad of pd.artifacts) {
     const artifact = projectMemoryStore.upsertArtifact({
       projectId: project.id,
@@ -515,15 +575,28 @@ for (const pd of extraProjects) {
       try {
         projectMemoryStore.linkSessionArtifact(session.id, artifact.id, { relation: ad.relation }, userId);
       } catch { /* 关联已存在 */ }
+      // 关联 workItem ↔ artifact（沿 session 的 workItem 归属）
+      const workItemIndex = pd.sessions[ad.sessionIndex]?.workItemIndex;
+      const workItemId = workItemIndex != null ? workItemIds[workItemIndex] : null;
+      if (workItemId) {
+        try {
+          projectMemoryStore.linkWorkItemArtifact(workItemId, artifact.id, {
+            relation: ad.relation,
+            sourceSessionId: session.id
+          }, userId);
+        } catch { /* 关联已存在则忽略 */ }
+      }
     }
   }
 
   const projectDecisions = projectMemoryStore.listDecisions(project.id, userId);
   for (const dd of pd.decisions) {
     if (projectDecisions.some(d => d.title === dd.title)) continue;
+    const workItemIndex = pd.sessions[dd.sessionIndex]?.workItemIndex;
     projectMemoryStore.createDecision({
       projectId: project.id,
       sessionId: projectSessions[dd.sessionIndex]?.id || null,
+      workItemId: workItemIndex != null ? workItemIds[workItemIndex] || null : null,
       title: dd.title,
       decision: dd.decision,
       rationale: dd.rationale,

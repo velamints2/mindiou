@@ -71,6 +71,148 @@ function panel(title: string, body: HTMLElement): HTMLElement {
   return section
 }
 
+// ── ① Agent 会话时间线：竖轴 + 时间节点，按发生时间倒序 ──
+function renderSessionTimeline(sessions: Json[]): HTMLElement {
+  const wrap = el('div', 'pm-timeline')
+  if (!sessions.length) {
+    wrap.appendChild(el('p', 'project-memory-empty', '暂无会话记录'))
+    return wrap
+  }
+  const sorted = [...sessions].sort((a, b) =>
+    String(b.startedAt || b.createdAt || '').localeCompare(String(a.startedAt || a.createdAt || ''))
+  )
+  for (const session of sorted.slice(0, 12)) {
+    const item = el('div', 'pm-timeline-item')
+    item.appendChild(el('span', 'pm-timeline-dot'))
+    const content = el('div', 'pm-timeline-content')
+    content.appendChild(el('div', 'pm-timeline-date', dateLabel(session.startedAt || session.createdAt) + ' · ' + text(session.platform)))
+    const title = link(text(session.title || session.userIntentSummary), '#/agent-sessions/' + encodeURIComponent(session.id))
+    title.className = 'pm-timeline-title'
+    content.appendChild(title)
+    content.appendChild(el('p', 'pm-timeline-summary', text(session.implementationSummary)))
+    item.appendChild(content)
+    wrap.appendChild(item)
+  }
+  return wrap
+}
+
+// ── ② 项目结构树：项目 → 功能任务 → 会话/产出物/决策 层级缩进 ──
+function renderProjectTree(memory: Json, projectId: string): HTMLElement {
+  const wrap = el('div', 'pm-tree')
+  const workItems: Json[] = memory.workItems || []
+  const sessions: Json[] = memory.sessions || []
+  const artifacts: Json[] = memory.artifacts || []
+  const decisions: Json[] = memory.decisions || []
+  const sessionLinks: Json[] = memory.sessionWorkItemLinks || []
+  const artifactLinks: Json[] = memory.workItemArtifactLinks || []
+  // ownership 里带证据等级，按 id 合并到产出物
+  const ownershipByArtifactId = new Map<string, Json>()
+  for (const o of memory.ownership?.artifacts || []) ownershipByArtifactId.set(String(o.id), o)
+
+  if (!workItems.length && !sessions.length && !artifacts.length && !decisions.length) {
+    wrap.appendChild(el('p', 'project-memory-empty', '暂无内容，先导入一段 Agent 对话。'))
+    return wrap
+  }
+
+  const sessionIdsByWorkItem = new Map<string, Set<string>>()
+  for (const l of sessionLinks) {
+    if (!sessionIdsByWorkItem.has(String(l.workItemId))) sessionIdsByWorkItem.set(String(l.workItemId), new Set())
+    sessionIdsByWorkItem.get(String(l.workItemId))!.add(String(l.sessionId))
+  }
+  const artifactIdsByWorkItem = new Map<string, Set<string>>()
+  for (const l of artifactLinks) {
+    if (!artifactIdsByWorkItem.has(String(l.workItemId))) artifactIdsByWorkItem.set(String(l.workItemId), new Set())
+    artifactIdsByWorkItem.get(String(l.workItemId))!.add(String(l.artifactId))
+  }
+
+  const assignedSessionIds = new Set<string>()
+  const assignedArtifactIds = new Set<string>()
+  const assignedDecisionIds = new Set<string>()
+
+  const leafGroup = (label: string, nodes: HTMLElement[]): HTMLElement | null => {
+    if (!nodes.length) return null
+    const group = el('div', 'pm-tree-group')
+    group.appendChild(el('div', 'pm-tree-group-label', label + '（' + nodes.length + '）'))
+    for (const n of nodes.slice(0, 6)) group.appendChild(n)
+    if (nodes.length > 6) group.appendChild(el('div', 'pm-tree-more', `… 其余 ${nodes.length - 6} 条见功能任务详情`))
+    return group
+  }
+
+  for (const work of workItems) {
+    const itemSessions = sessions.filter(s => sessionIdsByWorkItem.get(String(work.id))?.has(String(s.id)))
+    const itemArtifacts = artifacts.filter(a => artifactIdsByWorkItem.get(String(work.id))?.has(String(a.id)))
+    const itemDecisions = decisions.filter(d => String(d.workItemId || '') === String(work.id))
+    itemSessions.forEach(s => assignedSessionIds.add(String(s.id)))
+    itemArtifacts.forEach(a => assignedArtifactIds.add(String(a.id)))
+    itemDecisions.forEach(d => assignedDecisionIds.add(String(d.id)))
+
+    const item = el('div', 'pm-tree-item')
+    const row = el('div', 'pm-tree-row')
+    const title = link(text(work.title), '#/projects/' + encodeURIComponent(projectId) + '/work-items/' + encodeURIComponent(work.id))
+    title.className = 'pm-tree-title'
+    row.appendChild(title)
+    row.appendChild(el('span', 'pm-tree-badge', workStatusLabel(work.status)))
+    row.appendChild(el('span', 'pm-tree-count', `${itemSessions.length} 会话 · ${itemArtifacts.length} 产出物 · ${itemDecisions.length} 决策`))
+    item.appendChild(row)
+
+    const children = el('div', 'pm-tree-children')
+    const sessionGroup = leafGroup('Agent 会话', itemSessions.map(s => {
+      const leaf = el('div', 'pm-tree-leaf')
+      const a = link(text(s.title || s.userIntentSummary), '#/agent-sessions/' + encodeURIComponent(s.id))
+      leaf.append(a, el('small', undefined, dateLabel(s.startedAt || s.createdAt)))
+      return leaf
+    }))
+    const artifactGroup = leafGroup('产出物', itemArtifacts.map(a => {
+      const leaf = el('div', 'pm-tree-leaf')
+      leaf.append(el('span', undefined, text(a.repositoryRelativePath || a.name)))
+      const own = ownershipByArtifactId.get(String(a.id))
+      if (own) leaf.append(el('span', 'pm-tree-badge', text(own.evidenceLevel) + ' · ' + ownershipStateLabel(own.ownershipState)))
+      return leaf
+    }))
+    const decisionGroup = leafGroup('技术决策', itemDecisions.map(d => {
+      const leaf = el('div', 'pm-tree-leaf')
+      leaf.append(el('span', undefined, text(d.title)), el('small', undefined, participationLabel(d.userParticipation)))
+      return leaf
+    }))
+    for (const g of [sessionGroup, artifactGroup, decisionGroup]) if (g) children.appendChild(g)
+    if (children.childElementCount) item.appendChild(children)
+    wrap.appendChild(item)
+  }
+
+  // 未归属内容：没有关联到任何功能任务的会话/产出物/决策
+  const orphanSessions = sessions.filter(s => !assignedSessionIds.has(String(s.id)))
+  const orphanArtifacts = artifacts.filter(a => !assignedArtifactIds.has(String(a.id)))
+  const orphanDecisions = decisions.filter(d => !assignedDecisionIds.has(String(d.id)))
+  if (orphanSessions.length || orphanArtifacts.length || orphanDecisions.length) {
+    const item = el('div', 'pm-tree-item pm-tree-orphan')
+    const row = el('div', 'pm-tree-row')
+    row.appendChild(el('span', 'pm-tree-title', '未归属内容'))
+    row.appendChild(el('span', 'pm-tree-count', `${orphanSessions.length} 会话 · ${orphanArtifacts.length} 产出物 · ${orphanDecisions.length} 决策`))
+    item.appendChild(row)
+    const children = el('div', 'pm-tree-children')
+    const sg = leafGroup('Agent 会话', orphanSessions.map(s => {
+      const leaf = el('div', 'pm-tree-leaf')
+      const a = link(text(s.title || s.userIntentSummary), '#/agent-sessions/' + encodeURIComponent(s.id))
+      leaf.append(a, el('small', undefined, dateLabel(s.startedAt || s.createdAt)))
+      return leaf
+    }))
+    const ag = leafGroup('产出物', orphanArtifacts.map(a => {
+      const leaf = el('div', 'pm-tree-leaf')
+      leaf.append(el('span', undefined, text(a.repositoryRelativePath || a.name)))
+      return leaf
+    }))
+    const dg = leafGroup('技术决策', orphanDecisions.map(d => {
+      const leaf = el('div', 'pm-tree-leaf')
+      leaf.append(el('span', undefined, text(d.title)), el('small', undefined, participationLabel(d.userParticipation)))
+      return leaf
+    }))
+    for (const g of [sg, ag, dg]) if (g) children.appendChild(g)
+    item.appendChild(children)
+    wrap.appendChild(item)
+  }
+  return wrap
+}
+
 function list(items: Json[], render: (item: Json, index: number) => HTMLElement): HTMLElement {
   const wrap = el('div', 'project-memory-list')
   if (!items.length) {
@@ -228,26 +370,8 @@ export async function renderProjectPage(root: HTMLElement, projectId: string): P
       root.replaceChildren()
       void renderProjectPage(root, projectId)
     })))
-    body.appendChild(panel('最近实现', list((memory.sessions || []).slice(0, 8), session => {
-      const item = el('article', 'project-memory-card')
-      item.append(link(text(session.title || session.userIntentSummary), '#/agent-sessions/' + encodeURIComponent(session.id)), el('p', undefined, text(session.implementationSummary)), el('small', undefined, text(session.platform) + ' · ' + dateLabel(session.createdAt)))
-      return item
-    })))
-    body.appendChild(panel('功能任务', list(memory.workItems || [], work => {
-      const item = el('article', 'project-memory-card')
-      item.append(link(text(work.title), '#/projects/' + encodeURIComponent(projectId) + '/work-items/' + encodeURIComponent(work.id)), el('p', undefined, workStatusLabel(work.status) + ' · ' + text(work.summary)))
-      return item
-    })))
-    body.appendChild(panel('关键决策', list((memory.decisions || []).slice(0, 8), decision => {
-      const item = el('article', 'project-memory-card')
-      item.append(el('strong', undefined, text(decision.title)), el('p', undefined, text(decision.decision)), el('small', undefined, '参与度：' + participationLabel(decision.userParticipation)))
-      return item
-    })))
-    body.appendChild(panel('项目所有权', list((memory.ownership?.artifacts || []).slice(0, 12), artifact => {
-      const item = el('article', 'project-memory-card')
-      item.append(el('strong', undefined, text(artifact.repositoryRelativePath || artifact.name)), el('span', 'project-memory-badge', text(artifact.evidenceLevel) + ' · ' + ownershipStateLabel(artifact.ownershipState)))
-      return item
-    })))
+    body.appendChild(panel('项目结构树', renderProjectTree(memory, projectId)))
+    body.appendChild(panel('实现时间线', renderSessionTimeline(memory.sessions || [])))
   } catch (error) {
     body.replaceChildren(el('div', 'error-box', error instanceof Error ? error.message : '加载失败'))
   }
