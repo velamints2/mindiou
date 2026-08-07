@@ -42,6 +42,27 @@ function projectTypeLabel(value: unknown): string {
 function projectStatusLabel(value: unknown): string {
   return PROJECT_STATUS_LABELS[String(value ?? '')] || text(value)
 }
+// 决策参与度与所有权确证状态中文映射
+const PARTICIPATION_LABELS: Record<string, string> = {
+  decided: '用户决定', approved: '已批准', accepted: '已接受', consulted: '已咨询', none: '未参与'
+}
+const OWNERSHIP_STATE_LABELS: Record<string, string> = {
+  owned: '已确证', verified: '已验证', unverified: '未确证', partial: '部分确证', unknown: '未知'
+}
+function participationLabel(value: unknown): string {
+  return PARTICIPATION_LABELS[String(value ?? '')] || text(value)
+}
+function ownershipStateLabel(value: unknown): string {
+  return OWNERSHIP_STATE_LABELS[String(value ?? '')] || text(value)
+}
+// ISO 时间 → 本地短格式（2026-08-07T11:51:51.485Z → 8月7日 19:51）
+function dateLabel(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return '—'
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return raw
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 
 function panel(title: string, body: HTMLElement): HTMLElement {
   const section = el('section', 'project-memory-panel')
@@ -139,7 +160,7 @@ export async function renderProjectListPage(root: HTMLElement): Promise<void> {
       const card = el('article', 'project-memory-card project-memory-project-card')
       card.appendChild(link(text(project.name), '#/projects/' + encodeURIComponent(project.id)))
       card.appendChild(el('p', undefined, projectTypeLabel(project.projectType) + ' · ' + projectStatusLabel(project.status)))
-      card.appendChild(el('small', undefined, '最近更新：' + text(project.updatedAt)))
+      card.appendChild(el('small', undefined, '最近更新：' + dateLabel(project.updatedAt)))
       return card
     })))
   } catch (error) {
@@ -209,7 +230,7 @@ export async function renderProjectPage(root: HTMLElement, projectId: string): P
     })))
     body.appendChild(panel('最近实现', list((memory.sessions || []).slice(0, 8), session => {
       const item = el('article', 'project-memory-card')
-      item.append(link(text(session.title || session.userIntentSummary), '#/agent-sessions/' + encodeURIComponent(session.id)), el('p', undefined, text(session.implementationSummary)), el('small', undefined, text(session.platform) + ' · ' + text(session.createdAt)))
+      item.append(link(text(session.title || session.userIntentSummary), '#/agent-sessions/' + encodeURIComponent(session.id)), el('p', undefined, text(session.implementationSummary)), el('small', undefined, text(session.platform) + ' · ' + dateLabel(session.createdAt)))
       return item
     })))
     body.appendChild(panel('功能任务', list(memory.workItems || [], work => {
@@ -219,12 +240,12 @@ export async function renderProjectPage(root: HTMLElement, projectId: string): P
     })))
     body.appendChild(panel('关键决策', list((memory.decisions || []).slice(0, 8), decision => {
       const item = el('article', 'project-memory-card')
-      item.append(el('strong', undefined, text(decision.title)), el('p', undefined, text(decision.decision)), el('small', undefined, '参与度：' + text(decision.userParticipation)))
+      item.append(el('strong', undefined, text(decision.title)), el('p', undefined, text(decision.decision)), el('small', undefined, '参与度：' + participationLabel(decision.userParticipation)))
       return item
     })))
     body.appendChild(panel('项目所有权', list((memory.ownership?.artifacts || []).slice(0, 12), artifact => {
       const item = el('article', 'project-memory-card')
-      item.append(el('strong', undefined, text(artifact.repositoryRelativePath || artifact.name)), el('span', 'project-memory-badge', text(artifact.evidenceLevel) + ' · ' + text(artifact.ownershipState)))
+      item.append(el('strong', undefined, text(artifact.repositoryRelativePath || artifact.name)), el('span', 'project-memory-badge', text(artifact.evidenceLevel) + ' · ' + ownershipStateLabel(artifact.ownershipState)))
       return item
     })))
   } catch (error) {
@@ -255,7 +276,7 @@ export async function renderWorkItemPage(root: HTMLElement, projectId: string, w
     })))
     body.appendChild(panel('关键决策', list(detail.decisions || [], decision => {
       const item = el('article', 'project-memory-card')
-      item.append(el('strong', undefined, text(decision.title)), el('p', undefined, text(decision.decision)), el('small', undefined, '用户参与：' + text(decision.userParticipation)))
+      item.append(el('strong', undefined, text(decision.title)), el('p', undefined, text(decision.decision)), el('small', undefined, '用户参与：' + participationLabel(decision.userParticipation)))
       return item
     })))
     const back = link('返回项目', '#/projects/' + encodeURIComponent(projectId))
@@ -275,7 +296,7 @@ export async function renderAgentSessionPage(root: HTMLElement, sessionId: strin
     const response = await projectMemoryRequest<{ detail: Json }>('/api/agent-sessions/' + encodeURIComponent(sessionId))
     const detail = response.detail
     page.querySelector('.page-title')!.textContent = text(detail.session.title || detail.session.platform)
-    page.querySelector('.project-memory-subtitle')!.textContent = text(detail.session.platform) + ' · ' + text(detail.session.createdAt)
+    page.querySelector('.project-memory-subtitle')!.textContent = text(detail.session.platform) + ' · ' + dateLabel(detail.session.createdAt)
     body.replaceChildren()
     body.appendChild(panel('用户想完成什么', el('p', undefined, text(detail.session.userIntentSummary))))
     body.appendChild(panel('Agent 实际做了什么', el('p', undefined, text(detail.session.implementationSummary))))
