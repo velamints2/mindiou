@@ -59,9 +59,14 @@ afterAll(async () => {
     await new Promise(resolve => setTimeout(resolve, 200));
     if (!serverProcess.killed) serverProcess.kill("SIGKILL");
   }
-  if (sttMock) await new Promise(resolve => sttMock.close(resolve));
+  if (sttMock) {
+    // mock 永不响应，被测进程的挂起连接会让 close() 一直等，
+    // 先强制断开所有连接再关闭，避免 afterAll 超时。
+    sttMock.closeAllConnections?.();
+    await new Promise(resolve => sttMock.close(resolve));
+  }
   await rm(TEST_DIR, { recursive: true, force: true });
-});
+}, 30000);
 
 describe("request id", () => {
   it("generates an x-request-id header when absent", async () => {
