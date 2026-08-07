@@ -1872,8 +1872,8 @@ export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: st
   }
 }
 
-// 训练阶段中文标签
-function stageLabel(stage: string): string {
+// 训练阶段中文标签（兼容后端 MasteryProfile 的 1-5 数字阶段）
+function stageLabel(stage: string | number): string {
   const labels: Record<string, string> = {
     initial_compensation: '初始补偿',
     delayed_recall: '延迟回忆',
@@ -1882,7 +1882,12 @@ function stageLabel(stage: string): string {
     error_detection: '错误检测',
     real_work_validation: '真实工作验证'
   }
-  return labels[stage] || stage
+  // 与后端 review-scheduler.stageFromNumber 对齐：1-based 数字
+  const byNumber = ['initial_compensation', 'delayed_recall', 'misconception_check', 'scenario_transfer', 'real_work_validation']
+  const key = typeof stage === 'number'
+    ? byNumber[Math.max(0, Math.min(stage - 1, byNumber.length - 1))]
+    : stage
+  return labels[key] || String(stage)
 }
 
 // 日期格式化

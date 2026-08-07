@@ -311,7 +311,8 @@ export type CognitiveDebt = {
 export type MasteryProfile = {
   cognitiveDebtId: string
   userId: string
-  currentStage: TrainingStage
+  // 后端存储为 1-5 数字（review-scheduler.stageFromNumber）
+  currentStage: TrainingStage | number
   overallMastery: number
   dimensionScores?: Record<string, number>
   // 后端按成功/失败分别计数，无 attemptCount 字段
