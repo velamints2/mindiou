@@ -98,6 +98,7 @@ import {
 } from "./project-ownership.js";
 import { generateModuleRecommendation, generateProjectRecommendations } from "./learning-orchestrator.js";
 import { seedOwnershipData } from "./ownership-seed.js";
+import { seedDemoAccountData } from "./demo-account-seed.js";
 import { reportEnvValidation } from "./env-validation.js";
 
 // 启动期环境验证：值非法时打印变量级错误并退出（绝不打印值）。
@@ -183,11 +184,35 @@ const ownershipStorePath = process.env.OWNERSHIP_STORE_PATH || "tmp/ownership-st
 const ownershipStore = createOwnershipStore(ownershipStorePath);
 await ownershipStore.load();
 
-// 初始化种子数据（幂等）
-try {
-  await seedOwnershipData(ownershipStore, trainingStore);
-} catch (seedError) {
-  console.warn(`Ownership seed failed (non-blocking): ${seedError.message}`);
+// 初始化种子数据（幂等）。配置了 DEMO_USERNAME/DEMO_PASSWORD 时，
+// 种子数据挂到演示账号真实 userId 下；否则保持原有 demo-user 行为。
+const demoEmail = process.env.DEMO_USERNAME || "";
+const demoPassword = process.env.DEMO_PASSWORD || "";
+if (demoEmail && demoPassword) {
+  try {
+    const { user: demoUser, created: demoCreated } = authStore.ensureDemoAccount({
+      email: demoEmail,
+      password: demoPassword,
+      name: "MindIOU 演示体验官"
+    });
+    await seedOwnershipData(ownershipStore, trainingStore, demoUser.id);
+    await seedDemoAccountData({
+      authStore,
+      mvp0Store,
+      trainingStore,
+      repaymentStore,
+      userId: demoUser.id
+    });
+    console.log(`[demo] 演示账号已${demoCreated ? "创建" : "就绪"}: ${demoEmail}`);
+  } catch (demoError) {
+    console.warn(`Demo account setup failed (non-blocking): ${demoError.message}`);
+  }
+} else {
+  try {
+    await seedOwnershipData(ownershipStore, trainingStore);
+  } catch (seedError) {
+    console.warn(`Ownership seed failed (non-blocking): ${seedError.message}`);
+  }
 }
 
 const learningCoachSystemPrompt = [
@@ -2744,9 +2769,19 @@ const server = createServer(async (req, res) => {
           ? reports.find(report => report.id === latestSession.reportId) || null
           : null;
         const latestSessionCard = latestSessionReport?.sections?.feynmanCards?.find(card => card.id === latestSession.cardId) || null;
+        // 已清偿口径合并：MVP-1 卡片 clearance 与认知清偿 V1 的 repaid gap
+        // 是同一笔债务的两种表示，按标题去重，避免“清偿后计数不变”。
+        const repaymentGapsForDashboard = repaymentStore.listGaps(user.id);
+        const repaidTitles = new Set(
+          repaymentGapsForDashboard
+            .filter(gap => gap.status === "repaid")
+            .map(gap => gap.title)
+            .filter(Boolean)
+        );
         const outstandingDebts = reports.flatMap(report =>
           (report.sections?.feynmanCards || [])
             .filter(card => !["provisionally_cleared"].includes(card.clearance?.status))
+            .filter(card => !repaidTitles.has(card.target || card.prompt || ""))
             .map(card => ({
               reportId: report.id,
               cardId: card.id,
@@ -2755,6 +2790,15 @@ const server = createServer(async (req, res) => {
               locale: report.locale || "zh-CN"
             }))
         ).slice(0, 12);
+        const clearedCardTitles = new Set();
+        for (const report of reports) {
+          for (const card of report.sections?.feynmanCards || []) {
+            if (card.clearance?.status === "provisionally_cleared") {
+              clearedCardTitles.add(card.target || card.prompt || "Cognitive debt");
+            }
+          }
+        }
+        const repaidCount = new Set([...repaidTitles, ...clearedCardTitles]).size;
         const activeSession = sessions.find(session => session.state !== "ended") || null;
         const activeCard = activeSession
           ? reports.find(report => report.id === activeSession.reportId)?.sections?.feynmanCards?.find(card => card.id === activeSession.cardId)
@@ -2765,6 +2809,7 @@ const server = createServer(async (req, res) => {
             reportCount: reports.length,
             latestReport: latestReport ? { ...latestReport, display: deriveReportDisplay(latestReport) } : null,
             outstandingDebts,
+            repaidCount,
             latestSession: latestSession ? {
               ...publicSession(latestSession, { revealScaffold: latestSession.attempts?.length > 0 }),
               reportDisplay: latestSessionReport ? deriveReportDisplay(latestSessionReport) : null,

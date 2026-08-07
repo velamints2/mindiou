@@ -502,6 +502,7 @@ export type DashboardSummary = {
     status: string
     locale?: string
   }>
+  repaidCount?: number
   latestSession: (ClearanceSession & {
     reportDisplay?: { title: string; domain: string } | null
     cardTitle?: string

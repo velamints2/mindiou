@@ -15,6 +15,7 @@ export type DangerousGap = {
   gap: string
   whyDangerous: string
   evidence: string
+  surfaceSignals?: string[]
 }
 
 export type CognitiveStructure = {
@@ -36,6 +37,14 @@ export type FeynmanCard = {
   userAnswer: string
   aiFollowUp: string
   answeredAt: string | null
+  clearance?: {
+    sessionId: string
+    status: string
+    sourceReviewRequired?: boolean
+    endedAt?: string
+    nextRecommendation?: string
+    remainingGaps?: string[]
+  }
 }
 
 export type NextAction = {

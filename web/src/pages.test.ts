@@ -48,7 +48,8 @@ vi.mock("./api", () => ({
       continuable: null
     }
   }),
-  fetchSession: vi.fn()
+  fetchSession: vi.fn(),
+  getRepaymentProfile: vi.fn().mockResolvedValue({ ok: true, profiles: [] })
 }));
 
 // Mock router navigate

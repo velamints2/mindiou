@@ -21,6 +21,7 @@ import {
   generateReport,
   generateTimeline,
   getAccessToken,
+  getRepaymentProfile,
   listDeviceTokens,
   login,
   logoutAuth,
@@ -43,6 +44,7 @@ import type {
   ConfusionResolution,
   Draft,
   FeynmanCard,
+  RepaymentProfile,
   ReviewTask,
   SubmitReviewResponse,
   TimelineStep
@@ -138,6 +140,45 @@ function stepIndicator(active: 1 | 2 | 3): HTMLElement {
     wrap.appendChild(item)
   }
   return wrap
+}
+
+// 能力画像卡片：按领域展示五维能力得分
+const PROFILE_DOMAIN_LABELS: Record<string, string> = {
+  'web-development': 'Web 开发',
+  'system-architecture': '系统架构',
+  general: '通用领域'
+}
+const PROFILE_DIMENSION_LABELS: Record<string, string> = {
+  conceptualUnderstanding: '概念理解',
+  causalExplanation: '因果解释',
+  practicalReproduction: '实践复现',
+  boundariesAndRisks: '边界与风险',
+  transferAbility: '迁移能力'
+}
+
+function renderCapabilityProfileCard(profile: RepaymentProfile): HTMLElement {
+  const card = el('article', 'profile-card')
+  const head = el('div', 'profile-card-head')
+  head.appendChild(el('strong', 'profile-card-domain', PROFILE_DOMAIN_LABELS[profile.domain] || profile.domain))
+  head.appendChild(el('span', 'profile-card-updated', `更新于 ${new Date(profile.updatedAt).toLocaleDateString('zh-CN')}`))
+  card.appendChild(head)
+  const dims = el('div', 'profile-dims')
+  for (const [key, label] of Object.entries(PROFILE_DIMENSION_LABELS)) {
+    const dim = profile.dimensions?.[key]
+    if (!dim) continue
+    const row = el('div', 'profile-dim-row')
+    row.appendChild(el('span', 'profile-dim-label', label))
+    const meter = el('div', 'profile-dim-meter')
+    const fill = el('div', 'profile-dim-fill')
+    fill.style.width = `${Math.max(0, Math.min(100, dim.score))}%`
+    meter.appendChild(fill)
+    row.appendChild(meter)
+    row.appendChild(el('span', 'profile-dim-score', `${dim.score} · ${dim.level}`))
+    dims.appendChild(row)
+  }
+  card.appendChild(dims)
+  card.appendChild(el('p', 'profile-card-note', '随每次清偿与复训持续更新，反映系统对你的长期了解。'))
+  return card
 }
 
 // ── 登录页 ──
@@ -366,6 +407,10 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
     debtMetric.appendChild(el('strong', 'dashboard-metric-value', String(data.outstandingDebts.length)))
     debtMetric.appendChild(el('span', 'dashboard-metric-label', t('尚未清偿', 'Outstanding debts')))
     metrics.appendChild(debtMetric)
+    const repaidMetric = el('article', 'dashboard-metric')
+    repaidMetric.appendChild(el('strong', 'dashboard-metric-value', String(data.repaidCount ?? 0)))
+    repaidMetric.appendChild(el('span', 'dashboard-metric-label', t('已清偿', 'Repaid')))
+    metrics.appendChild(repaidMetric)
     dashboardBody.appendChild(metrics)
 
     const grid = el('div', 'dashboard-grid')
@@ -426,6 +471,31 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
       continuation.appendChild(continueBtn)
       dashboardBody.appendChild(continuation)
     }
+
+    // 能力画像：随清偿与复训积累，展示系统对用户的长期了解
+    const profileSection = el('section', 'dashboard-profile')
+    profileSection.appendChild(el('h3', 'dashboard-section-title', t('我的能力画像', 'My capability profile')))
+    const profileBody = el('div', 'dashboard-profile-body')
+    profileBody.appendChild(loading(t('正在加载能力画像…', 'Loading capability profile…')))
+    profileSection.appendChild(profileBody)
+    dashboardBody.appendChild(profileSection)
+    void getRepaymentProfile().then(res => {
+      clear(profileBody)
+      const profiles = res.ok ? res.profiles || [] : []
+      if (!profiles.length) {
+        profileBody.appendChild(el('p', 'dashboard-empty', t(
+          '完成几次清偿作答后，这里会逐渐形成你的长期能力画像。',
+          'After a few repayment attempts, your long-term capability profile will form here.'
+        )))
+        return
+      }
+      for (const profile of profiles) {
+        profileBody.appendChild(renderCapabilityProfileCard(profile))
+      }
+    }).catch(() => {
+      clear(profileBody)
+      profileBody.appendChild(el('p', 'dashboard-empty', t('能力画像加载失败', 'Could not load capability profile')))
+    })
   } catch {
     clear(dashboardBody)
     dashboardBody.appendChild(errorBox(t('加载失败，请重试', 'Could not load your dashboard. Try again.')))
@@ -854,12 +924,18 @@ function renderCard(reportId: string, card: FeynmanCard): HTMLElement {
   if (card.target) node.appendChild(el('p', 'card-target', card.target))
   node.appendChild(el('p', 'card-prompt', card.prompt))
   if (card.answeredAt) node.appendChild(el('span', 'card-badge card-answered', '已尝试'))
+  if (card.clearance?.status === 'provisionally_cleared') {
+    node.appendChild(el('span', 'card-badge card-cleared', '已清偿'))
+  }
 
   const btn = el('button', 'btn btn-primary card-start-btn', '开始清偿')
   btn.onclick = async () => {
     node.querySelector('.error-inline')?.remove()
     btn.disabled = true
     btn.textContent = '正在创建会话…'
+    // 创建会话需要大模型生成清偿问题与评估脚手架，耗时较长，给出明确加载提示
+    const overlay = spinnerOverlay('AI 正在生成清偿问题与评估标准，通常需要 10-30 秒…')
+    document.body.appendChild(overlay)
     try {
       const res = await createSession(reportId, card.id)
       rememberSessionId(res.session.id)
@@ -871,6 +947,8 @@ function renderCard(reportId: string, card: FeynmanCard): HTMLElement {
       const errNode = el('p', 'error-inline', msg)
       errNode.setAttribute('role', 'alert')
       node.appendChild(errNode)
+    } finally {
+      overlay.remove()
     }
   }
   node.appendChild(btn)
@@ -903,10 +981,56 @@ export async function renderSessionPage(root: HTMLElement, sessionId: string): P
   }
 
   clear(page)
-  drawSession(page, session)
+  await drawSession(page, session)
 }
 
-function drawSession(page: HTMLElement, session: ClearanceSession): void {
+// 欠条来源上下文：告诉用户这笔认知欠条是在哪段 AI 协作中、因为什么表现被识别的
+async function renderDebtContext(session: ClearanceSession): Promise<HTMLElement | null> {
+  if (!session.reportId) return null
+  let report: ClearanceReport
+  try {
+    const res = await fetchReport(session.reportId)
+    report = res.report
+  } catch {
+    return null
+  }
+  const card = report.sections?.feynmanCards?.find(c => c.id === session.cardId) || null
+  const target = card?.target || session.clearanceQuestion || ''
+  const gaps = report.sections?.dangerousGaps || []
+  const gap = gaps.find(g => g.title === target)
+    || gaps.find(g => target && (target.includes(g.title || '') || (g.title || '').includes(target)))
+    || null
+
+  const box = el('section', 'debt-context')
+  box.appendChild(el('h3', 'debt-context-heading', '这笔欠条是在哪里产生的'))
+
+  const scene = el('p', 'debt-context-scene')
+  const artifactTitle = report.analysis?.artifactTitle || '一次 AI 协作'
+  const when = report.createdAt ? new Date(report.createdAt).toLocaleString('zh-CN') : ''
+  scene.textContent = `来自报告《${artifactTitle}》${when ? `（${when}）` : ''}。当时 AI 帮你完成了这项工作，而这个理解环节被它代劳了。`
+  box.appendChild(scene)
+
+  if (gap?.surfaceSignals?.length) {
+    const signals = el('div', 'debt-context-signals')
+    signals.appendChild(el('p', 'debt-context-sub', '当时的表现（系统据此识别出这笔欠条）：'))
+    const ul = el('ul', 'debt-context-signal-list')
+    for (const s of gap.surfaceSignals.slice(0, 4)) ul.appendChild(el('li', undefined, s))
+    signals.appendChild(ul)
+    box.appendChild(signals)
+  }
+
+  if (gap?.whyDangerous) {
+    box.appendChild(el('p', 'debt-context-why', `为什么值得清偿：${gap.whyDangerous}`))
+  }
+
+  const confusions = report.input?.confusions || []
+  if (confusions.length) {
+    box.appendChild(el('p', 'debt-context-confusion', `你当时标注的困惑：${confusions[0].text}`))
+  }
+  return box
+}
+
+async function drawSession(page: HTMLElement, session: ClearanceSession): Promise<void> {
   clear(page)
 
   // 头部
@@ -932,6 +1056,10 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
     page.appendChild(el('div', 'notice notice-fallback',
       '当前为策展备用模式，研究来源为预设材料'))
   }
+
+  // 欠条来源上下文（产生场景 + 当时表现）
+  const contextBox = await renderDebtContext(session)
+  if (contextBox) page.appendChild(contextBox)
 
   // 清偿问题
   const questionBox = el('section', 'session-question')
@@ -1007,7 +1135,7 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
       // 重新拉取会话状态后重绘（确保最新 scaffold/attempts）
       const fresh = await fetchSession(session.id)
       clear(page)
-      drawSession(page, fresh.session)
+      await drawSession(page, fresh.session)
     } catch (err) {
       status.textContent = err instanceof Error ? err.message : '提交失败，请重试'
     } finally {
@@ -1026,9 +1154,10 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
     try {
       const res = await endSession(session.id)
       clear(page)
-      drawSession(page, res.session)
+      await drawSession(page, res.session)
+      // 创世身份以弹出层呈现，非常驻页面；关闭后停留在清偿结果页
       if (res.genesisIdentity?.activatedAt) {
-        page.appendChild(renderGenesisIdentityChoice(res.genesisIdentity as GenesisIdentity))
+        showGenesisIdentityModal(res.genesisIdentity as GenesisIdentity)
       }
     } catch (err) {
       status.textContent = err instanceof Error ? err.message : '结束会话失败'
@@ -1079,6 +1208,29 @@ function renderGenesisIdentityChoice(identity: GenesisIdentity): HTMLElement {
   }
   panel.append(save, status)
   return panel
+}
+
+// 创世身份弹出层：清偿结束后一次性展示，可关闭，不常驻页面
+function showGenesisIdentityModal(identity: GenesisIdentity): void {
+  document.querySelector('.modal-overlay')?.remove()
+  const overlay = el('div', 'modal-overlay')
+  overlay.setAttribute('role', 'dialog')
+  overlay.setAttribute('aria-modal', 'true')
+  const dialog = el('div', 'modal-dialog')
+  const close = el('button', 'modal-close', '×')
+  close.setAttribute('aria-label', t('关闭', 'Close'))
+  close.onclick = () => overlay.remove()
+  dialog.appendChild(close)
+  dialog.appendChild(renderGenesisIdentityChoice(identity))
+  const later = el('button', 'btn btn-ghost', t('稍后再说', 'Maybe later'))
+  later.onclick = () => overlay.remove()
+  dialog.appendChild(later)
+  overlay.appendChild(dialog)
+  // 点击遮罩空白处关闭
+  overlay.onclick = (event) => {
+    if (event.target === overlay) overlay.remove()
+  }
+  document.body.appendChild(overlay)
 }
 
 export async function renderGenesisPage(root: HTMLElement): Promise<void> {
@@ -1351,7 +1503,7 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
   root.appendChild(page)
 
   try {
-    const data = await fetchTodayTraining()
+    const [data, debtsData] = await Promise.all([fetchTodayTraining(), fetchTrainingDebts()])
     clear(page)
     page.appendChild(header)
     page.appendChild(intro)
@@ -1367,40 +1519,76 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
       empty.appendChild(el('p', 'empty-title', '今天没有复训任务'))
       empty.appendChild(el('p', 'empty-desc', '完成新的清偿后，系统会自动生成复训任务。'))
       page.appendChild(empty)
-      return
-    }
-
-    const list = el('div', 'task-list')
-    for (const task of data.tasks) {
-      const card = el('div', 'task-card')
-      card.appendChild(el('div', 'task-stage', stageLabel(task.trainingStage)))
-      card.appendChild(el('p', 'task-prompt', task.prompt))
-      const meta = el('div', 'task-meta')
-      meta.appendChild(el('span', 'task-due', `到期：${formatDate(task.dueAt)}`))
-      card.appendChild(meta)
-      const btn = el('button', 'btn btn-primary', '开始复训')
-      btn.onclick = async () => {
-        btn.disabled = true
-        btn.textContent = '正在启动…'
-        try {
-          const result = await startReviewTask(task.id)
-          if (result.ok) {
-            await renderReviewSubmitForm(page, task)
-          } else {
+    } else {
+      const list = el('div', 'task-list')
+      for (const task of data.tasks) {
+        const card = el('div', 'task-card')
+        card.appendChild(el('div', 'task-stage', stageLabel(task.trainingStage)))
+        card.appendChild(el('p', 'task-prompt', task.prompt))
+        const meta = el('div', 'task-meta')
+        meta.appendChild(el('span', 'task-due', `到期：${formatDate(task.dueAt)}`))
+        card.appendChild(meta)
+        const btn = el('button', 'btn btn-primary', '开始复训')
+        btn.onclick = async () => {
+          btn.disabled = true
+          btn.textContent = '正在启动…'
+          try {
+            const result = await startReviewTask(task.id)
+            if (result.ok) {
+              await renderReviewSubmitForm(page, task)
+            } else {
+              btn.disabled = false
+              btn.textContent = '开始复训'
+              alert(result.error || '启动失败')
+            }
+          } catch (e) {
             btn.disabled = false
             btn.textContent = '开始复训'
-            alert(result.error || '启动失败')
+            alert('网络错误')
           }
-        } catch (e) {
-          btn.disabled = false
-          btn.textContent = '开始复训'
-          alert('网络错误')
         }
+        card.appendChild(btn)
+        list.appendChild(card)
       }
-      card.appendChild(btn)
-      list.appendChild(card)
+      page.appendChild(list)
     }
-    page.appendChild(list)
+
+    // 长期掌握度追踪：随清偿与复训累积的每笔记欠条掌握画像
+    const profiles = data.profiles || []
+    if (profiles.length > 0) {
+      const debtTextById = new Map<string, string>()
+      if (debtsData.ok) {
+        for (const debt of debtsData.debts) debtTextById.set(debt.id, debt.gapText)
+      }
+      const tracking = el('section', 'mastery-tracking')
+      tracking.appendChild(el('h2', 'mastery-tracking-title', '长期掌握度追踪'))
+      tracking.appendChild(el('p', 'mastery-tracking-desc', '每条欠条的掌握度随清偿与复训持续累积，按遗忘曲线安排下次复习。'))
+      const grid = el('div', 'mastery-grid')
+      for (const profile of profiles) {
+        const card = el('article', 'mastery-card')
+        const debtText = debtTextById.get(profile.cognitiveDebtId) || '认知欠条'
+        card.appendChild(el('p', 'mastery-card-debt', debtText))
+        const meterRow = el('div', 'mastery-meter-row')
+        const meter = el('div', 'mastery-meter')
+        const fill = el('div', 'mastery-meter-fill')
+        const score = Math.max(0, Math.min(100, profile.overallMastery))
+        fill.style.width = `${score}%`
+        meter.appendChild(fill)
+        meterRow.appendChild(meter)
+        meterRow.appendChild(el('strong', 'mastery-score-value', String(profile.overallMastery)))
+        card.appendChild(meterRow)
+        const meta = el('div', 'mastery-card-meta')
+        meta.appendChild(el('span', undefined, stageLabel(profile.currentStage)))
+        meta.appendChild(el('span', undefined, `练习 ${profile.attemptCount} 次`))
+        if (profile.nextReviewAt) {
+          meta.appendChild(el('span', undefined, `下次复习：${formatDate(profile.nextReviewAt)}`))
+        }
+        card.appendChild(meta)
+        grid.appendChild(card)
+      }
+      tracking.appendChild(grid)
+      page.appendChild(tracking)
+    }
   } catch (e) {
     clear(page)
     page.appendChild(header)
@@ -1412,6 +1600,11 @@ async function renderReviewSubmitForm(page: HTMLElement, task: ReviewTask): Prom
   clear(page)
   const header = el('header', 'page-header')
   header.appendChild(el('h1', 'page-title', '复训中'))
+  const headerActions = el('div', 'header-actions')
+  const backBtn = el('button', 'btn btn-ghost btn-sm', '返回今日复训')
+  backBtn.onclick = () => navigate({ name: 'training' })
+  headerActions.appendChild(backBtn)
+  header.appendChild(headerActions)
   page.appendChild(header)
 
   page.appendChild(el('div', 'task-stage', stageLabel(task.trainingStage)))
@@ -1648,10 +1841,13 @@ export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: st
     if (data.reviews.length > 0) {
       const reviews = el('div', 'review-history')
       reviews.appendChild(el('h3', 'result-section-title', '复训任务'))
+      const reviewStatusLabels: Record<string, string> = {
+        pending: '待复习', in_progress: '进行中', completed: '已完成'
+      }
       for (const review of data.reviews) {
         const item = el('div', 'review-item')
         item.appendChild(el('span', 'review-stage', stageLabel(review.trainingStage)))
-        item.appendChild(el('span', `review-status status-${review.status}`, review.status))
+        item.appendChild(el('span', `review-status status-${review.status}`, reviewStatusLabels[review.status] || review.status))
         item.appendChild(el('span', 'review-due', formatDate(review.dueAt)))
         reviews.appendChild(item)
       }

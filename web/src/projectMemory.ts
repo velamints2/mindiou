@@ -23,6 +23,26 @@ function text(value: unknown, fallback = '—'): string {
   return result || fallback
 }
 
+// 项目记忆页状态/类型中文映射，避免中英混杂
+const WORK_STATUS_LABELS: Record<string, string> = {
+  detected: '已识别', in_progress: '进行中', implemented: '已实现', verified: '已验证', archived: '已归档'
+}
+const PROJECT_TYPE_LABELS: Record<string, string> = {
+  software: '软件项目', research: '研究', writing: '写作', design: '设计', other: '其他'
+}
+const PROJECT_STATUS_LABELS: Record<string, string> = {
+  active: '进行中', archived: '已归档'
+}
+function workStatusLabel(value: unknown): string {
+  return WORK_STATUS_LABELS[String(value ?? '')] || text(value)
+}
+function projectTypeLabel(value: unknown): string {
+  return PROJECT_TYPE_LABELS[String(value ?? '')] || text(value)
+}
+function projectStatusLabel(value: unknown): string {
+  return PROJECT_STATUS_LABELS[String(value ?? '')] || text(value)
+}
+
 function panel(title: string, body: HTMLElement): HTMLElement {
   const section = el('section', 'project-memory-panel')
   section.appendChild(el('h2', 'project-memory-panel-title', title))
@@ -118,7 +138,7 @@ export async function renderProjectListPage(root: HTMLElement): Promise<void> {
     body.replaceChildren(panel('我的项目', list(response.projects || [], project => {
       const card = el('article', 'project-memory-card project-memory-project-card')
       card.appendChild(link(text(project.name), '#/projects/' + encodeURIComponent(project.id)))
-      card.appendChild(el('p', undefined, text(project.projectType) + ' · ' + text(project.status)))
+      card.appendChild(el('p', undefined, projectTypeLabel(project.projectType) + ' · ' + projectStatusLabel(project.status)))
       card.appendChild(el('small', undefined, '最近更新：' + text(project.updatedAt)))
       return card
     })))
@@ -171,10 +191,15 @@ export async function renderProjectPage(root: HTMLElement, projectId: string): P
     page.querySelector('.project-memory-subtitle')!.textContent = text(memory.project.description, '长期追踪这个项目的 AI 协作和人类能力证据。')
     body.replaceChildren()
     const metrics = el('div', 'project-memory-metrics')
+    const countLabels: Record<string, string> = {
+      projects: '项目', workItems: '功能任务', sessions: 'Agent 会话',
+      artifacts: '产出物', decisions: '技术决策', cognitiveDebts: '认知欠条',
+      debts: '关联欠条', owned: '已确证模块', evidence: '证据', links: '关联'
+    }
     Object.entries(memory.counts || {}).forEach(([label, value]) => {
       const metric = el('article', 'project-memory-metric')
       metric.appendChild(el('strong', undefined, String(value)))
-      metric.appendChild(el('span', undefined, label))
+      metric.appendChild(el('span', undefined, countLabels[label] || label))
       metrics.appendChild(metric)
     })
     body.appendChild(metrics)
@@ -189,7 +214,7 @@ export async function renderProjectPage(root: HTMLElement, projectId: string): P
     })))
     body.appendChild(panel('功能任务', list(memory.workItems || [], work => {
       const item = el('article', 'project-memory-card')
-      item.append(link(text(work.title), '#/projects/' + encodeURIComponent(projectId) + '/work-items/' + encodeURIComponent(work.id)), el('p', undefined, text(work.status) + ' · ' + text(work.summary)))
+      item.append(link(text(work.title), '#/projects/' + encodeURIComponent(projectId) + '/work-items/' + encodeURIComponent(work.id)), el('p', undefined, workStatusLabel(work.status) + ' · ' + text(work.summary)))
       return item
     })))
     body.appendChild(panel('关键决策', list((memory.decisions || []).slice(0, 8), decision => {
@@ -216,7 +241,7 @@ export async function renderWorkItemPage(root: HTMLElement, projectId: string, w
     const response = await projectMemoryRequest<{ detail: Json }>('/api/work-items/' + encodeURIComponent(workItemId))
     const detail = response.detail
     page.querySelector('.page-title')!.textContent = text(detail.workItem.title)
-    page.querySelector('.project-memory-subtitle')!.textContent = text(detail.workItem.status) + ' · ' + text(detail.workItem.summary)
+    page.querySelector('.project-memory-subtitle')!.textContent = workStatusLabel(detail.workItem.status) + ' · ' + text(detail.workItem.summary)
     body.replaceChildren()
     body.appendChild(panel('相关 Agent 对话', list(detail.sessions || [], session => {
       const item = el('article', 'project-memory-card')

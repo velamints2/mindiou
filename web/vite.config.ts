@@ -17,7 +17,11 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": "http://localhost:8793",
-      "/health": "http://localhost:8793"
+      "/health": "http://localhost:8793",
+      "/mindiou-api": {
+        target: "http://localhost:8793",
+        rewrite: (path) => path.replace(/^\/mindiou-api/, "")
+      }
     }
   },
   preview: {
