@@ -155,18 +155,24 @@ if (!login.json.ok) throw new Error(`登录失败: ${JSON.stringify(login.json)}
 const cookie = (login.setCookie || "").split(";")[0];
 console.log(`登录成功: ${login.json.user?.email}`);
 
-// 2. 两份真实材料走完整管线
-const r1 = await runOne("Nginx 部署排障", MATERIAL_NGINX, [
-  "proxy_pass 结尾斜杠的路径替换规则我当时没搞懂，是照着改的",
-  "ProtectSystem=strict 下为什么还要 ReadWritePaths 我只是大概明白"
-], cookie);
-
-const r2 = await runOne("复训调度器", MATERIAL_TRAINING, [
-  "艾宾浩斯 1/3/7/15 天间隔适不适合程序知识，我没有质疑过",
-  "顺延逻辑和 next_review_at 相互作用会不会让欠条永远排不上，我没验证"
-], cookie);
+// 2. 两份真实材料走完整管线（ONLY=1|2 可只跑其中一份，用于限量重试）
+const ONLY = process.env.ONLY || "";
+let r1 = null;
+let r2 = null;
+if (ONLY !== "2") {
+  r1 = await runOne("Nginx 部署排障", MATERIAL_NGINX, [
+    "proxy_pass 结尾斜杠的路径替换规则我当时没搞懂，是照着改的",
+    "ProtectSystem=strict 下为什么还要 ReadWritePaths 我只是大概明白"
+  ], cookie);
+}
+if (ONLY !== "1") {
+  r2 = await runOne("复训调度器", MATERIAL_TRAINING, [
+    "艾宾浩斯 1/3/7/15 天间隔适不适合程序知识，我没有质疑过",
+    "顺延逻辑和 next_review_at 相互作用会不会让欠条永远排不上，我没验证"
+  ], cookie);
+}
 
 console.log("\n========================================");
 console.log("完成。报告 ID:");
-console.log(`  1. ${r1.id}`);
-console.log(`  2. ${r2.id}`);
+if (r1) console.log(`  1. ${r1.id}`);
+if (r2) console.log(`  2. ${r2.id}`);
