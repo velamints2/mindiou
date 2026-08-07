@@ -1596,13 +1596,25 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
   }
 }
 
+// 复训表单/结果页在 #/training 页内渲染，hash 不变时 navigate 不会触发重渲染，
+// 因此返回按钮需要原地重新渲染复训列表。
+async function backToTrainingList(page: HTMLElement): Promise<void> {
+  const root = page.parentElement as HTMLElement | null
+  if (!root) {
+    navigate({ name: 'training' })
+    return
+  }
+  clear(root)
+  await renderTrainingPage(root)
+}
+
 async function renderReviewSubmitForm(page: HTMLElement, task: ReviewTask): Promise<void> {
   clear(page)
   const header = el('header', 'page-header')
   header.appendChild(el('h1', 'page-title', '复训中'))
   const headerActions = el('div', 'header-actions')
   const backBtn = el('button', 'btn btn-ghost btn-sm', '返回今日复训')
-  backBtn.onclick = () => navigate({ name: 'training' })
+  backBtn.onclick = () => void backToTrainingList(page)
   headerActions.appendChild(backBtn)
   header.appendChild(headerActions)
   page.appendChild(header)
@@ -1689,7 +1701,7 @@ function renderReviewResult(page: HTMLElement, result: SubmitReviewResponse): vo
   page.appendChild(meta)
 
   const backBtn = el('button', 'btn btn-primary', '返回今日复训')
-  backBtn.onclick = () => navigate({ name: 'training' })
+  backBtn.onclick = () => void backToTrainingList(page)
   page.appendChild(backBtn)
 }
 
