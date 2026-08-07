@@ -1579,7 +1579,7 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
         card.appendChild(meterRow)
         const meta = el('div', 'mastery-card-meta')
         meta.appendChild(el('span', undefined, stageLabel(profile.currentStage)))
-        meta.appendChild(el('span', undefined, `练习 ${profile.attemptCount} 次`))
+        meta.appendChild(el('span', undefined, `练习 ${(profile.successfulAttempts ?? 0) + (profile.failedAttempts ?? 0)} 次`))
         if (profile.nextReviewAt) {
           meta.appendChild(el('span', undefined, `下次复习：${formatDate(profile.nextReviewAt)}`))
         }
@@ -1827,7 +1827,7 @@ export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: st
       mastery.appendChild(el('h3', 'result-section-title', '掌握度信息'))
       mastery.appendChild(el('p', 'mastery-score', `总体掌握度：${data.profile.overallMastery}`))
       mastery.appendChild(el('p', 'mastery-stage', `当前阶段：${stageLabel(data.profile.currentStage)}`))
-      mastery.appendChild(el('p', 'mastery-attempts', `练习次数：${data.profile.attemptCount}`))
+      mastery.appendChild(el('p', 'mastery-attempts', `练习次数：${(data.profile.successfulAttempts ?? 0) + (data.profile.failedAttempts ?? 0)}`))
       if (data.profile.nextReviewAt) {
         mastery.appendChild(el('p', 'mastery-next', `下次复习：${formatDate(data.profile.nextReviewAt)}`))
       }

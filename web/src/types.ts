@@ -314,7 +314,9 @@ export type MasteryProfile = {
   currentStage: TrainingStage
   overallMastery: number
   dimensionScores?: Record<string, number>
-  attemptCount: number
+  // 后端按成功/失败分别计数，无 attemptCount 字段
+  successfulAttempts?: number
+  failedAttempts?: number
   lastAttemptAt?: string
   nextReviewAt?: string
   relapseCount?: number
