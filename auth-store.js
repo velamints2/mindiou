@@ -138,6 +138,24 @@ export function createAuthStore(dbPath) {
     return { user: getUserById(user.id), sessionId };
   }
 
+  /**
+   * 幂等确保演示账号存在：邮箱已存在则返回该用户（不校验密码、不新建 session），
+   * 不存在则调用 register 创建。仅用于启动时预置评委演示账号。
+   */
+  function ensureDemoAccount({ email, password, name } = {}) {
+    const normalizedEmail = normalizeEmail(email);
+    const rawPassword = String(password || "");
+    if (!normalizedEmail || !rawPassword) {
+      throw new Error("Demo account email and password are required");
+    }
+    const existing = db.prepare("SELECT * FROM users WHERE email = ?").get(normalizedEmail);
+    if (existing) {
+      return { user: publicUser(existing), created: false };
+    }
+    const { user } = register(email, password, name);
+    return { user, created: true };
+  }
+
   function login(email, password) {
     const normalizedEmail = normalizeEmail(email);
     const row = db.prepare("SELECT * FROM users WHERE email = ?").get(normalizedEmail);
@@ -344,6 +362,7 @@ export function createAuthStore(dbPath) {
 
   return {
     register,
+    ensureDemoAccount,
     login,
     logout,
     getUserBySession,

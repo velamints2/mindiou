@@ -15,6 +15,7 @@ export type DangerousGap = {
   gap: string
   whyDangerous: string
   evidence: string
+  surfaceSignals?: string[]
 }
 
 export type CognitiveStructure = {
@@ -36,6 +37,14 @@ export type FeynmanCard = {
   userAnswer: string
   aiFollowUp: string
   answeredAt: string | null
+  clearance?: {
+    sessionId: string
+    status: string
+    sourceReviewRequired?: boolean
+    endedAt?: string
+    nextRecommendation?: string
+    remainingGaps?: string[]
+  }
 }
 
 export type NextAction = {
@@ -353,10 +362,13 @@ export type CognitiveDebt = {
 export type MasteryProfile = {
   cognitiveDebtId: string
   userId: string
-  currentStage: TrainingStage
+  // 后端存储为 1-5 数字（review-scheduler.stageFromNumber）
+  currentStage: TrainingStage | number
   overallMastery: number
   dimensionScores?: Record<string, number>
-  attemptCount: number
+  // 后端按成功/失败分别计数，无 attemptCount 字段
+  successfulAttempts?: number
+  failedAttempts?: number
   lastAttemptAt?: string
   nextReviewAt?: string
   relapseCount?: number

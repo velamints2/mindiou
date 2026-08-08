@@ -11,6 +11,7 @@ import {
   renderEmailVerificationPage,
   renderGenesisPage,
   renderLoginPage,
+  renderProfilePage,
   renderRegisterPage,
   renderReportPage,
   renderSessionPage,
@@ -188,6 +189,10 @@ async function render(route: Route): Promise<void> {
     case 'repayment-detail':
       await renderRepaymentDetailPage(app, route.gapId)
       trackRoute('repayment')
+      return
+    case 'profile':
+      await renderProfilePage(app)
+      trackRoute('profile')
       return
     case 'projects':
       await renderProjectListPage(app)
