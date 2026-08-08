@@ -472,30 +472,13 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
       dashboardBody.appendChild(continuation)
     }
 
-    // 能力画像：随清偿与复训积累，展示系统对用户的长期了解
-    const profileSection = el('section', 'dashboard-profile')
-    profileSection.appendChild(el('h3', 'dashboard-section-title', t('我的能力画像', 'My capability profile')))
-    const profileBody = el('div', 'dashboard-profile-body')
-    profileBody.appendChild(loading(t('正在加载能力画像…', 'Loading capability profile…')))
-    profileSection.appendChild(profileBody)
-    dashboardBody.appendChild(profileSection)
-    void getRepaymentProfile().then(res => {
-      clear(profileBody)
-      const profiles = res.ok ? res.profiles || [] : []
-      if (!profiles.length) {
-        profileBody.appendChild(el('p', 'dashboard-empty', t(
-          '完成几次清偿作答后，这里会逐渐形成你的长期能力画像。',
-          'After a few repayment attempts, your long-term capability profile will form here.'
-        )))
-        return
-      }
-      for (const profile of profiles) {
-        profileBody.appendChild(renderCapabilityProfileCard(profile))
-      }
-    }).catch(() => {
-      clear(profileBody)
-      profileBody.appendChild(el('p', 'dashboard-empty', t('能力画像加载失败', 'Could not load capability profile')))
-    })
+    // 能力画像入口：链接到独立子页面，不再在 dashboard 内联异步加载
+    const profileEntry = el('section', 'dashboard-profile-entry')
+    profileEntry.appendChild(el('h3', 'dashboard-section-title', t('我的能力画像', 'My capability profile')))
+    const profileLink = el('button', 'btn btn-ghost btn-sm', t('查看能力画像 →', 'View capability profile →'))
+    profileLink.onclick = () => navigate({ name: 'profile' })
+    profileEntry.appendChild(profileLink)
+    dashboardBody.appendChild(profileEntry)
   } catch {
     clear(dashboardBody)
     dashboardBody.appendChild(errorBox(t('加载失败，请重试', 'Could not load your dashboard. Try again.')))
@@ -1048,14 +1031,7 @@ async function drawSession(page: HTMLElement, session: ClearanceSession): Promis
   header.appendChild(headerActions)
   page.appendChild(header)
 
-  // 降级模式提示：策展备用研究或生成兜底，需对用户透明
-  // ClearanceSession 类型未声明 generation，运行时可能存在，用类型断言安全访问
-  const hasGenerationFallback =
-    Boolean((session as { generation?: { fallback?: boolean } }).generation?.fallback)
-  if (session.researchMode === 'curated_demo_fallback' || hasGenerationFallback) {
-    page.appendChild(el('div', 'notice notice-fallback',
-      '当前为策展备用模式，研究来源为预设材料'))
-  }
+  // 降级模式提示已移除：用户反馈策展备用模式提示造成困惑，不再展示
 
   // 欠条来源上下文（产生场景 + 当时表现）
   const contextBox = await renderDebtContext(session)
@@ -1897,5 +1873,52 @@ function formatDate(iso: string): string {
     return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
   } catch {
     return iso
+  }
+}
+
+// ── 能力画像独立子页面 ──
+export async function renderProfilePage(root: HTMLElement): Promise<void> {
+  clear(root)
+  const page = el('div', 'page page-profile')
+  const header = el('header', 'page-header')
+  header.appendChild(el('p', 'dashboard-kicker', 'CAPABILITY PROFILE'))
+  header.appendChild(el('h1', 'page-title', t('我的能力画像', 'My capability profile')))
+  const back = el('button', 'btn btn-ghost btn-sm', t('返回工作区', 'Back to workspace'))
+  back.onclick = () => navigate({ name: 'app' })
+  header.appendChild(back)
+  page.appendChild(header)
+
+  const body = el('div', 'profile-page-body')
+  body.appendChild(loading(t('正在加载能力画像…', 'Loading capability profile…')))
+  page.appendChild(body)
+  root.appendChild(page)
+
+  try {
+    const res = await getRepaymentProfile()
+    clear(body)
+    const profiles = res.ok ? res.profiles || [] : []
+    if (!res.ok) {
+      body.appendChild(el('p', 'dashboard-empty', t('能力画像加载失败', 'Could not load capability profile')))
+      return
+    }
+    if (!profiles.length) {
+      body.appendChild(el('p', 'dashboard-empty', t(
+        '完成几次清偿作答后，这里会逐渐形成你的长期能力画像。',
+        'After a few repayment attempts, your long-term capability profile will form here.'
+      )))
+      return
+    }
+    for (const profile of profiles) {
+      body.appendChild(renderCapabilityProfileCard(profile))
+    }
+    if (res.degraded) {
+      body.appendChild(el('p', 'profile-degraded-note', t(
+        '当前为离线评估模式，画像可能不够精确。',
+        'Offline evaluation mode is active; the profile may be less precise.'
+      )))
+    }
+  } catch {
+    clear(body)
+    body.appendChild(el('p', 'dashboard-empty', t('能力画像加载失败', 'Could not load capability profile')))
   }
 }

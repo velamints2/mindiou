@@ -23,6 +23,7 @@ export type Route =
   | { name: 'training-debt'; debtId: string }  // 产品区：认知欠条详情
   | { name: 'repayment' }            // 产品区：认知清偿 V1 列表
   | { name: 'repayment-detail'; gapId: string }  // 产品区：认知清偿欠条详情
+  | { name: 'profile' }              // 产品区：能力画像独立页
   | { name: 'projects' }
   | { name: 'project'; projectId: string }
   | { name: 'work-item'; projectId: string; workItemId: string }
@@ -74,6 +75,8 @@ export function parseRoute(): Route {
       return rest[0] ? { name: 'training-debt', debtId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     case 'repayment':
       return rest[0] ? { name: 'repayment-detail', gapId: decodeURIComponent(rest[0]) } : { name: 'repayment' }
+    case 'profile':
+      return { name: 'profile' }
     case 'projects':
       if (!rest[0]) return { name: 'projects' }
       if (rest[1] === 'work-items' && rest[2]) {
@@ -121,6 +124,7 @@ export function navigate(route: Route): void {
     case 'training': path = '/training'; break
     case 'training-debt': path = `/training-debt/${encodeURIComponent(route.debtId)}`; break
     case 'repayment': path = '/repayment'; break
+    case 'profile': path = '/profile'; break
     case 'projects': path = '/projects'; break
     case 'project': path = '/projects/' + encodeURIComponent(route.projectId); break
     case 'work-item': path = '/projects/' + encodeURIComponent(route.projectId) + '/work-items/' + encodeURIComponent(route.workItemId); break

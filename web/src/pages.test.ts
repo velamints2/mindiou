@@ -247,7 +247,7 @@ describe("renderReportPage", () => {
   });
 });
 
-// 策展备用模式降级通知：研究来源为预设材料，必须对用户透明
+// 策展备用模式降级通知已移除：用户反馈造成困惑
 describe("renderSessionPage", () => {
   let root: HTMLElement;
 
@@ -257,7 +257,7 @@ describe("renderSessionPage", () => {
     document.body.appendChild(root);
   });
 
-  it("shows fallback notice when session.researchMode is curated_demo_fallback", async () => {
+  it("does not show fallback notice for curated_demo_fallback mode", async () => {
     const fallbackSession = {
       id: "s-fallback-1",
       reportId: "r-1",
@@ -280,7 +280,6 @@ describe("renderSessionPage", () => {
     await renderSessionPage(root, "s-fallback-1");
 
     const notice = root.querySelector(".notice-fallback");
-    expect(notice).not.toBeNull();
-    expect(notice?.textContent).toContain("策展备用模式");
+    expect(notice).toBeNull();
   });
 });

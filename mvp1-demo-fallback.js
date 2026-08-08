@@ -41,8 +41,11 @@ export function createDemoResearchFallback(request, error) {
   const verification = /验证|验收|工具链|完整性/i.test(searchText);
   const rootCause = /根因|症状|缓解|restart|重启/i.test(searchText);
 
-  if (!serverIncident && !pageCache && !verification && !rootCause) {
-    throw error instanceof Error ? error : new Error("External research is unavailable");
+  // 仅当主题与服务器诊断演示样本强相关时才使用特定 fallback。
+  // "验证"/"根因"等词在非服务器主题中也会出现（如"我没验证"），
+  // 不能单独触发特定 fallback，必须叠加服务器上下文。
+  if (!serverIncident && !pageCache) {
+    return createGenericDemoFallback(request, error);
   }
 
   const commonSources = [
@@ -124,7 +127,7 @@ export function createDemoResearchFallback(request, error) {
     };
   }
 
-  if (rootCause && !serverIncident) {
+  if (rootCause) {
     return {
       researchMode: "curated_demo_fallback",
       rewrittenQuestion: "如何区分症状暂时缓解和真正的根因修复？",
@@ -222,5 +225,50 @@ export function createDemoAnswerFallback(input) {
     teaching: english ? "D-state and I/O wait are symptoms. A complete explanation needs a causal hypothesis, supporting evidence, and evidence that could falsify it." : "D 状态和 I/O wait 都是现象。完整解释需要提出原因、支持证据，以及能推翻该判断的结果。",
     nextQuestion: english ? "What evidence would distinguish a storage bottleneck, an Nginx problem, and an upstream service failure?" : "哪些证据可以区分存储瓶颈、Nginx 问题和上游服务故障？",
     recommendation: "continue"
+  };
+}
+
+// 通用 fallback：当欠条主题不属于服务器诊断演示样本时使用。
+// 使用实际卡片的 prompt 作为清偿问题，提供与欠条相关的最小 scaffold。
+function createGenericDemoFallback(request, error) {
+  const targetDebt = clean(request?.targetDebt || request?.originalQuestion || "认知欠条");
+  const originalQuestion = clean(request?.originalQuestion || targetDebt);
+  const dangerousGap = request?.dangerousGap;
+  const english = request?.locale === "en";
+
+  return {
+    researchMode: "curated_demo_fallback",
+    rewrittenQuestion: originalQuestion || targetDebt,
+    summary: english
+      ? "Curated fallback for a debt outside the server-diagnostics demo set; research is not live."
+      : "策展备用材料：该欠条不属于服务器诊断演示样本，研究非实时检索。",
+    sources: [{
+      id: "source-curated-fallback",
+      url: "https://en.wikipedia.org/wiki/Feynman_technique",
+      title: "Feynman technique — Wikipedia",
+      claim: english
+        ? "The Feynman technique tests understanding by asking the learner to explain a concept in simple terms and identify gaps."
+        : "费曼学习法通过让学习者用简单语言解释概念来检验理解，并识别知识盲区。"
+    }],
+    scaffold: [
+      {
+        id: "point-core-concept",
+        point: dangerousGap?.gap || targetDebt,
+        whyItMatters: dangerousGap?.whyDangerous || (english
+          ? "This gap was identified because the learner outsourced this understanding to AI."
+          : "这笔欠条被识别是因为学习者将此理解环节交给了 AI 代劳。"),
+        sourceIds: ["source-curated-fallback"]
+      },
+      {
+        id: "point-verification",
+        point: english
+          ? "A complete explanation should cover the mechanism, its boundary conditions, and how to verify it."
+          : "完整解释应覆盖机制原理、边界条件以及如何验证。",
+        whyItMatters: english
+          ? "Naming the mechanism alone does not prove understanding; boundaries and verification matter."
+          : "仅说出机制名称不足以证明理解，边界条件和验证方法同样重要。",
+        sourceIds: ["source-curated-fallback"]
+      }
+    ]
   };
 }

@@ -21,19 +21,44 @@ describe("MVP-1 public demo fallback", () => {
     expect(result.scaffold.every(point => point.sourceIds.length > 0)).toBe(true);
   });
 
-  it("does not fabricate research for unrelated debts", () => {
-    expect(() => createDemoResearchFallback({
+  it("returns a generic fallback for unrelated debts (not hardcoded server-diagnostics)", () => {
+    const result = createDemoResearchFallback({
       targetDebt: "Explain product-market fit.",
       originalQuestion: "What is PMF?"
-    }, new Error("offline"))).toThrow("offline");
+    }, new Error("offline"));
+
+    expect(result.researchMode).toBe("curated_demo_fallback");
+    // 通用 fallback 使用实际卡片 prompt 作为问题，而非硬编码服务器诊断问题
+    expect(result.rewrittenQuestion).toBe("What is PMF?");
+    expect(result.sources.length).toBeGreaterThanOrEqual(1);
+    expect(result.scaffold.length).toBeGreaterThanOrEqual(2);
+    expect(result.scaffold.every(point => point.sourceIds.length > 0)).toBe(true);
+  });
+
+  it("uses generic fallback for non-server debts that mention '验证' in passing", () => {
+    // 艾宾浩斯复训调度器欠条：evidence 含"我没验证"但主题与服务器诊断无关
+    const result = createDemoResearchFallback({
+      targetDebt: "顺延逻辑与 next_review_at 的交互",
+      originalQuestion: "顺延逻辑和 next_review_at 相互作用会不会让欠条永远排不上",
+      practiceEvidence: {
+        userContributed: ["用户事后反思'顺延逻辑和 next_review_at 相互作用会不会让欠条永远排不上，我没验证'"]
+      }
+    }, new Error("offline"));
+
+    expect(result.researchMode).toBe("curated_demo_fallback");
+    // 不应使用服务器诊断的硬编码问题
+    expect(result.rewrittenQuestion).not.toContain("哪些证据");
+    expect(result.rewrittenQuestion).not.toContain("D 状态");
+    // 应使用实际卡片 prompt
+    expect(result.rewrittenQuestion).toContain("顺延逻辑");
   });
 
   it.each([
-    ["Linux 内存管理中的 page cache 机制", "Page cache"],
-    ["验证修复完整性的工具链", "哪些证据"],
-    ["区分根因修复与症状缓解", "根因修复"]
-  ])("covers every card in the controlled server demo report: %s", (targetDebt, expected) => {
-    const result = createDemoResearchFallback({ targetDebt, originalQuestion: targetDebt }, new Error("offline"));
+    ["Linux 内存管理中的 page cache 机制", "Page cache", { aiCompleted: ["page cache 与 Linux 内存管理"] }],
+    ["验证修复完整性的工具链", "哪些证据", { decisions: ["重启 nginx 后验证修复是否完整"] }],
+    ["区分根因修复与症状缓解", "根因修复", { tradeoffs: ["nginx 重启只是症状缓解，需要区分根因修复"] }]
+  ])("covers every card in the controlled server demo report: %s", (targetDebt, expected, evidence) => {
+    const result = createDemoResearchFallback({ targetDebt, originalQuestion: targetDebt, practiceEvidence: evidence }, new Error("offline"));
     expect(result.researchMode).toBe("curated_demo_fallback");
     expect(result.rewrittenQuestion).toContain(expected);
     expect(result.sources.length).toBeGreaterThanOrEqual(3);

@@ -80,7 +80,6 @@ const translations: Record<string, string> = {
   , '作答历史': 'Answer history', '结束会话': 'End session', '正在生成最终结果…': 'Generating final result…'
   , '结束会话失败': 'Could not end the session', '会话加载失败': 'Could not load the session'
   , '会话已不存在，可能服务已重启。请返回报告重新开始。': 'This session is no longer available. Return to the report and start again.'
-  , '当前为策展备用模式，研究来源为预设材料': 'Curated fallback mode is active; research uses a predefined source set.'
   , 'AI 评价暂不可用，本次为本地评价结果，可稍后重试。': 'AI evaluation is temporarily unavailable. This result was produced locally; you can retry later.'
   , '今天没有复训任务': 'No review tasks today', '开始复训': 'Start review'
   , '认知欠条': 'Cognitive debts', '暂无认知欠条': 'No cognitive debts yet', '待清偿': 'Outstanding', '已清偿': 'Repaid'

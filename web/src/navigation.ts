@@ -18,7 +18,8 @@ export function renderPersistentNavigation(route: Route): void {
     ['#/', t('首页', 'Home'), 'landing', 'landing'],
     ['#/how-it-works', t('原理', 'How it works'), 'how-it-works', 'how-it-works'],
     ['#/genesis', t('创始档案', 'Genesis archive'), 'genesis', 'genesis'],
-    ['#/projects', t('项目记忆', 'Project memory'), 'projects', 'projects']
+    ['#/projects', t('项目记忆', 'Project memory'), 'projects', 'projects'],
+    ['#/profile', t('能力画像', 'Capability profile'), 'profile', 'profile']
   ]
   links.forEach(([href, label, _key, routeName]) => {
     const link = el('a', `site-nav-link ${route.name === routeName ? 'is-active' : ''}`, label) as HTMLAnchorElement
