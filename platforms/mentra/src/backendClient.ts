@@ -81,7 +81,7 @@ export class BackendError extends Error {
 }
 
 export interface BackendClientConfig {
-  /** 例：http://127.0.0.1:8793 或 https://114.67.169.78/mindiou-api */
+  /** 例：http://127.0.0.1:8793 或 https://demo.mindiou.top/mindiou-api（旧 IP 已弃用） */
   baseUrl: string;
   /** LEARNING_API_TOKEN；本地无鉴权部署可为空。 */
   token?: string;

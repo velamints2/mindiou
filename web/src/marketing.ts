@@ -5,6 +5,7 @@
 import { getAccessToken } from './api'
 import { el, navigate } from './router'
 import { renderSiteFooter } from './navigation'
+import { t } from './i18n'
 
 // ── 公共顶栏 ──
 
@@ -23,10 +24,13 @@ function renderPublicHeader(parent: HTMLElement, active: 'landing' | 'how-it-wor
   ;(navGenesis as HTMLAnchorElement).href = '#/genesis'
   const navTest = el('a', 'site-nav-link', '协作测试')
   ;(navTest as HTMLAnchorElement).href = '#/assessment'
+  const navProjects = el('a', 'site-nav-link', '项目记忆')
+  ;(navProjects as HTMLAnchorElement).href = '#/projects'
   nav.appendChild(navHome)
   nav.appendChild(navHow)
   nav.appendChild(navGenesis)
   nav.appendChild(navTest)
+  nav.appendChild(navProjects)
 
   // 右侧 CTA：已登录显示进入产品，未登录显示开始体验
   const ctaWrap = el('div', 'site-header-cta')
@@ -197,7 +201,7 @@ export function renderLandingPage(root: HTMLElement): void {
   const step1 = el('div', 'how-step')
   step1.appendChild(el('div', 'step-number', '1'))
   step1.appendChild(el('h3', 'step-title', '粘贴 AI 辅助材料'))
-  step1.appendChild(el('p', 'step-desc', 'ChatGPT 对话、AI 生成的方案、黑客松记录……任何一段 AI 帮你完成的工作。'))
+  step1.appendChild(el('p', 'step-desc', 'AI 协作对话、AI 生成的方案、黑客松记录……任何一段 AI 帮你完成的工作。'))
   steps.appendChild(step1)
 
   const step2 = el('div', 'how-step')
@@ -280,18 +284,18 @@ export function renderLandingPage(root: HTMLElement): void {
   // 首期计划宣传入口：001 期 7 天认知清债挑战
   const promo = el('section', 'landing-section landing-challenge-promo')
   const promoCopy = el('div', 'landing-challenge-copy')
-  promoCopy.appendChild(el('p', 'landing-kicker', '001 期 · 首期计划'))
-  promoCopy.appendChild(el('h2', 'section-heading', '7 天认知清债挑战'))
-  promoCopy.appendChild(el('p', 'landing-lead', '用一段真实的 AI 协作材料开始：发现欠条、亲自解释、延迟回忆、场景迁移。7 天，把 AI 代劳变成真正掌握。'))
+  promoCopy.appendChild(el('p', 'landing-kicker', t('001 期 · 首期计划', 'Cohort 001 · First program')))
+  promoCopy.appendChild(el('h2', 'section-heading', t('7 天认知清债挑战', '7-day cognitive-debt challenge')))
+  promoCopy.appendChild(el('p', 'landing-lead', t('用一段真实的 AI 协作材料开始：发现欠条、亲自解释、延迟回忆、场景迁移。7 天，把 AI 代劳变成真正掌握。', 'Start with one real AI-assisted artifact: find the debt, explain it yourself, recall it later, and transfer it to a new scenario. In 7 days, turn delegated work into real mastery.')))
   const promoActions = el('div', 'landing-challenge-actions')
-  const joinBtn = el('button', 'btn btn-primary btn-lg', '了解 001 期挑战')
+  const joinBtn = el('button', 'btn btn-primary btn-lg', t('了解 001 期挑战', 'Learn about Cohort 001'))
   joinBtn.onclick = () => navigate({ name: 'challenge', slug: '001' })
-  const testBtn = el('button', 'btn btn-ghost btn-lg', '先做免费协作测试')
+  const testBtn = el('button', 'btn btn-ghost btn-lg', t('先做免费协作测试', 'Try the free collaboration assessment'))
   testBtn.onclick = () => navigate({ name: 'assessment' })
   promoActions.appendChild(joinBtn)
   promoActions.appendChild(testBtn)
   promoCopy.appendChild(promoActions)
-  promoCopy.appendChild(el('p', 'landing-challenge-note', '首期筹备中 · 20 天开放期随报随学 · 个人 7 天周期 · 不限名额'))
+  promoCopy.appendChild(el('p', 'landing-challenge-note', t('首期筹备中 · 20 天开放期随报随学 · 个人 7 天周期 · 不限名额', 'Preparing for launch · 20-day enrollment window · 7-day personal cycle · no seat limit')))
   promo.appendChild(promoCopy)
   page.appendChild(promo)
 
@@ -314,11 +318,11 @@ export function renderLandingPage(root: HTMLElement): void {
   var banner = el("aside", "challenge-floating-banner")
   var bannerBody = el("div", "challenge-floating-body")
   var bannerText = el("div", "challenge-floating-text")
-  bannerText.appendChild(el("span", "challenge-floating-kicker", "001 期 · 首期计划"))
-  bannerText.appendChild(el("strong", "challenge-floating-title", "7 天认知清债挑战"))
+  bannerText.appendChild(el("span", "challenge-floating-kicker", t('001 期 · 首期计划', 'Cohort 001 · First program')))
+  bannerText.appendChild(el("strong", "challenge-floating-title", t('7 天认知清债挑战', '7-day cognitive-debt challenge')))
   bannerBody.appendChild(bannerText)
   bannerBody.appendChild(el("span", "challenge-floating-price", "¥29.9"))
-  var bannerBtn = el("a", "challenge-floating-btn", "了解详情")
+  var bannerBtn = el("a", "challenge-floating-btn", t('了解详情', 'Learn more'))
   bannerBtn.href = "#/challenge/001"
   bannerBody.appendChild(bannerBtn)
   banner.appendChild(bannerBody)

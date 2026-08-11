@@ -66,7 +66,7 @@ npm run api
 The competition package uses the public HTTPS backend:
 
 ```text
-https://114.67.169.78/mindiou-api
+https://demo.mindiou.top/mindiou-api
 ```
 
 It is pinned to one random-ID demonstration report and card, so the glasses do

@@ -18,6 +18,8 @@ import {
   type UserEvidenceItem
 } from './api'
 import { clear, el, navigate } from './router'
+import { buildProjectMemoryDemo, friendlyProjectError } from './projectMemoryDemo'
+import { t } from './i18n'
 
 // ── 状态标签映射 ──
 // 与后端 MODULE_STATUS_LABELS 保持一致，避免依赖后端返回的 statusLabel。
@@ -141,8 +143,8 @@ function loadingNode(message: string): HTMLElement {
   return el('div', 'loading', message)
 }
 
-function errorNode(message: string): HTMLElement {
-  return el('div', 'error-box', message)
+function errorNode(_message: string): HTMLElement {
+  return el('div', 'error-box', friendlyProjectError('项目记录暂时无法同步。'))
 }
 
 function emptyStateNode(message: string): HTMLElement {
@@ -176,6 +178,133 @@ function backButtonToApp(): HTMLElement {
   const btn = el('button', 'btn btn-ghost btn-sm', '← 返回工作区')
   btn.onclick = () => navigate({ name: 'app' })
   return btn
+}
+
+function demoBadge(): HTMLElement {
+  return el('span', 'project-memory-badge', '示范内容 · 不写入真实数据')
+}
+
+function demoOwnershipView(projectId: string, projectName = '项目示范视图'): ProjectOwnershipView {
+  const demo = buildProjectMemoryDemo({ id: projectId, name: projectName })
+  const work = demo.workItems[0]
+  const decision = demo.decisions[0]
+  const module = {
+    workItemId: work.id,
+    title: work.title,
+    status: 'needs_initial_understanding' as ModuleOwnershipStatus,
+    statusLabel: '缺少初步理解',
+    riskLevel: 'medium' as const,
+    importantDecisionCount: 1,
+    highestEvidenceLevel: 0,
+    highestEvidenceLevelLabel: 'E0 · 无证据',
+    relatedSessionCount: 1,
+    relatedArtifactCount: 1,
+    openDebtCount: 0,
+    highRiskDebtCount: 0,
+    missingEvidenceTypes: ['independent_explanation', 'scenario_transfer'],
+    ownershipGapType: 'needs_initial_understanding',
+    latestActivityAt: new Date().toISOString(),
+    demo: true
+  }
+  return {
+    ok: true,
+    project: { ...demo.project, name: projectName } as any,
+    summary: {
+      projectId,
+      importantDecisionCount: 1,
+      ownedDecisionCount: 0,
+      initialUnderstandingCount: 1,
+      missingVerificationCount: 0,
+      highRiskUnownedCount: 0,
+      moduleCount: 1,
+      ownedModuleCount: 0,
+      highRiskModuleCount: 0,
+      needsRealWorkModuleCount: 1,
+      ownershipCoverage: 0,
+      calculatedAt: new Date().toISOString(),
+      calculationVersion: 'demo'
+    },
+    modules: [module as any],
+    decisions: [{
+      decisionId: decision.id,
+      workItemId: work.id,
+      title: decision.title,
+      importance: decision.importance,
+      decisionMaker: decision.decisionMaker,
+      isImportant: true,
+      status: 'initial_understanding',
+      evidenceLevel: 0,
+      evidenceLevelLabel: 'E0 · 无证据'
+    }]
+  }
+}
+
+function demoModuleDetail(projectId: string, moduleId: string, title = '项目模块示范'): ModuleDetailView {
+  const demo = buildProjectMemoryDemo({ id: projectId, name: title })
+  const session = demo.sessions[0]
+  const artifact = demo.artifacts[0]
+  const decision = demo.decisions[0]
+  const emptyEvidence: UserEvidenceGroup = {
+    independentExplanation: [], delayedRecall: [], errorDetection: [], misconceptionCheck: [],
+    scenarioTransfer: [], realWorkModification: [], testPassed: [], manualReview: []
+  }
+  emptyEvidence.manualReview = [{
+    id: `demo-evidence-${moduleId}`,
+    description: '示范记录：真实用户证据会在完成解释、迁移或独立修改后写入这里。',
+    source: '项目示范', evidenceLevel: 0, evidenceLevelLabel: 'E0 · 无证据'
+  }]
+  return {
+    workItemId: moduleId,
+    title,
+    status: 'needs_initial_understanding',
+    statusLabel: '缺少初步理解',
+    riskLevel: 'medium',
+    importantDecisionCount: 1,
+    highestEvidenceLevel: 0,
+    highestEvidenceLevelLabel: 'E0 · 无证据',
+    relatedSessionCount: 1,
+    relatedArtifactCount: 1,
+    openDebtCount: 0,
+    highRiskDebtCount: 0,
+    missingEvidenceTypes: ['independent_explanation', 'scenario_transfer'],
+    nextRecommendedStage: 'initial_compensation',
+    ownershipGapType: 'needs_initial_understanding',
+    latestActivityAt: session.createdAt,
+    aiWork: {
+      agentSessions: [{ id: session.id, source: session.platform, title: session.title, implementationSummary: session.implementationSummary }],
+      decisions: [{
+        decisionId: decision.id, title: decision.title, decision: decision.decision, rationale: decision.rationale,
+        decisionType: decision.decisionType, importance: decision.importance, decisionMaker: decision.decisionMaker,
+        userParticipation: decision.userParticipation, isImportant: true, status: 'initial_understanding',
+        evidenceLevel: 0, evidenceLevelLabel: 'E0 · 无证据', linkedArtifacts: [], linkedDebts: []
+      }],
+      artifacts: [{ id: artifact.id, artifactType: artifact.artifactType, path: artifact.repositoryRelativePath, diffSummary: artifact.diffSummary }]
+    },
+    userEvidence: emptyEvidence,
+    remainingDebts: { openDebts: [], relapsedDebts: [], highRiskDebts: [] },
+    demo: true
+  } as any
+}
+
+function fillModuleDetailWithDemo(module: ModuleDetailView, projectId: string): ModuleDetailView {
+  const demo = demoModuleDetail(projectId, module.workItemId, module.title)
+  const has = (value: unknown): value is any[] => Array.isArray(value) && value.length > 0
+  return {
+    ...demo,
+    ...module,
+    aiWork: {
+      ...demo.aiWork,
+      ...(module.aiWork || {}),
+      agentSessions: has(module.aiWork?.agentSessions) ? module.aiWork.agentSessions : demo.aiWork.agentSessions,
+      decisions: has(module.aiWork?.decisions) ? module.aiWork.decisions : demo.aiWork.decisions,
+      artifacts: has(module.aiWork?.artifacts) ? module.aiWork.artifacts : demo.aiWork.artifacts
+    },
+    userEvidence: Object.values(module.userEvidence || {}).some(value => Array.isArray(value) && value.length > 0)
+      ? module.userEvidence
+      : demo.userEvidence,
+    remainingDebts: module.remainingDebts || demo.remainingDebts,
+    demo: !has(module.aiWork?.agentSessions) || !has(module.aiWork?.decisions) || !has(module.aiWork?.artifacts)
+  } as any
 }
 
 // ── 项目列表页 ──
@@ -252,7 +381,11 @@ export async function renderOwnershipMapPage(root: HTMLElement, projectId: strin
   } catch (err) {
     clear(page)
     page.appendChild(backToProjectsBtn())
-    page.appendChild(errorNode(err instanceof Error ? err.message : '加载所有权地图失败'))
+    view = demoOwnershipView(projectId)
+    renderOwnershipHeader(page, view, projectId)
+    page.appendChild(el('p', 'summary-note', '真实项目记录暂时无法同步，以下为基于项目入口生成的示范视图。'))
+    renderOwnershipSummary(page, view)
+    renderModuleList(page, view, projectId)
     return
   }
 
@@ -274,10 +407,10 @@ function renderOwnershipHeader(page: HTMLElement, view: ProjectOwnershipView, pr
 
   const actions = el('div', 'header-actions')
   actions.appendChild(backToProjectsBtn())
-  const refreshBtn = el('button', 'btn btn-ghost btn-sm', '重新计算')
+  const refreshBtn = el('button', 'btn btn-ghost btn-sm', t('重新计算', 'Recalculate'))
   refreshBtn.onclick = async () => {
     refreshBtn.disabled = true
-    refreshBtn.textContent = '计算中…'
+    refreshBtn.textContent = t('计算中…', 'Calculating…')
     try {
       const newView = await recalculateOwnership(view.project.id)
       clear(page)
@@ -286,8 +419,10 @@ function renderOwnershipHeader(page: HTMLElement, view: ProjectOwnershipView, pr
       renderModuleList(page, newView, view.project.id)
     } catch (err) {
       refreshBtn.disabled = false
-      refreshBtn.textContent = '重新计算'
-      alert(err instanceof Error ? err.message : '重新计算失败')
+      refreshBtn.textContent = t('重新计算', 'Recalculate')
+      const notice = errorNode(t('重新计算暂时不可用。', 'Recalculation is temporarily unavailable.'))
+      notice.classList.add('refresh-error')
+      page.appendChild(notice)
     }
   }
   actions.appendChild(refreshBtn)
@@ -410,7 +545,9 @@ function renderModuleRows(list: HTMLElement, view: ProjectOwnershipView, filter:
   })
 
   if (modules.length === 0) {
-    list.appendChild(emptyStateNode('当前筛选条件下没有模块。'))
+    const demo = demoOwnershipView(projectId, view.project.name).modules[0]
+    list.appendChild(el('p', 'summary-note', '当前没有真实模块记录，以下为基于项目名称生成的示范模块。'))
+    list.appendChild(moduleRow(demo, projectId))
     return
   }
 
@@ -464,12 +601,16 @@ function moduleRow(m: ModuleOwnershipView, projectId: string): HTMLElement {
   }
 
   const enterBtn = el('button', 'btn btn-primary btn-sm', '查看详情')
-  enterBtn.onclick = () => navigate({
-    name: 'project-ownership-module',
-    projectId,
-    moduleId: m.workItemId
-  })
-  row.appendChild(enterBtn)
+  if ((m as any).demo) {
+    row.appendChild(demoBadge())
+  } else {
+    enterBtn.onclick = () => navigate({
+      name: 'project-ownership-module',
+      projectId,
+      moduleId: m.workItemId
+    })
+    row.appendChild(enterBtn)
+  }
 
   return row
 }
@@ -491,11 +632,17 @@ export async function renderModuleDetailPage(
   } catch (err) {
     clear(page)
     page.appendChild(backToOwnershipBtn(projectId))
-    page.appendChild(errorNode(err instanceof Error ? err.message : '加载模块详情失败'))
+    const detail = demoModuleDetail(projectId, moduleId)
+    page.appendChild(el('p', 'summary-note', '真实模块记录暂时无法同步，以下为基于项目内容生成的示范详情。'))
+    page.appendChild(aiWorkSection(detail))
+    page.appendChild(userEvidenceSection(detail))
+    page.appendChild(remainingDebtsSection(detail))
+    page.appendChild(nextStepSection(detail, null))
+    page.appendChild(artifactsSection(detail))
     return
   }
 
-  const m = res.module
+  const m = fillModuleDetailWithDemo(res.module, projectId)
   const rec = res.recommendation
   clear(page)
 
@@ -664,7 +811,7 @@ function evidenceItemNode(item: UserEvidenceItem): HTMLElement {
     meta.appendChild(el('span', 'meta-chip', `提示依赖：${item.hintDependency}`))
   }
   if (typeof item.overallScore === 'number') {
-    meta.appendChild(el('span', 'meta-chip', `评分：${item.overallScore}`))
+    meta.appendChild(el('span', 'meta-chip', `${t('评分：', 'Score: ')}${item.overallScore}`))
   }
   if (item.createdAt) {
     meta.appendChild(el('span', 'meta-chip', formatTime(item.createdAt)))
@@ -680,7 +827,7 @@ function remainingDebtsSection(m: ModuleDetailView): HTMLElement {
   const rd = m.remainingDebts
   const total = rd.openDebts.length + rd.relapsedDebts.length + rd.highRiskDebts.length
   if (total === 0) {
-    section.appendChild(emptyStateNode('当前没有未处理的认知欠条。'))
+    section.appendChild(el('p', 'summary-note', '当前没有真实未处理的认知欠条；示范视图不会虚构欠条。'))
     return section
   }
 
@@ -708,7 +855,7 @@ function remainingDebtsSection(m: ModuleDetailView): HTMLElement {
   return section
 }
 
-function debtCard(gapText: string, status: string, riskType: string | undefined, highlight: boolean): HTMLElement {
+function debtCard(gapText: string, status: string, riskType: string | undefined, highlight = false): HTMLElement {
   const card = el('div', `debt-card ${highlight ? 'is-highlight' : ''}`)
   card.appendChild(el('p', 'debt-gap', gapText))
   const meta = el('div', 'debt-meta')
@@ -733,7 +880,7 @@ function nextStepSection(
   }
 
   if (!rec) {
-    section.appendChild(emptyStateNode('暂无明确的下一步训练建议。'))
+    section.appendChild(el('p', 'summary-note', '示范建议：先用自己的话解释关键决策，再用一个不同场景验证能否迁移。'))
     return section
   }
 
@@ -754,11 +901,18 @@ function nextStepSection(
   card.appendChild(kvRow('当前证据', EVIDENCE_LEVEL_LABEL[rec.currentEvidenceLevel] || `E${rec.currentEvidenceLevel}`))
 
   // 进入现有训练流程的入口
-  // 注意：不创建第二套训练提交页面，而是引导用户回到主工作区或对应会话。
+  // 不创建第二套训练提交页面，而是将模块关联的认知欠条接入训练流程。
+  // 优先级：高风险欠条 > 已复发欠条 > 未处理欠条；都没有时回到训练欠条列表。
   const startBtn = el('button', 'btn btn-primary', '进入训练流程')
   startBtn.onclick = () => {
-    // 训练流程统一在主工作区发起，由 LearningOrchestrator 根据 ownershipGapType 路由。
-    navigate({ name: 'app' })
+    const rd = m.remainingDebts
+    const firstDebt =
+      rd.highRiskDebts[0] || rd.relapsedDebts[0] || rd.openDebts[0]
+    if (firstDebt) {
+      navigate({ name: 'training-debt', debtId: firstDebt.id })
+    } else {
+      navigate({ name: 'training-debt', debtId: 'list' })
+    }
   }
   card.appendChild(startBtn)
 
@@ -771,7 +925,7 @@ function artifactsSection(m: ModuleDetailView): HTMLElement {
   section.appendChild(el('h2', 'section-heading', '真实产出物'))
 
   if (m.aiWork.artifacts.length === 0) {
-    section.appendChild(emptyStateNode('未关联产出物（文件、函数、Commit、PR、API、数据库迁移、测试等）。'))
+    section.appendChild(el('p', 'summary-note', '暂无真实产出物；示范视图会展示一个与当前模块相关的产出物结构。'))
     return section
   }
 

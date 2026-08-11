@@ -256,9 +256,46 @@ describe("generateClearanceReport (multi-step pipeline)", () => {
     it("preserves AI-generated feynman card prompts and cardType", async () => {
       const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
       expect(report.sections.feynmanCards[0].prompt).toContain("数据流");
+      expect(report.sections.feynmanCards[0].prompt).toContain("请只用文字回答");
+      expect(report.sections.feynmanCards[0].prompt).not.toMatch(/画出|绘制|手绘|拍照|上传|图片|附件/);
       expect(report.sections.feynmanCards[0].cardType).toBe("system_map");
       expect(report.sections.feynmanCards[0].userAnswer).toBe("");
       expect(report.sections.feynmanCards[0].answeredAt).toBeNull();
+    });
+
+    it("rewrites diagnostic questions and cards into text-only interaction", async () => {
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline());
+      const prompts = [
+        ...report.sections.dangerousGaps.map(gap => gap.diagnosticQuestion),
+        ...report.sections.feynmanCards.map(card => card.prompt)
+      ].join(" ");
+      expect(prompts).toContain("请只用文字回答");
+      expect(prompts).not.toMatch(/画出|画图|绘制|手绘|拍照|上传|图片|照片|附件|录音|视频|截图/);
+    });
+
+    it("rewrites the reported smart-glasses drawing prompt into a text answer", async () => {
+      const reportedPrompt = "假设你要设计一个智能眼镜，包含摄像头、电池和显示模块。请画出从概念到首板的协作流程图，标明各阶段需要冻结的信息、团队间的交付物和关键验证点。你可以用文字描述或手绘后拍照上传。";
+      const stepB = {
+        ...STEP_B,
+        dangerousGaps: [{ ...STEP_B.dangerousGaps[0], diagnosticQuestion: reportedPrompt }]
+      };
+      const stepD = {
+        ...STEP_D,
+        feynmanCards: [{ ...STEP_D.feynmanCards[0], prompt: reportedPrompt }]
+      };
+      const report = await generateClearanceReport(
+        SAMPLE_TEXT,
+        "chatgpt",
+        mockPipeline({ stepB, stepD })
+      );
+      const prompts = [
+        report.sections.dangerousGaps[0].diagnosticQuestion,
+        report.sections.feynmanCards[0].prompt
+      ].join(" ");
+      expect(prompts).toContain("请只用文字回答");
+      expect(prompts).toContain("文字流程");
+      expect(prompts).toContain("关键验证点");
+      expect(prompts).not.toMatch(/画出|流程图|手绘|拍照|上传|图片|附件/);
     });
 
     it("preserves AI-generated next action routes", async () => {
@@ -556,6 +593,14 @@ describe("generateClearanceReport (multi-step pipeline)", () => {
         expect(prompt).not.toContain("产品负责人");
         expect(prompt).not.toContain("创业者");
       }
+    });
+
+    it("requires every diagnostic interaction to be answerable with text only", () => {
+      const prompts = getReportStepPrompts();
+      expect(prompts.attribution).toContain("只支持文字对话和文字回答");
+      expect(prompts.rootGaps).toContain("只支持文字对话和文字回答");
+      expect(prompts.cards).toContain("不得要求画图、手绘、拍照、上传图片或附件");
+      expect(prompts.cards).toContain("所有问题都能只用文字回答");
     });
 
     it("root-gaps prompt requires 2-4 root gaps with transfer, verification, and mastery criteria", () => {

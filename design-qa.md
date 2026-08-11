@@ -1,8 +1,8 @@
 # MindIOU Landing Fix — Design QA
 
 - Source visual truth:
-  - `/var/folders/h1/dbfhmwjs7q3_p7xxhh4xjq300000gn/T/codex-clipboard-29c5f80c-7231-4d11-9254-2db649eceb19.png`
-  - `/var/folders/h1/dbfhmwjs7q3_p7xxhh4xjq300000gn/T/codex-clipboard-b21f0f27-d908-465f-923a-827547ceb896.png`
+  - `qa/reference-desktop.png`
+  - `qa/reference-mobile.png`
 - Implementation screenshots:
   - `/tmp/mindiou-landing-fixed-en-cta-viewport.png` (desktop hero)
   - `/tmp/mindiou-landing-fixed-en-cta-viewport-v2.png` (desktop CTA)

@@ -207,7 +207,7 @@ function render() {
             <button id="checkpoint-btn" class="primary">Run Checkpoint</button>
           </div>
           <div class="card-list">
-            ${state.candidates.map(renderCandidate).join('') || '<p class="muted">No candidates yet. Capture a Codex event, then run a checkpoint.</p>'}
+            ${state.candidates.map(renderCandidate).join('') || '<p class="muted">No candidates yet. Capture an AI-assisted work event, then run a checkpoint.</p>'}
           </div>
         </section>
 

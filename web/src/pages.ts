@@ -21,10 +21,16 @@ import {
   generateReport,
   generateTimeline,
   getAccessToken,
+  linkReportToProjectMemory,
+  listProjectHookTokens,
+  listProjects,
   listDeviceTokens,
   login,
   logoutAuth,
+  projectMemoryRequest,
   register,
+  createProjectHookToken,
+  revokeProjectHookToken,
   revokeDeviceToken,
   saveDraftConfusions,
   setAccessToken,
@@ -33,7 +39,7 @@ import {
   submitReviewAnswer,
   updateGenesisIdentity
 } from './api'
-import type { DeviceTokenInfo, GenesisIdentity } from './api'
+import type { DeviceTokenInfo, GenesisIdentity, ProjectHookTokenInfo } from './api'
 import { renderSiteFooter } from './navigation'
 import { isEnglish, t } from './i18n'
 import type {
@@ -53,9 +59,11 @@ import {
   forgetSessionId,
   navigate,
   recallDraftId,
+  recallProjectMemoryProjectId,
   recallReportId,
   recallSessionId,
   rememberDraftId,
+  rememberProjectMemoryProjectId,
   rememberReportId,
   rememberSessionId
 } from './router'
@@ -110,15 +118,111 @@ function spinnerOverlay(label: string): HTMLElement {
   return box
 }
 
+type ProjectMemoryProject = { id: string; name: string; status?: string }
+
+function renderProjectMemoryAttach(reportId?: string): HTMLElement {
+  const section = el('section', 'project-memory-attach')
+  section.appendChild(el('h2', 'section-heading', t('归入项目记忆', 'Attach to project memory')))
+  section.appendChild(el('p', 'section-desc', reportId
+    ? '不用重新粘贴材料。选择项目后，当前报告会和会话摘要、功能任务、产出物及认知欠条建立关联。'
+    : '选择项目后，生成报告会自动把本次材料归入项目记忆。'))
+  const row = el('div', 'project-memory-attach-row')
+  const select = el('select', 'project-memory-select') as HTMLSelectElement
+  const emptyProjectOption = el('option', undefined, t('生成后不关联项目', 'Do not attach to a project')) as HTMLOptionElement
+  emptyProjectOption.value = ''
+  select.appendChild(emptyProjectOption)
+  const createName = el('input', 'project-memory-project-input') as HTMLInputElement
+  createName.type = 'text'
+  createName.placeholder = t('新项目名称（可选）', 'New project name (optional)')
+  const create = el('button', 'btn btn-ghost btn-sm', t('新建项目', 'New project')) as HTMLButtonElement
+  create.type = 'button'
+  const attach = el('button', `btn ${reportId ? 'btn-primary' : 'btn-ghost'} btn-sm`, reportId ? t('归入项目记忆', 'Attach to project memory') : t('选择后自动归入', 'Attach automatically after selection')) as HTMLButtonElement
+  attach.type = 'button'
+  attach.disabled = !reportId
+  const status = el('p', 'project-memory-attach-status')
+  row.append(select, createName, create, attach)
+  section.append(row, status)
+
+  const loadProjects = async (): Promise<void> => {
+    try {
+      const response = await projectMemoryRequest<{ projects: ProjectMemoryProject[] }>('/api/projects')
+      for (const project of response.projects || []) {
+        const option = el('option') as HTMLOptionElement
+        option.value = project.id
+        option.textContent = project.name
+        select.appendChild(option)
+      }
+      const remembered = recallProjectMemoryProjectId()
+      if (remembered && response.projects?.some(project => project.id === remembered)) {
+        select.value = remembered
+        attach.disabled = !reportId || !select.value
+        if (reportId) void attachReport(remembered, true)
+      }
+      if (!response.projects?.length) status.textContent = t('还没有项目；可在右侧输入项目名称后新建。', 'No projects yet. Enter a project name on the right to create one.')
+    } catch {
+      status.textContent = t('项目列表暂时不可用，报告仍可正常生成。', 'The project list is temporarily unavailable. You can still generate the report.')
+    }
+  }
+
+  const attachReport = async (projectId: string, automatic = false): Promise<void> => {
+    if (!reportId || !projectId) return
+    attach.disabled = true
+    status.textContent = automatic ? t('正在同步到项目记忆…', 'Syncing with project memory…') : t('正在建立项目关联…', 'Creating the project link…')
+    try {
+      const response = await linkReportToProjectMemory(reportId, projectId)
+      status.textContent = `${t('已归入项目：', 'Attached to project: ')}${response.project.name}${response.idempotent ? t('（已存在关联）', ' (already linked)') : ''}`
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : t('项目关联失败，请稍后重试', 'Could not link the project. Try again later.')
+      attach.disabled = false
+    }
+  }
+
+  select.onchange = () => {
+    rememberProjectMemoryProjectId(select.value || null)
+    attach.disabled = !reportId || !select.value
+  }
+  create.onclick = async () => {
+    const name = createName.value.trim()
+    if (!name) {
+    status.textContent = t('请先输入项目名称。', 'Enter a project name first.')
+      createName.focus()
+      return
+    }
+    create.disabled = true
+    try {
+      const response = await projectMemoryRequest<{ project: ProjectMemoryProject }>('/api/projects', {
+        method: 'POST',
+        body: JSON.stringify({ name, projectType: 'software' })
+      })
+      const option = el('option') as HTMLOptionElement
+      option.value = response.project.id
+      option.textContent = response.project.name
+      select.appendChild(option)
+      select.value = response.project.id
+      rememberProjectMemoryProjectId(response.project.id)
+      attach.disabled = !reportId
+      createName.value = ''
+      status.textContent = reportId ? t('项目已创建，点击“归入项目记忆”完成关联。', 'Project created. Click “Attach to project memory” to finish linking it.') : t('项目已创建，生成报告后会自动归入。', 'Project created. The report will be attached automatically after it is generated.')
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : t('项目创建失败', 'Could not create the project')
+    } finally {
+      create.disabled = false
+    }
+  }
+  if (reportId) attach.onclick = () => void attachReport(select.value)
+  void loadProjects()
+  return section
+}
+
 function connectionStatusBadge(): HTMLElement {
   const badge = el('div', 'connection-pill is-checking')
   badge.appendChild(el('span', 'connection-dot'))
-  const label = el('span', 'connection-label', '正在连接')
+  const label = el('span', 'connection-label', t('正在连接', 'Connecting'))
   badge.appendChild(label)
   void checkHealth().then(ok => {
     badge.classList.remove('is-checking')
     badge.classList.add(ok ? 'is-online' : 'is-offline')
-    label.textContent = ok ? 'AI 服务已连接' : '服务未连接'
+    label.textContent = ok ? t('AI 服务已连接', 'AI service connected') : t('服务未连接', 'Service unavailable')
   })
   return badge
 }
@@ -330,10 +434,13 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
   const repaymentBtn = el('button', 'btn btn-ghost btn-sm', '认知清偿')
   repaymentBtn.onclick = () => navigate({ name: 'repayment' })
   headerActions.appendChild(repaymentBtn)
+  const profileBtn = el('button', 'btn btn-ghost btn-sm', '用户画像')
+  profileBtn.onclick = () => navigate({ name: 'profile' })
+  headerActions.appendChild(profileBtn)
   const devicesBtn = el('button', 'btn btn-ghost btn-sm', '设备Token')
   devicesBtn.onclick = () => navigate({ name: 'devices' })
   headerActions.appendChild(devicesBtn)
-  const ownershipBtn = el('button', 'btn btn-ghost btn-sm', '项目所有权')
+  const ownershipBtn = el('button', 'btn btn-ghost btn-sm', '项目记忆')
   ownershipBtn.onclick = () => navigate({ name: 'projects' })
   headerActions.appendChild(ownershipBtn)
   const logout = el('button', 'btn btn-ghost btn-sm', '退出登录')
@@ -403,7 +510,7 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
     debts.appendChild(el('h3', 'dashboard-section-title', t('尚未清偿的认知欠条', 'Outstanding cognitive debts')))
     if (data.outstandingDebts.length) {
       const list = el('div', 'dashboard-debt-list')
-      data.outstandingDebts.slice(0, 5).forEach(debt => {
+      data.outstandingDebts.forEach(debt => {
         const item = el('article', 'dashboard-debt-item')
         item.appendChild(el('span', 'dashboard-debt-title', debt.title))
         const action = el('button', 'btn btn-ghost btn-sm', t('继续清偿', 'Continue repayment'))
@@ -433,28 +540,31 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
 
   const intro = el('section', 'app-intro')
   intro.appendChild(el('p', 'dashboard-kicker', t('开始新的分析', 'Start a new analysis')))
-  intro.appendChild(el('h2', 'app-heading', '识别你跳过的认知债务'))
-  intro.appendChild(el('p', 'app-desc', '粘贴一段你用 AI 辅助完成的工作材料。MindIOU 会分析哪些理解过程被 AI 代劳了，并生成一份认知债务报告。'))
+  intro.appendChild(el('h2', 'app-heading', t('识别你跳过的认知债务', 'Find the cognitive work AI skipped for you')))
+  intro.appendChild(el('p', 'app-desc', t('粘贴一段你用 AI 辅助完成的工作材料。MindIOU 会分析哪些理解过程被 AI 代劳了，并生成一份认知债务报告。', 'Paste work you completed with AI. MindIOU identifies the reasoning you delegated and turns it into a cognitive debt report.')))
   page.appendChild(intro)
 
   // 会得到什么说明（预期管理）
   const expect = el('section', 'app-expect')
-  expect.appendChild(el('h3', 'expect-heading', '接下来会经历什么'))
+  expect.appendChild(el('h3', 'expect-heading', t('接下来会经历什么', 'What happens next')))
   const expectList = el('ul', 'expect-list')
-  expectList.appendChild(el('li', 'expect-item', 'AI 把你的材料拆成协作步骤'))
-  expectList.appendChild(el('li', 'expect-item', '你在每一步上标注「我哪里没看懂」'))
-  expectList.appendChild(el('li', 'expect-item', '基于你的困惑生成认知债务报告'))
+  expectList.appendChild(el('li', 'expect-item', t('AI 把你的材料拆成协作步骤', 'AI breaks your material into collaboration steps')))
+  expectList.appendChild(el('li', 'expect-item', t('你在每一步上标注「我哪里没看懂」', 'Mark what you did not understand at each step')))
+  expectList.appendChild(el('li', 'expect-item', t('基于你的困惑生成认知债务报告', 'Generate a cognitive debt report from your questions')))
   expect.appendChild(expectList)
   page.appendChild(expect)
 
   // 三步进度指示
   page.appendChild(stepIndicator(1))
 
+  // 项目记忆作为生成认知欠条主流程的可选归档目标；不要求用户再次粘贴材料。
+  page.appendChild(renderProjectMemoryAttach())
+
   const form = el('form', 'input-form') as HTMLFormElement
 
   // 演示样本按钮：一键填入固定文本，配合 SPIRAL_DISABLE_AI=1 可稳定复现
   const demoBar = el('div', 'demo-bar')
-  const demoBtn = el('button', 'btn-demo-sample', '使用演示样本（服务器事故排查）')
+  const demoBtn = el('button', 'btn-demo-sample', t('使用演示样本（服务器事故排查）', 'Use the demo sample (server incident investigation)'))
   demoBtn.type = 'button'
   demoBtn.onclick = () => {
     textarea.value = isEnglish() ? DEMO_SAMPLE_TEXT_EN : DEMO_SAMPLE_TEXT
@@ -465,8 +575,8 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
 
   const textarea = el('textarea', 'artifact-input') as HTMLTextAreaElement
   textarea.placeholder = t(
-    '粘贴 ChatGPT/Claude 对话、AI 生成的方案、黑客松记录、会议纪要…',
-    'Paste a ChatGPT/Claude conversation, AI-generated plan, hackathon log, or meeting notes…'
+    '粘贴 AI 协作对话、AI 生成的方案、黑客松记录、会议纪要…',
+    'Paste an AI-assisted conversation, AI-generated plan, hackathon log, or meeting notes…'
   )
   form.appendChild(textarea)
   const assessmentMaterial = sessionStorage.getItem('mindiou_assessment_activation')
@@ -504,7 +614,7 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
   form.appendChild(hint)
 
   const actions = el('div', 'form-actions')
-  const submit = el('button', 'btn btn-primary', '生成认知债务报告') as HTMLButtonElement
+  const submit = el('button', 'btn btn-primary', t('生成认知债务报告', 'Generate a cognitive debt report')) as HTMLButtonElement
   submit.type = 'submit'
   submit.disabled = true
   actions.appendChild(submit)
@@ -739,6 +849,8 @@ export async function renderReportPage(root: HTMLElement, reportId: string): Pro
     if (report.generation.error) notice.appendChild(el('p', 'notice-detail', report.generation.error))
     page.appendChild(notice)
   }
+
+  page.appendChild(renderProjectMemoryAttach(reportId))
 
   // 第 1 部分：AI 完成了什么
   page.appendChild(renderSection('一、AI 完成了什么', 'ai-completed',
@@ -1092,7 +1204,9 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
 
     const metrics = el('section', 'genesis-metrics')
     const metricData = [
-      [t('已正式加入', 'Officially joined'), genesis.actual.joined, t('完成首次认知债务扫描后计入', 'Counted after the first cognitive-debt scan')],
+      // This is a cross-version historical total supplied for the public copy,
+      // not the live Cohort 001 account count returned by the API.
+      [t('注册用户', 'Registered users'), 36, t('历史 / 跨版本累计，不等同于当前 001 期实时账户数', 'Historical cross-version total; not the live Cohort 001 account count')],
       [t('已完成首次清偿', 'Completed first repayment'), genesis.actual.completedFirstClearance, t('不是登录签到，而是完成一次真实理解训练', 'A real understanding exercise—not a login check-in')],
       [t('共创建议已采纳', 'Co-creation ideas shipped'), genesis.actual.adoptedSuggestions, t('仅记录已经进入产品的真实改进', 'Only verified improvements already shipped')]
     ] as const
@@ -1103,12 +1217,14 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
 
     const wall = el('section', 'genesis-wall'); wall.appendChild(el('h2', undefined, t('首发体验者名录', 'Genesis participants')))
     if (!genesis.members.length) wall.appendChild(el('p', 'genesis-empty', t('等待第一位主动选择公开的完成者。', 'Waiting for the first finisher who chooses to be listed.')))
-    wall.appendChild(el('p', 'genesis-section-copy', t('完成者可以选择公开头像、昵称和编号；只公开昵称或匿名编号；或完全不公开展示、仅在个人账户中永久保留身份。公开档案不会展示导入的 AI 对话、原始代码或私密训练内容。', 'Finishers may publish an avatar, name, and ID; publish only a name or anonymous ID; or remain entirely private while retaining the identity in their account. Imported AI conversations, source code, and private training content are never shown here.')))
+    wall.appendChild(el('p', 'genesis-section-copy', t('名录优先展示真实的首发体验者编号；用户主动公开昵称后才会显示昵称和头像。这里不会展示邮箱、导入的 AI 对话、原始代码或私密训练内容。', 'The directory first shows real genesis participant numbers; names and avatars appear only after a participant opts in. Emails, imported AI conversations, source code, and private training content are never shown here.')))
     genesis.members.forEach(member => {
       const card = el('article', 'genesis-member')
       const identity = el('div', '')
-      identity.appendChild(el('strong', undefined, member.nickname || t('匿名首发体验者', 'Anonymous genesis participant')))
-      identity.appendChild(el('small', undefined, t('001 期 · 身份有效', 'Cohort 001 · Valid identity')))
+      identity.appendChild(el('strong', undefined, member.nickname || `${t('首发体验者', 'Genesis participant')} ${member.number}`))
+      identity.appendChild(el('small', undefined, member.activatedAt
+        ? t('001 期 · 身份有效', 'Cohort 001 · Valid identity')
+        : t('001 期 · 已注册首发用户', 'Cohort 001 · Registered genesis user')))
       card.append(identity, el('span', undefined, member.number)); wall.appendChild(card)
     }); page.appendChild(wall)
 
@@ -1122,8 +1238,7 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
     const privacy = section('PRIVACY · CURRENT CAPABILITY', '隐私与数据说明', 'Privacy and data', '你的真实项目内容不会自动出现在公开档案中。', 'Your real project content will never automatically appear in the public archive.')
     const privacyGrid = el('div', 'genesis-privacy-grid')
     ;[
-      [t('当前已支持', 'Available now'), [t('公开展示完全由用户主动选择', 'Public display is always opt-in'), t('活动页面只展示匿名汇总统计', 'Activity statistics are anonymous aggregates'), t('公开名录不展示原始对话、代码或私密训练内容', 'The public directory excludes original chats, code, and private training content')]],
-      [t('上线前需补齐', 'Required before launch'), [t('自助删除导入内容和账户数据', 'Self-service deletion of imports and account data'), t('只保留结构化欠条、不长期保留完整原文的模式', 'A structured-debt-only mode without long-term source retention'), t('分享卡片生成前的逐次确认', 'Per-share confirmation before generating public cards')]]
+      [t('当前已支持', 'Available now'), [t('公开展示完全由用户主动选择', 'Public display is always opt-in'), t('活动页面只展示匿名汇总统计', 'Activity statistics are anonymous aggregates'), t('公开名录不展示邮箱、原始对话、代码或私密训练内容', 'The public directory excludes emails, original chats, code, and private training content')]]
     ].forEach(([title, items]) => { const card = el('article', 'genesis-privacy-card'); card.appendChild(el('h3', '', title as string)); const list = el('ul'); (items as string[]).forEach(item => list.appendChild(el('li', '', item))); card.appendChild(list); privacyGrid.appendChild(card) })
     privacy.appendChild(privacyGrid); page.appendChild(privacy)
   } catch (error) { page.querySelector('.loading')?.remove(); page.appendChild(errorBox(error instanceof Error ? error.message : t('档案加载失败', 'Could not load archive'))) }
@@ -1202,10 +1317,10 @@ export async function renderDevicesPage(root: HTMLElement): Promise<void> {
   const header = el('header', 'page-header')
   header.appendChild(el('h1', 'page-title', 'MindIOU'))
   const headerActions = el('div', 'header-actions')
-  const backBtn = el('button', 'btn btn-ghost btn-sm', '返回')
+  const backBtn = el('button', 'btn btn-ghost btn-sm', t('返回', 'Back'))
   backBtn.onclick = () => navigate({ name: 'app' })
   headerActions.appendChild(backBtn)
-  const logout = el('button', 'btn btn-ghost btn-sm', '退出登录')
+  const logout = el('button', 'btn btn-ghost btn-sm', t('退出登录', 'Sign out'))
   logout.onclick = async () => {
     await logoutAuth()
     navigate({ name: 'landing' })
@@ -1215,22 +1330,22 @@ export async function renderDevicesPage(root: HTMLElement): Promise<void> {
   page.appendChild(header)
 
   const intro = el('section', 'app-intro')
-  intro.appendChild(el('h2', 'app-heading', '设备 Token 管理'))
-  intro.appendChild(el('p', 'app-desc', '为智能眼镜（G2/Rokid）生成专用访问 Token。每个 Token 只显示一次明文，请妥善保存。'))
+  intro.appendChild(el('h2', 'app-heading', t('设备 Token 管理', 'Device token management')))
+  intro.appendChild(el('p', 'app-desc', t('为智能眼镜（G2/Rokid）生成专用访问 Token。每个 Token 只显示一次明文，请妥善保存。', 'Generate a dedicated access token for smart glasses (G2/Rokid). The plaintext is shown only once, so save it securely.')))
   page.appendChild(intro)
 
   // 创建 Token 表单
   const form = el('form', 'device-form') as HTMLFormElement
   const nameInput = el('input', 'login-input') as HTMLInputElement
   nameInput.type = 'text'
-  nameInput.placeholder = '设备名称（如：我的 Rokid）'
+  nameInput.placeholder = t('设备名称（如：我的 Rokid）', 'Device name (for example: My Rokid)')
   nameInput.required = true
   form.appendChild(nameInput)
 
   const status = el('p', 'form-status')
   form.appendChild(status)
 
-  const submit = el('button', 'btn btn-primary', '生成 Token') as HTMLButtonElement
+  const submit = el('button', 'btn btn-primary', t('生成 Token', 'Generate token')) as HTMLButtonElement
   submit.type = 'submit'
   form.appendChild(submit)
 
@@ -1243,15 +1358,15 @@ export async function renderDevicesPage(root: HTMLElement): Promise<void> {
     e.preventDefault()
     const name = nameInput.value.trim()
     if (!name) {
-      status.textContent = '请输入设备名称'
+      status.textContent = t('请输入设备名称', 'Enter a device name')
       return
     }
     submit.disabled = true
-    status.textContent = '生成中…'
+    status.textContent = t('生成中…', 'Generating…')
     tokenDisplay.style.display = 'none'
     try {
       const info = await createDeviceToken(name)
-      status.textContent = 'Token 已生成，请立即复制保存（关闭后不可再查看）'
+      status.textContent = t('Token 已生成，请立即复制保存（关闭后不可再查看）', 'Token generated. Copy and save it now; it will not be shown again after closing.')
       tokenDisplay.style.display = 'block'
       tokenDisplay.replaceChildren()
       tokenDisplay.appendChild(el('p', 'token-label', `设备：${info.name}`))
@@ -1261,7 +1376,7 @@ export async function renderDevicesPage(root: HTMLElement): Promise<void> {
       tokenBox.readOnly = true
       tokenBox.onclick = () => tokenBox.select()
       tokenDisplay.appendChild(tokenBox)
-      const copyBtn = el('button', 'btn btn-ghost btn-sm', '复制')
+      const copyBtn = el('button', 'btn btn-ghost btn-sm', t('复制', 'Copy'))
       copyBtn.onclick = () => {
         tokenBox.select()
         try { void navigator.clipboard.writeText(tokenBox.value) } catch { /* */ }
@@ -1270,7 +1385,7 @@ export async function renderDevicesPage(root: HTMLElement): Promise<void> {
       // 刷新列表
       void loadTokens()
     } catch (err) {
-      status.textContent = err instanceof Error ? err.message : '生成失败'
+      status.textContent = err instanceof Error ? err.message : t('生成失败', 'Could not generate the token')
     } finally {
       submit.disabled = false
     }
@@ -1279,11 +1394,40 @@ export async function renderDevicesPage(root: HTMLElement): Promise<void> {
 
   // 已有 Token 列表
   const listSection = el('section', 'device-list-section')
-  listSection.appendChild(el('h3', 'device-list-title', '已有设备 Token'))
+  listSection.appendChild(el('h3', 'device-list-title', t('已有设备 Token', 'Existing device tokens')))
   const tokenList = el('div', 'device-list')
   tokenList.appendChild(loading('加载中…'))
   listSection.appendChild(tokenList)
   page.appendChild(listSection)
+
+  // 项目 MCP / Hook Token 管理：与眼镜 Token 共用登录入口，但按项目隔离。
+  const hookSection = el('section', 'device-list-section project-hook-section')
+  hookSection.appendChild(el('h3', 'device-list-title', t('项目 MCP / Hook Token', 'Project MCP / Hook tokens')))
+  hookSection.appendChild(el('p', 'device-token-help', t('给 TRAE、远程 MCP 或代码 Hook 使用。每个 Token 只绑定一个项目，明文只在生成成功后显示一次。', 'For TRAE, remote MCP, or code hooks. Each token is bound to one project, and plaintext is shown only after successful creation.')))
+
+  const hookForm = el('form', 'hook-token-form') as HTMLFormElement
+  const projectSelect = el('select', 'login-input') as HTMLSelectElement
+  projectSelect.required = true
+  const emptyHookProject = el('option', undefined, t('选择项目…', 'Select a project…')) as HTMLOptionElement
+  emptyHookProject.value = ''
+  projectSelect.appendChild(emptyHookProject)
+  const hookNameInput = el('input', 'login-input') as HTMLInputElement
+  hookNameInput.type = 'text'
+  hookNameInput.placeholder = t('Token 名称（如：评委演示）', 'Token name (for example: Reviewer demo)')
+  hookNameInput.required = true
+  const hookSubmit = el('button', 'btn btn-primary', t('生成项目 Token', 'Generate project token')) as HTMLButtonElement
+  hookSubmit.type = 'submit'
+  const hookStatus = el('p', 'form-status')
+  const hookTokenDisplay = el('div', 'token-display')
+  hookTokenDisplay.style.display = 'none'
+  hookForm.append(projectSelect, hookNameInput, hookSubmit, hookStatus, hookTokenDisplay)
+  hookSection.appendChild(hookForm)
+
+  const hookListTitle = el('h4', 'hook-token-list-title', t('已有项目 Token', 'Existing project tokens'))
+  const hookList = el('div', 'device-list')
+  hookList.appendChild(el('p', 'admin-empty', t('请选择项目', 'Select a project')))
+  hookSection.append(hookListTitle, hookList)
+  page.appendChild(hookSection)
 
   root.appendChild(page)
 
@@ -1324,6 +1468,124 @@ export async function renderDevicesPage(root: HTMLElement): Promise<void> {
     }
   }
 
+  function renderHookTokenList(tokens: ProjectHookTokenInfo[]): void {
+    hookList.replaceChildren()
+    if (!tokens.length) {
+      hookList.appendChild(el('p', 'admin-empty', '暂无项目 Token'))
+      return
+    }
+    for (const token of tokens) {
+      const row = el('div', 'device-row hook-token-row')
+      row.appendChild(el('span', 'device-name', token.name))
+      row.appendChild(el('span', 'device-date', `创建于 ${new Date(token.createdAt).toLocaleDateString('zh-CN')}`))
+      if (token.revokedAt) {
+        row.appendChild(el('span', 'device-used token-revoked', `已于 ${new Date(token.revokedAt).toLocaleDateString('zh-CN')} 撤销`))
+      } else {
+        row.appendChild(el('span', 'device-used', '可用'))
+        const revokeBtn = el('button', 'btn btn-ghost btn-sm', '撤销') as HTMLButtonElement
+        revokeBtn.type = 'button'
+        revokeBtn.onclick = async () => {
+          revokeBtn.disabled = true
+          try {
+            await revokeProjectHookToken(projectSelect.value, token.id)
+            hookStatus.textContent = '项目 Token 已撤销。'
+            await loadHookTokens()
+          } catch (error) {
+            revokeBtn.disabled = false
+            hookStatus.textContent = error instanceof Error ? error.message : '撤销失败'
+          }
+        }
+        row.appendChild(revokeBtn)
+      }
+      hookList.appendChild(row)
+    }
+  }
+
+  async function loadHookTokens(hidePlaintext = true): Promise<void> {
+    const projectId = projectSelect.value
+    if (hidePlaintext) hookTokenDisplay.style.display = 'none'
+    if (!projectId) {
+      hookList.replaceChildren(el('p', 'admin-empty', '请选择项目'))
+      return
+    }
+    hookList.replaceChildren(loading('加载项目 Token…'))
+    try {
+      renderHookTokenList(await listProjectHookTokens(projectId))
+    } catch (error) {
+      hookList.replaceChildren(el('p', 'admin-empty', error instanceof Error ? error.message : '无法加载项目 Token 列表'))
+    }
+  }
+
+  hookForm.onsubmit = async (event) => {
+    event.preventDefault()
+    const projectId = projectSelect.value
+    const name = hookNameInput.value.trim()
+    if (!projectId) {
+      hookStatus.textContent = '请先选择项目。'
+      return
+    }
+    if (!name) {
+      hookStatus.textContent = '请输入 Token 名称。'
+      return
+    }
+    hookSubmit.disabled = true
+    hookStatus.textContent = '生成中…'
+    hookTokenDisplay.style.display = 'none'
+    try {
+      const info = await createProjectHookToken(projectId, name)
+      hookStatus.textContent = '项目 Token 已生成，请立即复制保存；关闭或刷新后不可再查看。'
+      hookTokenDisplay.replaceChildren()
+      hookTokenDisplay.appendChild(el('p', 'token-label', `项目：${projectSelect.selectedOptions[0]?.textContent || projectId} · 名称：${info.name}`))
+      const tokenBox = el('input', 'token-plaintext') as HTMLInputElement
+      tokenBox.type = 'text'
+      tokenBox.value = info.token || ''
+      tokenBox.readOnly = true
+      tokenBox.setAttribute('aria-label', '项目 Hook Token 明文')
+      tokenBox.onclick = () => tokenBox.select()
+      hookTokenDisplay.appendChild(tokenBox)
+      const copyBtn = el('button', 'btn btn-ghost btn-sm', '复制') as HTMLButtonElement
+      copyBtn.type = 'button'
+      copyBtn.onclick = () => {
+        tokenBox.select()
+        try { void navigator.clipboard.writeText(tokenBox.value) } catch { /* */ }
+      }
+      hookTokenDisplay.appendChild(copyBtn)
+      hookTokenDisplay.style.display = 'block'
+      hookNameInput.value = ''
+      await loadHookTokens(false)
+    } catch (error) {
+      hookStatus.textContent = error instanceof Error ? error.message : '生成失败'
+    } finally {
+      hookSubmit.disabled = false
+    }
+  }
+
+  projectSelect.onchange = () => {
+    hookStatus.textContent = ''
+    void loadHookTokens()
+  }
+
+  try {
+    const projects = await listProjects()
+    for (const project of projects) {
+      const option = el('option') as HTMLOptionElement
+      option.value = project.id
+      option.textContent = project.name
+      projectSelect.appendChild(option)
+    }
+    const remembered = recallProjectMemoryProjectId()
+    const preferred = projects.find(project => project.id === remembered) || projects.find(project => project.name === '认知欠条') || projects[0]
+    if (preferred) {
+      projectSelect.value = preferred.id
+      await loadHookTokens()
+    } else {
+      hookStatus.textContent = '还没有项目，请先在项目记忆中创建一个项目。'
+    }
+  } catch (error) {
+    hookStatus.textContent = error instanceof Error ? error.message : '无法加载项目列表'
+    hookList.replaceChildren(el('p', 'admin-empty', '无法加载项目列表'))
+  }
+
   void loadTokens()
 }
 
@@ -1357,15 +1619,30 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
     page.appendChild(intro)
 
     if (!data.ok) {
-      const err = el('p', 'error', data.error || '加载失败')
+      const err = el('section', 'training-error-card')
+      err.appendChild(el('p', undefined, data.error || '加载失败'))
+      const retry = el('button', 'btn btn-ghost btn-sm', '重试')
+      retry.onclick = () => {
+        root.replaceChildren()
+        void renderTrainingPage(root)
+      }
+      err.appendChild(retry)
       page.appendChild(err)
       return
     }
 
+    const overview = el('section', 'training-overview-card')
+    overview.appendChild(el('h2', undefined, data.totalDue === 0 ? '今天可以轻松一点' : `今天有 ${data.totalDue} 个复训任务`))
+    overview.appendChild(el('p', undefined, '每次复训都只记录你实际能解释、识别边界和迁移的证据。'))
+    page.appendChild(overview)
+
     if (data.totalDue === 0) {
-      const empty = el('div', 'empty-state')
+      const empty = el('section', 'empty-state training-empty-card')
       empty.appendChild(el('p', 'empty-title', '今天没有复训任务'))
-      empty.appendChild(el('p', 'empty-desc', '完成新的清偿后，系统会自动生成复训任务。'))
+      empty.appendChild(el('p', 'empty-desc', '完成新的认知清偿后，系统会自动生成复训任务。你也可以先去认知清偿查看待处理欠条。'))
+      const go = el('button', 'btn btn-ghost btn-sm', '查看认知清偿')
+      go.onclick = () => navigate({ name: 'repayment' })
+      empty.appendChild(go)
       page.appendChild(empty)
       return
     }
@@ -1379,9 +1656,11 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
       meta.appendChild(el('span', 'task-due', `到期：${formatDate(task.dueAt)}`))
       card.appendChild(meta)
       const btn = el('button', 'btn btn-primary', '开始复训')
+      const actionMessage = el('p', 'training-action-message')
       btn.onclick = async () => {
         btn.disabled = true
         btn.textContent = '正在启动…'
+        actionMessage.textContent = ''
         try {
           const result = await startReviewTask(task.id)
           if (result.ok) {
@@ -1389,51 +1668,118 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
           } else {
             btn.disabled = false
             btn.textContent = '开始复训'
-            alert(result.error || '启动失败')
+            actionMessage.textContent = result.error || '启动失败，请稍后重试。'
           }
         } catch (e) {
+          if (e instanceof ApiError && e.status === 401) {
+            navigate({ name: 'login' })
+            return
+          }
           btn.disabled = false
           btn.textContent = '开始复训'
-          alert('网络错误')
+          actionMessage.textContent = e instanceof Error ? e.message : '网络错误，请稍后重试。'
         }
       }
       card.appendChild(btn)
+      card.appendChild(actionMessage)
       list.appendChild(card)
     }
     page.appendChild(list)
   } catch (e) {
     clear(page)
     page.appendChild(header)
-    page.appendChild(el('p', 'error', '加载失败，请稍后重试。'))
+    if (e instanceof ApiError && e.status === 401) {
+      const expiredCard = el('section', 'training-session-expired')
+      expiredCard.appendChild(el('h2', undefined, t('登录状态已失效', 'Your session has expired')))
+      expiredCard.appendChild(el('p', undefined, t('今日复训需要有效的账号登录状态。请重新登录后再继续，训练记录不会被删除。', 'Today’s review requires an active account session. Sign in again to continue; your training records are not deleted.')))
+      const login = el('button', 'btn btn-primary btn-sm', t('重新登录', 'Sign in again'))
+      login.onclick = () => navigate({ name: 'login' })
+      expiredCard.appendChild(login)
+      page.appendChild(expiredCard)
+    } else {
+      const errorCard = el('section', 'training-error-card')
+      errorCard.appendChild(el('p', undefined, e instanceof Error ? e.message : t('加载失败，请稍后重试。', 'Could not load today’s review. Please try again.')))
+      const retry = el('button', 'btn btn-ghost btn-sm', t('重试', 'Try again'))
+      retry.onclick = () => {
+        root.replaceChildren()
+        void renderTrainingPage(root)
+      }
+      errorCard.appendChild(retry)
+      page.appendChild(errorCard)
+    }
   }
 }
 
 async function renderReviewSubmitForm(page: HTMLElement, task: ReviewTask): Promise<void> {
   clear(page)
-  const header = el('header', 'page-header')
-  header.appendChild(el('h1', 'page-title', '复训中'))
+  page.className = 'page page-session page-training-conversation'
+  const header = el('header', 'session-header')
+  const heading = el('div')
+  heading.appendChild(el('p', 'session-kicker', '今日复训 · 人类回答'))
+  heading.appendChild(el('h1', 'page-title', '把这条认知欠条讲清楚'))
+  heading.appendChild(el('p', 'session-subtitle', '先独立回答，再看 AI 反馈。你的回答会成为后续掌握度和项目所有权的证据。'))
+  header.appendChild(heading)
+  const headerActions = el('div', 'session-actions')
+  const back = el('a', 'btn btn-ghost btn-sm', '返回今日复训') as HTMLAnchorElement
+  back.href = '#/training'
+  headerActions.appendChild(back)
+  header.appendChild(headerActions)
   page.appendChild(header)
 
-  page.appendChild(el('div', 'task-stage', stageLabel(task.trainingStage)))
-  page.appendChild(el('p', 'task-prompt-large', task.prompt))
+  const context = el('section', 'session-sources')
+  context.appendChild(el('h2', 'session-section-title', '这次复训的来源'))
+  context.appendChild(el('p', 'session-source-note', `训练阶段：${stageLabel(task.trainingStage)} · 到期：${formatDate(task.dueAt)}`))
+  try {
+    const detail = await fetchTrainingDebtDetail(task.cognitiveDebtId)
+    if (detail.ok) {
+      context.appendChild(el('p', 'session-source-note', `认知欠条：${detail.debt.gapText}`))
+      const links = detail.projectMemory?.links || []
+      if (links.length) {
+        const sourceList = el('div', 'session-source-list')
+        for (const source of links.slice(0, 4)) {
+          const sourceCard = el('article', 'session-source-card')
+          sourceCard.appendChild(el('strong', undefined, source.artifact.repositoryRelativePath || source.artifact.name))
+          sourceCard.appendChild(el('p', undefined, [source.artifact.symbolName, source.artifact.gitCommitHash ? `Commit ${source.artifact.gitCommitHash}` : '', source.workItemTitle, source.sessionTitle].filter(Boolean).join(' · ')))
+          sourceList.appendChild(sourceCard)
+        }
+        context.appendChild(sourceList)
+      }
+    }
+  } catch {
+    context.appendChild(el('p', 'session-source-note', '暂时无法加载项目材料，但不影响本次回答。'))
+  }
+  page.appendChild(context)
 
-  const textarea = document.createElement('textarea')
-  textarea.className = 'answer-textarea'
+  const question = el('section', 'session-question')
+  question.appendChild(el('span', 'session-question-label', 'AI 的问题'))
+  question.appendChild(el('p', 'session-question-text', task.prompt))
+  page.appendChild(question)
+
+  const inputCard = el('section', 'session-input')
+  inputCard.appendChild(el('h2', 'session-section-title', '你的回答'))
+  inputCard.appendChild(el('p', 'session-input-hint', '请用自己的话解释，不要只复述结论；如果还不确定，也可以明确说出你的疑问。'))
+  const textarea = el('textarea', 'answer-input') as HTMLTextAreaElement
   textarea.placeholder = '用你自己的话解释这个概念…'
-  textarea.rows = 8
-  page.appendChild(textarea)
+  textarea.rows = 7
+  inputCard.appendChild(textarea)
 
-  const btn = el('button', 'btn btn-primary', '提交答案')
-  page.appendChild(btn)
+  const footer = el('div', 'session-input-footer')
+  const btn = el('button', 'btn btn-primary', '提交回答') as HTMLButtonElement
+  footer.appendChild(btn)
+  const actionMessage = el('p', 'session-status')
+  footer.appendChild(actionMessage)
+  inputCard.appendChild(footer)
+  page.appendChild(inputCard)
 
   btn.onclick = async () => {
     const answer = textarea.value.trim()
     if (!answer) {
-      alert('请输入你的回答')
+      actionMessage.textContent = '请先输入你的回答，再提交评估。'
       return
     }
     btn.disabled = true
     btn.textContent = '正在评估…'
+    actionMessage.textContent = ''
     try {
       const result = await submitReviewAnswer(task.id, answer)
       if (result.ok) {
@@ -1441,39 +1787,50 @@ async function renderReviewSubmitForm(page: HTMLElement, task: ReviewTask): Prom
       } else {
         btn.disabled = false
         btn.textContent = '提交答案'
-        alert(result.error || '提交失败')
+        actionMessage.textContent = result.error || '提交失败，请稍后重试。'
       }
     } catch (e) {
       btn.disabled = false
       btn.textContent = '提交答案'
-      alert('网络错误')
+      actionMessage.textContent = e instanceof Error ? e.message : '网络错误，请稍后重试。'
     }
   }
 }
 
 function renderReviewResult(page: HTMLElement, result: SubmitReviewResponse): void {
   clear(page)
-  const header = el('header', 'page-header')
-  header.appendChild(el('h1', 'page-title', '复训结果'))
+  page.className = 'page page-session page-training-conversation'
+  const header = el('header', 'session-header')
+  const heading = el('div')
+  heading.appendChild(el('p', 'session-kicker', '今日复训 · AI 反馈'))
+  heading.appendChild(el('h1', 'page-title', '这次回答的反馈'))
+  heading.appendChild(el('p', 'session-subtitle', '反馈已经保存；你可以回到复训列表继续下一条，也可以打开认知欠条查看完整来源链路。'))
+  header.appendChild(heading)
+  const actions = el('div', 'session-actions')
+  const back = el('a', 'btn btn-ghost btn-sm', '返回今日复训') as HTMLAnchorElement
+  back.href = '#/training'
+  actions.appendChild(back)
+  header.appendChild(actions)
   page.appendChild(header)
 
+  const resultCard = el('section', 'session-result')
   const score = result.evaluation.overallScore
   const passed = result.evaluation.passed
-  const scoreEl = el('div', 'result-score', `${score} 分`)
-  scoreEl.className = passed ? 'result-score passed' : 'result-score failed'
-  page.appendChild(scoreEl)
-
-  page.appendChild(el('p', 'result-status', passed ? '✓ 通过' : '✗ 未通过'))
+  const scoreEl = el('div', passed ? 'result-score passed' : 'result-score failed', `${score}${t(' 分', ' points')}`)
+  resultCard.appendChild(scoreEl)
+  resultCard.appendChild(el('p', 'result-status', passed ? '✓ 已通过这一阶段' : '✗ 还需要再验证一次'))
+  resultCard.appendChild(el('p', 'session-result-note', `掌握度：${result.profile.overallMastery} · 下一次复习：${formatDate(result.nextReviewAt)}`))
+  page.appendChild(resultCard)
 
   if (result.evaluation.userFeedback) {
-    const feedback = el('div', 'result-feedback')
+    const feedback = el('section', 'session-sources result-feedback')
     feedback.appendChild(el('h3', 'result-section-title', 'AI 反馈'))
     feedback.appendChild(el('p', 'result-feedback-text', result.evaluation.userFeedback))
     page.appendChild(feedback)
   }
 
   if (result.evaluation.strengths.length > 0) {
-    const sec = el('div', 'result-section')
+    const sec = el('section', 'session-sources result-section')
     sec.appendChild(el('h3', 'result-section-title', '做得好的地方'))
     for (const s of result.evaluation.strengths) {
       sec.appendChild(el('li', 'result-item', s))
@@ -1482,7 +1839,7 @@ function renderReviewResult(page: HTMLElement, result: SubmitReviewResponse): vo
   }
 
   if (result.evaluation.missingPoints.length > 0) {
-    const sec = el('div', 'result-section')
+    const sec = el('section', 'session-sources result-section')
     sec.appendChild(el('h3', 'result-section-title', '需要补充的点'))
     for (const m of result.evaluation.missingPoints) {
       sec.appendChild(el('li', 'result-item', m))
@@ -1490,14 +1847,17 @@ function renderReviewResult(page: HTMLElement, result: SubmitReviewResponse): vo
     page.appendChild(sec)
   }
 
-  const meta = el('div', 'result-meta')
-  meta.appendChild(el('span', 'result-meta-item', `掌握度：${result.profile.overallMastery}`))
-  meta.appendChild(el('span', 'result-meta-item', `下次复习：${formatDate(result.nextReviewAt)}`))
-  page.appendChild(meta)
-
-  const backBtn = el('button', 'btn btn-primary', '返回今日复训')
-  backBtn.onclick = () => navigate({ name: 'training' })
-  page.appendChild(backBtn)
+  const next = el('section', 'session-input')
+  next.appendChild(el('h2', 'session-section-title', '接下来'))
+  next.appendChild(el('p', 'session-input-hint', passed ? '这次证据已保存。请在下一次复训或真实项目验证中继续确认，而不是把一次通过当成永久掌握。' : '请根据反馈重新解释关键因果；下一次复训会继续追踪这条欠条。'))
+  const nextActions = el('div', 'session-actions')
+  const listLink = el('a', 'btn btn-primary', '继续今日复训') as HTMLAnchorElement
+  listLink.href = '#/training'
+  const debtLink = el('a', 'btn btn-ghost', '查看这条认知欠条') as HTMLAnchorElement
+  debtLink.href = '#/training-debt/' + encodeURIComponent(result.attempt.cognitiveDebtId)
+  nextActions.append(listLink, debtLink)
+  next.appendChild(nextActions)
+  page.appendChild(next)
 }
 
 export async function renderTrainingDebtListPage(root: HTMLElement): Promise<void> {
@@ -1562,7 +1922,7 @@ export async function renderTrainingDebtListPage(root: HTMLElement): Promise<voi
 }
 
 export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: string): Promise<void> {
-  const page = el('div', 'page page-training-debt-detail')
+  const page = el('div', 'page page-training-debt-detail page-session')
   const header = el('header', 'page-header')
   header.appendChild(el('h1', 'page-title', '认知欠条详情'))
   const headerActions = el('div', 'header-actions')
@@ -1586,16 +1946,23 @@ export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: st
       return
     }
 
-    page.appendChild(el('div', `debt-status level-${data.understandingLevel}`, data.masteryLabel))
-    page.appendChild(el('p', 'debt-gap-large', data.debt.gapText))
+    const summary = el('section', 'session-question')
+    summary.appendChild(el('span', 'session-question-label', '认知欠条'))
+    summary.appendChild(el('p', 'session-question-text', data.debt.gapText))
+    summary.appendChild(el('div', `debt-status level-${data.understandingLevel}`, data.masteryLabel))
+    page.appendChild(summary)
 
     if (data.projectMemory) {
       const memory = el('section', 'project-memory-panel')
-      memory.appendChild(el('h3', 'result-section-title', '项目认知账本关联'))
+      memory.appendChild(el('h2', 'project-memory-panel-title', '这条欠条当时在哪里出现？'))
+      memory.appendChild(el('p', 'session-source-note', '下面的项目、功能任务、Agent 会话、文件和决策来自同一条项目记忆链路。'))
       const links = data.projectMemory.links || []
       for (const link of links.slice(0, 12)) {
         const item = el('article', 'project-memory-card')
-        item.appendChild(el('strong', undefined, link.artifact.repositoryRelativePath || link.artifact.name))
+        const projectHref = '#/projects/' + encodeURIComponent(link.artifact.projectId)
+        const artifactLink = el('a', 'project-memory-card-link', link.artifact.repositoryRelativePath || link.artifact.name) as HTMLAnchorElement
+        artifactLink.href = projectHref
+        item.appendChild(artifactLink)
         item.appendChild(el('p', undefined, [
           link.artifact.symbolName,
           link.artifact.gitCommitHash ? 'Commit ' + link.artifact.gitCommitHash : '',
@@ -1603,8 +1970,11 @@ export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: st
           link.sessionTitle,
           link.decisionTitle
         ].filter(Boolean).join(' · ')))
+        const context = el('small', undefined, '打开项目认知账本查看完整链路')
+        item.appendChild(context)
         memory.appendChild(item)
       }
+      if (!links.length) memory.appendChild(el('p', 'project-memory-empty', '这条欠条目前还没有绑定项目产出物；后续导入会话或手动关联后会显示来源。'))
       const evidence = data.projectMemory.evidence || []
       const highest = evidence.reduce((current, item) => item.evidenceLevel > current ? item.evidenceLevel : current, 'E0')
       memory.appendChild(el('p', 'project-memory-status', '当前最高证据：' + highest + '；测试通过不自动等于项目所有权。'))
@@ -1634,7 +2004,7 @@ export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: st
       history.appendChild(el('h3', 'result-section-title', '练习历史'))
       for (const attempt of data.attempts.slice(0, 10)) {
         const item = el('div', 'attempt-item')
-        item.appendChild(el('div', 'attempt-score', `${attempt.evaluation.overallScore} 分`))
+        item.appendChild(el('div', 'attempt-score', `${attempt.evaluation.overallScore}${t(' 分', ' points')}`))
         item.appendChild(el('div', 'attempt-stage', stageLabel(attempt.trainingStage)))
         item.appendChild(el('div', 'attempt-date', formatDate(attempt.completedAt)))
         if (attempt.evaluation.userFeedback) {

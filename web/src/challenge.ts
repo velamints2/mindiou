@@ -314,7 +314,7 @@ function renderFaq(page: HTMLElement): void {
   const faqs: Array<[string, string]> = [
     [label('需要每天连续训练吗？', 'Do I have to train every single day?'), label('不需要。7 天周期内累计 5 个自然日完成有效训练即可，允许漏掉最多 2 天。', 'No. You need valid training on 5 different days within your 7-day cycle—you may miss up to 2 days.')],
     [label('需要会编程吗？', 'Do I need to know how to code?'), label('不需要。任何你借助 AI 完成的工作材料都可以：代码、方案、研究、内容创作。', 'No. Any AI-assisted work counts: code, plans, research, or content creation.')],
-    [label('可以使用什么 AI 对话？', 'Which AI conversations can I use?'), label('任何真实的 AI 协作内容，例如 ChatGPT、Claude 或其他工具的对话与产出。', 'Any real AI-assisted material—ChatGPT, Claude, or other tool conversations and outputs.')],
+    [label('可以使用什么 AI 对话？', 'Which AI conversations can I use?'), label('任何真实的 AI 协作内容、对话与产出都可以。', 'Any real AI-assisted material, conversations, and outputs are welcome.')],
     [label('一定要公开分享吗？', 'Do I have to share publicly?'), label('完全自愿。分享不影响完赛等级，也不要求好评或统一文案。', 'Completely voluntary. Sharing never affects completion and we never require positive reviews or scripted copy.')],
     [label('实体奖励什么时候发？', 'When are physical rewards shipped?'), label('完赛审核通过后由运营人工发放，邮寄地址仅在奖励解锁后收集。', 'After completion review, rewards are issued manually. Shipping addresses are collected only after rewards unlock.')],
     [label('激活码在哪里看？', 'Where do I find my activation code?'), label('在爱发电完成购买后，系统会随订单自动发放唯一激活码。', 'After purchase on Afdian, a unique activation code is issued automatically with your order.')],

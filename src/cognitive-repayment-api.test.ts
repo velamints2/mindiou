@@ -250,6 +250,26 @@ describe("cognitive repayment API (flag enabled)", () => {
     expect(unauthenticated.status).toBe(401);
   });
 
+  it("automatically syncs dangerous gaps from generated reports before listing", async () => {
+    const response = await fetch(`${ENABLED_BASE}/api/repayment/gaps`, {
+      headers: { cookie: alice.cookie }
+    });
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.gaps.some(item => item.reportId === "repayment-seeded-report")).toBe(true);
+    expect(data.gaps.some(item => item.reportId === "repayment-legacy-report")).toBe(true);
+  });
+
+  it("builds dashboard outstanding debts from the unified repayment view", async () => {
+    const response = await fetch(`${ENABLED_BASE}/api/dashboard`, {
+      headers: { cookie: alice.cookie }
+    });
+    expect(response.status).toBe(200);
+    const { dashboard } = await response.json();
+    expect(dashboard.outstandingDebts.some(item => item.reportId === "repayment-seeded-report" && item.gapId)).toBe(true);
+    expect(dashboard.outstandingDebts.every(item => item.status !== "repaid")).toBe(true);
+  });
+
   it("imports a gap with evidence bound to the artifact and deduplicates re-import", async () => {
     const response = await fetch(`${ENABLED_BASE}/api/repayment/gaps/import`, {
       method: "POST",

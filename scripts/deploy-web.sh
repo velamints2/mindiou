@@ -106,7 +106,7 @@ verify_url() {
 
 verify_url "/mindiou/index.html"
 verify_url "/mindiou/legacy.html"
-verify_url "/mindiou/report.html"
+verify_url "/mindiou/report.html" 302
 verify_url "/mindiou/desktop.html"
 verify_url "/mindiou/mvp1.html"
 verify_url "/mindiou/training.html"
@@ -148,7 +148,8 @@ echo "========================================"
 echo "访问地址:"
 echo "  SPA:       ${PUBLIC_ORIGIN}/mindiou/"
 echo "  旧主界面: https://${SSH_HOST}/mindiou/legacy.html"
-echo "  旧报告页: https://${SSH_HOST}/mindiou/report.html"
+echo "  新版工作区/报告入口: ${PUBLIC_ORIGIN}/mindiou/#/app"
+echo "  旧报告页别名: ${PUBLIC_ORIGIN}/mindiou/report.html (302 → 新版工作区)"
 echo "  桌面界面: https://${SSH_HOST}/mindiou/desktop.html"
 echo "  MVP-1:     https://${SSH_HOST}/mindiou/mvp1.html"
 echo "  训练系统:  https://${SSH_HOST}/mindiou/training.html"

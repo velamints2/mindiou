@@ -129,7 +129,11 @@ describe("auth store", () => {
       expect(bob.genesisIdentity.number).toBe("MIOU-001-0002");
       expect(alice.genesisIdentity.activatedAt).toBeNull();
       expect(alice.genesisIdentity.visibility).toBe("private");
-      expect(store.getGenesisArchive()).toMatchObject({ joined: 2, completed: 0, members: [] });
+      expect(store.getGenesisArchive()).toMatchObject({ joined: 2, completed: 0 });
+      expect(store.getGenesisArchive().members).toEqual([
+        expect.objectContaining({ number: "MIOU-001-0001", visibility: "anonymous", activatedAt: null }),
+        expect.objectContaining({ number: "MIOU-001-0002", visibility: "anonymous", activatedAt: null })
+      ]);
     });
 
     it("activates once and keeps public listing opt-in", () => {
@@ -137,7 +141,14 @@ describe("auth store", () => {
       const first = store.activateGenesisIdentity(user.id, "2026-08-03T10:00:00.000Z");
       const second = store.activateGenesisIdentity(user.id, "2026-08-04T10:00:00.000Z");
       expect(second.activatedAt).toBe(first.activatedAt);
-      expect(store.getGenesisArchive()).toMatchObject({ joined: 1, completed: 1, members: [] });
+      expect(store.getGenesisArchive()).toMatchObject({ joined: 1, completed: 1 });
+      expect(store.getGenesisArchive().members).toEqual([
+        expect.objectContaining({
+          number: "MIOU-001-0001",
+          activatedAt: "2026-08-03T10:00:00.000Z",
+          visibility: "anonymous"
+        })
+      ]);
 
       store.updateGenesisIdentity(user.id, { visibility: "public", displayName: "Alice", avatarUrl: "https://example.com/a.png" });
       expect(store.getGenesisArchive().members).toEqual([expect.objectContaining({
@@ -147,7 +158,9 @@ describe("auth store", () => {
       store.updateGenesisIdentity(user.id, { visibility: "anonymous" });
       expect(store.getGenesisArchive().members[0]).not.toHaveProperty("nickname");
       store.updateGenesisIdentity(user.id, { visibility: "private" });
-      expect(store.getGenesisArchive().members).toEqual([]);
+      expect(store.getGenesisArchive().members).toEqual([
+        expect.objectContaining({ number: "MIOU-001-0001", visibility: "anonymous" })
+      ]);
     });
 
     it("rejects profile changes before activation and unsafe avatar URLs", () => {

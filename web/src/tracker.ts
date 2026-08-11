@@ -14,7 +14,7 @@ let currentScreen = ''
 let screenEnterTime = 0
 
 // 通用埋点发送
-// 优先 fetch + keepalive：可带 Authorization 头，且页面卸载时也能送达（payload < 64KB）。
+// 优先 fetch + keepalive：使用网页登录产生的 HttpOnly Cookie，且页面卸载时也能送达（payload < 64KB）。
 // 无 token 时（未登录访客）降级 sendBeacon：仅在后端未对 POST /api/learn/events 开启 requireToken 时有效；
 // 若后端开启了鉴权，未登录访客的埋点会丢失 —— 见 ADMIN_SETUP.md「埋点鉴权」一节。
 function send(type: string, data: Record<string, unknown>): void {
@@ -26,10 +26,15 @@ function send(type: string, data: Record<string, unknown>): void {
 
   try {
     if (token) {
-      // 已登录：fetch + keepalive + Authorization 头
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      headers['Authorization'] = `Bearer ${token}`
-      void fetch(url, { method: 'POST', headers, body, keepalive: true }).catch(() => { /* 静默 */ })
+      // 已登录：认证凭据由浏览器自动携带的 HttpOnly Cookie 提供。
+      // localStorage 中的值只是登录状态标记，不能当作 Bearer Token 发送。
+      void fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        credentials: 'same-origin',
+        keepalive: true
+      }).catch(() => { /* 静默 */ })
       return
     }
     // 未登录访客：只能用 sendBeacon（无法带鉴权头）

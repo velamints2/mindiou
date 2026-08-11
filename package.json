@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5175",
     "dev:desktop": "npm run dev & sleep 2 && NODE_ENV=development electron src/desktop/main.cjs",
+    "mcp:remote": "node mcp/remote-server.mjs",
     "api": "node --use-env-proxy --env-file-if-exists=.env.local server.js",
     "backup:db": "node scripts/backup-database.mjs",
     "build": "tsc && vite build",
@@ -29,6 +30,7 @@
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "0.0.11",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.0.0",
     "cheerio": "^1.1.2",

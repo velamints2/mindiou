@@ -6,6 +6,7 @@ import path from "node:path";
 const TEST_PORT = 8799;
 const TEST_STORE = path.resolve("tmp/mvp0-api-test-store.json");
 const TEST_AUTH_STORE = path.resolve("tmp/mvp0-api-test-auth.sqlite");
+const TEST_REPAY_STORE = path.resolve("tmp/mvp0-api-test-repayment.sqlite");
 const BASE = `http://127.0.0.1:${TEST_PORT}`;
 let serverProcess: ReturnType<typeof spawn> | null = null;
 let authCookie = "";
@@ -41,6 +42,9 @@ beforeAll(async () => {
   await rm(TEST_AUTH_STORE, { force: true });
   await rm(`${TEST_AUTH_STORE}-wal`, { force: true });
   await rm(`${TEST_AUTH_STORE}-shm`, { force: true });
+  await rm(TEST_REPAY_STORE, { force: true });
+  await rm(`${TEST_REPAY_STORE}-wal`, { force: true });
+  await rm(`${TEST_REPAY_STORE}-shm`, { force: true });
   serverProcess = spawn("node", ["server.js"], {
     cwd: path.resolve("."),
     env: {
@@ -48,9 +52,13 @@ beforeAll(async () => {
       PORT: String(TEST_PORT),
       MVP0_STORE_PATH: TEST_STORE,
       AUTH_STORE_PATH: TEST_AUTH_STORE,
+      COGNITIVE_REPAYMENT_V1: "1",
+      COGNITIVE_REPAYMENT_STORE_PATH: TEST_REPAY_STORE,
       DAILY_ANALYSIS_LIMIT: "100",
       SPIRAL_DISABLE_AI: "1",
-      LEARNING_API_TOKEN: ""
+      // Production has a service token configured. Keep this enabled so
+      // browser-session access cannot regress behind the compatibility gate.
+      LEARNING_API_TOKEN: "test-service-token"
     },
     stdio: "pipe"
   });
@@ -73,6 +81,9 @@ afterAll(async () => {
   await rm(TEST_AUTH_STORE, { force: true });
   await rm(`${TEST_AUTH_STORE}-wal`, { force: true });
   await rm(`${TEST_AUTH_STORE}-shm`, { force: true });
+  await rm(TEST_REPAY_STORE, { force: true });
+  await rm(`${TEST_REPAY_STORE}-wal`, { force: true });
+  await rm(`${TEST_REPAY_STORE}-shm`, { force: true });
 });
 
 describe("MVP-0 API endpoints", () => {
@@ -88,6 +99,20 @@ describe("MVP-0 API endpoints", () => {
         body: JSON.stringify({ artifactText: SAMPLE_ARTIFACT, artifactType: "chatgpt" })
       });
       expect(res.status).toBe(401);
+      expect(await res.json()).toMatchObject({ error: "Authentication required" });
+    });
+
+    it("does not treat the service token as a Web account session", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/timelines`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer test-service-token"
+        },
+        body: JSON.stringify({ artifactText: SAMPLE_ARTIFACT, artifactType: "chatgpt" })
+      });
+      expect(res.status).toBe(401);
+      expect(await res.json()).toMatchObject({ error: "Authentication required" });
     });
 
     it("creates a draft with a collaboration timeline", async () => {
@@ -113,6 +138,16 @@ describe("MVP-0 API endpoints", () => {
         expect(step.userConfusion).toBe("");
       }
       createdDraftId = data.draft.id;
+    });
+
+    it("accepts a web session when the service bearer token is configured", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/timelines`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: authCookie },
+        body: JSON.stringify({ artifactText: SAMPLE_ARTIFACT, artifactType: "chatgpt" })
+      });
+      expect(res.status).toBe(200);
+      expect((await res.json()).ok).toBe(true);
     });
 
     it("returns 400 when artifactText is missing", async () => {
@@ -278,6 +313,74 @@ describe("MVP-0 API endpoints", () => {
       expect(data.report.confusionResolutions).toBeDefined();
       createdReportId = data.report.id;
       firstCardId = data.report.sections.feynmanCards[0].id;
+    });
+
+    it("creates a zero-evidence capability domain when a new report is generated", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/report`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: authCookie },
+        body: JSON.stringify({
+          artifactText: "我在学习 3D 打印与增材制造，比较 FDM 和树脂打印，并记录切片参数、首层附着和支撑结构的取舍。",
+          artifactType: "ai_generated_document"
+        })
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+      const profileRes = await fetch(`${BASE}/api/repayment/profile`, { headers: { cookie: authCookie } });
+      expect(profileRes.status).toBe(200);
+      const profileData = await profileRes.json();
+      const domain = profileData.profiles.find((profile: any) => profile.domain === "3D打印与增材制造");
+      expect(domain).toBeDefined();
+      expect(domain.source).toBe("report_inferred");
+      expect(domain.dimensions.conceptualUnderstanding.score).toBe(0);
+      expect(domain.dimensions.conceptualUnderstanding.stability).toBe("unverified");
+    });
+
+    it("links an existing report into project memory without re-importing or duplicating it", async () => {
+      const projectRes = await fetch(`${BASE}/api/projects`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: authCookie },
+        body: JSON.stringify({ name: "报告归档测试项目", projectType: "software" })
+      });
+      expect(projectRes.status).toBe(201);
+      const project = (await projectRes.json()).project;
+
+      const link = async () => fetch(`${BASE}/api/mvp0/reports/${createdReportId}/project-memory`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: authCookie },
+        body: JSON.stringify({ projectId: project.id })
+      });
+      const first = await link();
+      expect(first.status).toBe(200);
+      const firstData = await first.json();
+      expect(firstData.ok).toBe(true);
+      expect(firstData.project.id).toBe(project.id);
+      expect(firstData.session.id).toBeTruthy();
+      expect(firstData.workItem.id).toBeTruthy();
+      expect(firstData.artifacts.length).toBeGreaterThanOrEqual(1);
+
+      const second = await link();
+      expect(second.status).toBe(200);
+      const secondData = await second.json();
+      expect(secondData.idempotent).toBe(true);
+      expect(secondData.session.id).toBe(firstData.session.id);
+
+      const memoryRes = await fetch(`${BASE}/api/projects/${project.id}/memory`, { headers: { cookie: authCookie } });
+      const memory = (await memoryRes.json()).memory;
+      expect(memory.sessions).toHaveLength(1);
+      expect(memory.workItems).toHaveLength(1);
+      expect(memory.artifacts.length).toBeGreaterThanOrEqual(1);
+      expect(memory.counts.debts).toBeGreaterThanOrEqual(1);
+    });
+
+    it("requires authentication for report-to-project-memory linking", async () => {
+      const res = await fetch(`${BASE}/api/mvp0/reports/${createdReportId}/project-memory`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId: "project-not-owned" })
+      });
+      expect(res.status).toBe(401);
     });
 
     it("generates a report from a draft and threads user confusions through", async () => {
@@ -525,7 +628,7 @@ describe("MVP-0 API endpoints", () => {
     });
 
     it("GET /api/spiral/today returns dashboard", async () => {
-      const res = await fetch(`${BASE}/api/spiral/today`);
+      const res = await fetch(`${BASE}/api/spiral/today`, { headers: { cookie: authCookie } });
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data).toBeDefined();

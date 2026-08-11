@@ -254,8 +254,10 @@ describe("auth API", () => {
     expect(genesis.actual.registered).toBeGreaterThanOrEqual(1);
     expect(genesis.actual.joined).toBe(0);
     expect(genesis.actual.completedFirstClearance).toBe(0);
-    expect(genesis.actual.adoptedSuggestions).toBe(0);
-    expect(genesis.members).toEqual([]);
+    expect(genesis.actual.adoptedSuggestions).toBe(4);
+    expect(genesis.members.length).toBeGreaterThanOrEqual(1);
+    expect(genesis.members[0].number).toMatch(/^MIOU-001-/);
+    expect(genesis.members[0]).not.toHaveProperty("email");
   });
 
   it("keeps the reserved identity private and immutable before activation", async () => {
@@ -492,6 +494,11 @@ describe("MVP-0/MVP-1 route protection and isolation", () => {
     const archive = (await (await fetch(`${BASE}/api/genesis`)).json()).genesis;
     expect(archive.actual.joined).toBeGreaterThanOrEqual(1);
     expect(archive.actual.completedFirstClearance).toBeGreaterThanOrEqual(1);
-    expect(archive.members).not.toContainEqual(expect.objectContaining({ number: alice.data.user.genesisIdentity.number }));
+    const listedAlice = archive.members.find(member => member.number === alice.data.user.genesisIdentity.number);
+    if (Number(alice.data.user.genesisIdentity.number.split("-").at(-1)) <= 5) {
+      expect(listedAlice).toMatchObject({ visibility: "anonymous" });
+    } else {
+      expect(listedAlice).toBeUndefined();
+    }
   });
 });

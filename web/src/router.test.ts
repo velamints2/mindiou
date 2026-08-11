@@ -42,6 +42,11 @@ describe("parseRoute", () => {
     expect(parseRoute().name).toBe("app");
   });
 
+  it("parses the user profile route", () => {
+    location.hash = "#/profile";
+    expect(parseRoute()).toEqual({ name: "profile" });
+  });
+
   it("parses timeline with draftId", () => {
     location.hash = "#/timeline/draft-123";
     const route = parseRoute();
@@ -61,6 +66,11 @@ describe("parseRoute", () => {
     const route = parseRoute();
     expect(route.name).toBe("session");
     if (route.name === "session") expect(route.sessionId).toBe("ses-789");
+  });
+
+  it("keeps project-memory agent session links on the agent session page", () => {
+    location.hash = "#/agent-sessions/pm-session-1";
+    expect(parseRoute()).toEqual({ name: "agent-session", sessionId: "pm-session-1" });
   });
 
   it("returns not-found for missing params", () => {
@@ -110,6 +120,11 @@ describe("navigate", () => {
   it("sets hash for app", () => {
     navigate({ name: "app" });
     expect(location.hash).toBe("#/app");
+  });
+
+  it("sets hash for the user profile", () => {
+    navigate({ name: "profile" });
+    expect(location.hash).toBe("#/profile");
   });
 
   it("sets hash for genesis", () => {

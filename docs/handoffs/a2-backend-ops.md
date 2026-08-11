@@ -1,5 +1,7 @@
 # Handoff：A2 后端与服务器安全梳理
 
+> **服务器状态：** `114.67.169.78` 已弃用，本文中的地址仅作历史记录；当前公网入口为 `https://demo.mindiou.top`。
+
 - 日期：2026-07-30
 - 分支：`refactor/backend-ops-boundaries`（独立 worktree `mindiou-worktrees/a2-backend`）
 - 起点：main @ `d3321e2`（任务书所述基线标签 `overnight-baseline-2026-07-30` 在仓库中不存在【待确认：标签未创建或已删除】）

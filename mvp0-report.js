@@ -68,11 +68,12 @@ const teacherPreamble = [
   "2. 不得把“没有提到”等同于“不会”。证据有四种状态：proven（材料直接证明会）、partial（部分证明）、",
   "   unobserved（材料未涉及，不能下结论）、misconception（有直接矛盾证据才能用）。",
   "3. 深层推断必须走三步：observedSignals（观察到的信号）→ capabilityHypothesis（能力假设）→ diagnosticQuestion（诊断问题）。",
-  "4. 教学方式必须匹配材料已经证明的用户背景与当前水平；可使用系统图、流程、类比、场景预测、决策比较等形式。类比必须准确，不得为了通俗而失真。",
-  "5. 已解决的具体问题（已识别+已处理+已验证）不得写成未解决问题；把它转化为用户尚未解释的决策、验证债务或训练材料。",
-  "6. 教师表达：不羞辱用户。强调“当前材料尚未证明”而不是“用户不懂”。先肯定已具备的能力，再指出下一个成长点。",
-  "7. 只返回合法 JSON，不要 Markdown、解释或额外文字。",
-  "8. 用户载荷含 outputLanguage 时，所有面向用户的分析必须使用该语言；原始证据引用保留原文。未指定时才跟随原文语言。"
+  "4. 本产品当前只支持文字对话和文字回答。所有 diagnosticQuestion、feynmanCards.prompt、evaluationCriteria 和 nextActions 必须能在文本框中完成；禁止要求用户画图、绘图、手绘、拍照、上传图片/附件、录音、视频或提交文件。需要表达系统图/流程图时，改成“请用文字按顺序说明步骤、交付物、判断依据和边界”，可使用编号、箭头和缩进纯文字表达。",
+  "5. 教学方式必须匹配材料已经证明的用户背景与当前水平；可使用文字流程、文字系统关系、类比、场景预测、决策比较等形式。类比必须准确，不得为了通俗而失真。",
+  "6. 已解决的具体问题（已识别+已处理+已验证）不得写成未解决问题；把它转化为用户尚未解释的决策、验证债务或训练材料。",
+  "7. 教师表达：不羞辱用户。强调“当前材料尚未证明”而不是“用户不懂”。先肯定已具备的能力，再指出下一个成长点。",
+  "8. 只返回合法 JSON，不要 Markdown、解释或额外文字。",
+  "9. 用户载荷含 outputLanguage 时，所有面向用户的分析必须使用该语言；原始证据引用保留原文。未指定时才跟随原文语言。"
 ].join("\n");
 
 const stepASystemPrompt = [
@@ -116,6 +117,7 @@ const stepASystemPrompt = [
   '"technicalDecisionComprehension":{"level":"L1","evidenceStatus":"unobserved","evidence":[],"confidence":0},',
   '"validationAndQualityJudgment":{"level":"L1","evidenceStatus":"unobserved","evidence":[],"confidence":0}},',
   '"currentDomain":"","strongestDemonstratedAbility":"","highestPriorityGrowthArea":"","evidenceSignals":[],"recommendedCardLevel":"foundation|intermediate|advanced"}}',
+  "currentDomain 必须提取材料的具体主题领域（例如‘3D打印与增材制造’、‘AR眼镜硬件协同设计’），不要填用户能力等级；只有材料主题确实无法判断时才填 unknown，不要把所有主题都归为 general。",
   "",
   "Step A 自检清单：归因区分 AI 与用户；evidence 含归因理由；四种证据状态区分；未观察到的维度标 unobserved 而不是猜；只返回合法 JSON。"
 ].join("\n");
@@ -170,7 +172,7 @@ const stepDSystemPrompt = [
   "",
   "feynmanCards 规则（3-5 张）：",
   "- 每张卡必须映射到一个根能力缺口（target 写缺口标题或 dangerousGap-N）。",
-  "- 卡片测的是心智模型，不是术语记忆：让用户画系统图/数据流、打类比、做场景预测、解释决策、比较方案、设计验证。",
+  "- 卡片测的是心智模型，不是术语记忆：让用户用文字描述系统关系/数据流、打类比、做场景预测、解释决策、比较方案、设计验证。不得要求画图、手绘、拍照、上传图片或附件。",
   "- 卡片必须匹配材料中有证据的用户背景和任务场景；不得预设写代码或不写代码，也不得要求与目标缺口无关的实现细节。",
   "- 用户标注过困惑的缺口优先配卡。",
   "- 按用户当前水平 +1 出题：不给初学者出架构题，不给专家出概念题。",
@@ -188,7 +190,7 @@ const stepDSystemPrompt = [
   '"userAnswer":"","aiFollowUp":"","answeredAt":null}],',
   '"nextActions":[{"item":"","route":"verify|note|task|ask","reason":"","relatedCapability":""}]}',
   "",
-  "Step D 自检清单：卡片测系统理解而非术语；每张卡映射一个缺口；身份中立且难度匹配；",
+  "Step D 自检清单：卡片测系统理解而非术语；每张卡映射一个缺口；身份中立且难度匹配；所有问题都能只用文字回答，不含画图、拍照、上传或文件要求；",
   "evaluationCriteria 可判定；行动建设能力；只返回合法 JSON。"
 ].join("\n");
 

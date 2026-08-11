@@ -3,7 +3,7 @@
 // 公开区（landing/how-it-works）无需登录；产品区（app/report/session/login）需邀请码。
 // 视觉样式见 styles.css（占位），由设计师 agent 重构。
 
-import { checkAuthSession, getAccessToken, setAccessToken } from './api'
+import { checkAuthSession, setAccessToken } from './api'
 import { renderHowItWorksPage, renderLandingPage } from './marketing'
 import {
   renderAppPage,
@@ -19,6 +19,7 @@ import {
   renderTrainingPage
 } from './pages'
 import { renderRepaymentDetailPage, renderRepaymentPage } from './repayment'
+import { renderProfilePage } from './profile'
 import { renderModuleDetailPage, renderOwnershipMapPage, renderProjectListPage as renderOwnershipProjectListPage } from './ownershipApp'
 import { clear, el, navigate, parseRoute, type Route } from './router'
 import { initTracker, trackRoute } from './tracker'
@@ -102,15 +103,11 @@ async function render(route: Route): Promise<void> {
     return
   }
 
-  // 非公开路由需要服务端会话。刷新后本地标记丢失时，以 HttpOnly Cookie 为准恢复。
-  if (!getAccessToken()) {
-    const hasServerSession = await checkAuthSession()
-    if (hasServerSession) {
-      setAccessToken('server-session')
-    }
-  }
-
-  if (!getAccessToken()) {
+  // 非公开路由始终以服务端 HttpOnly Cookie 为准。localStorage 里的标记
+  // 只用于记住页面状态，不能绕过会话校验，否则 Cookie 过期后仍会进入
+  // 工作区，并在生成时间线时收到误导性的 "Invalid token"。
+  const hasServerSession = await checkAuthSession()
+  if (!hasServerSession) {
     // 未登录：登录页直接渲染，其他路由跳登录
     if (route.name === 'login') {
       renderLoginPage(app)
@@ -120,6 +117,7 @@ async function render(route: Route): Promise<void> {
     }
     return
   }
+  setAccessToken('server-session')
 
   // 已登录用户访问登录页 → 跳工作区
   if (route.name === 'login') {
@@ -175,6 +173,10 @@ async function render(route: Route): Promise<void> {
     case 'repayment-detail':
       await renderRepaymentDetailPage(app, route.gapId)
       trackRoute('repayment')
+      return
+    case 'profile':
+      await renderProfilePage(app)
+      trackRoute('profile')
       return
     case 'projects':
       await renderProjectListPage(app)

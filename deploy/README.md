@@ -4,9 +4,12 @@ The public deployment keeps the existing server website intact and mounts:
 
 - `/mindiou/`: MVP-0 report experience;
 - `/mindiou/mvp1/`: one report/card-scoped MVP-1 clearance session;
-- `/mindiou-api/`: rate-limited Node API reverse proxy.
-- `https://114.67.169.78/mindiou/`: stable public TLS demo and Rokid AIUI
-  backend origin, using a trusted short-lived IP certificate.
+- `/mindiou-api/`: rate-limited Node API reverse proxy;
+- `/mindiou-mcp`: authenticated Streamable HTTP MCP for judge/Agent clients;
+  it is served by the separate `mindiou-mcp.service` on localhost port 8795.
+- `https://demo.mindiou.top/mindiou/`: canonical public TLS demo and Rokid AIUI
+  backend origin. The former `https://114.67.169.78/mindiou/` server is
+  **DEPRECATED** and must not be used for new deployments or user links.
 
 Runtime state is stored in one SQLite database outside the release directory:
 
@@ -77,6 +80,34 @@ The public demo enables `MVP1_DEMO_FALLBACK=1`. Live AI research remains the
 first choice. If live research is unavailable, only the four cards in the controlled
 public server-diagnostics report use source-cited deterministic scaffolds. The mode is
 reported as `curated_demo_fallback`, and heuristic evaluation never claims clearance.
+
+## Remote MCP deployment
+
+The remote MCP process does not store a shared Hook Token. Each HTTP session
+must present a project-scoped bearer token; the MCP process validates it by
+calling the existing API and binds the resulting backend client to that
+session. Use a separate project and revocable token for each judge/demo.
+
+Install the isolated runtime on the server:
+
+```bash
+sudo install -d -o mindiou -g mindiou /opt/mindiou-mcp/mcp
+sudo cp mcp/*.mjs /opt/mindiou-mcp/mcp/
+sudo chown -R mindiou:mindiou /opt/mindiou-mcp
+cd /opt/mindiou-mcp
+sudo -u mindiou npm init -y
+sudo -u mindiou npm install --omit=dev @modelcontextprotocol/sdk@^1.30.0
+sudo install -m 0644 deploy/mindiou-mcp.env.example /etc/mindiou-mcp.env
+sudo install -m 0644 deploy/mindiou-mcp.service /etc/systemd/system/mindiou-mcp.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now mindiou-mcp
+```
+
+After installing the matching Nginx location snippet and reloading Nginx,
+verify `GET https://demo.mindiou.top/mindiou-mcp/healthz` and then use the
+Streamable HTTP URL `https://demo.mindiou.top/mindiou-mcp` with an
+`Authorization: Bearer <judge-token>` header. Do not place a real token in
+this repository, a public post, or a video frame.
 Unrelated debts still fail visibly instead of fabricating research.
 
 Text generation can use a provider independently from research and speech. The

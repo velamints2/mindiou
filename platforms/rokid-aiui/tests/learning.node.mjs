@@ -35,7 +35,7 @@ test("legacy quick-tunnel settings migrate to the stable HTTPS IP", () => {
   };
 
   try {
-    assert.equal(getRuntimeConfig().apiBaseUrl, "https://114.67.169.78/mindiou-api");
+    assert.equal(getRuntimeConfig().apiBaseUrl, "https://demo.mindiou.top/mindiou-api");
   } finally {
     if (originalStorage === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = originalStorage;

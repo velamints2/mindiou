@@ -1,5 +1,8 @@
 # MindIOU Competition Technical Documentation
 
+> **Server notice:** `114.67.169.78` is **DEPRECATED**. The canonical current
+> public origin is `https://demo.mindiou.top`.
+
 Version: 2026-07-15  
 Product name: 认知欠条 MindIOU  
 Subtitle: 把 AI 代劳转化为真实能力成长
@@ -26,7 +29,7 @@ glasses and keeps the same backend available for desktop, web, and GPASS /
 
 ```mermaid
 flowchart TD
-  A["AI-assisted work: Codex, ChatGPT, Cursor, meeting notes, project logs"] --> B["MVP-0: cognitive-debt report generator"]
+  A["AI-assisted work: conversations, project notes, meeting records"] --> B["MVP-0: cognitive-debt report generator"]
   B --> C["Debt report: AI did / user contributed / dangerous gaps / Feynman cards / next actions"]
   C --> D["MVP-1: clearance session API"]
   D --> E["External research or curated source-grounded fallback"]
@@ -95,7 +98,7 @@ The backend is shared by all clients:
 
 ```text
 Production API base:
-https://114.67.169.78/mindiou-api
+https://demo.mindiou.top/mindiou-api
 ```
 
 Responsibilities:
@@ -203,7 +206,7 @@ MindIOU backend.
 ### 5.1 Health Check
 
 ```http
-GET https://114.67.169.78/mindiou-api/health?live=1
+GET https://demo.mindiou.top/mindiou-api/health?live=1
 ```
 
 Expected use:
@@ -214,7 +217,7 @@ Expected use:
 ### 5.2 Start Clearance Session
 
 ```http
-POST https://114.67.169.78/mindiou-api/api/mvp1/sessions
+POST https://demo.mindiou.top/mindiou-api/api/mvp1/sessions
 Content-Type: application/json
 Accept: application/json
 
@@ -241,7 +244,7 @@ specific text fields such as `$.session.sources[0].title`.
 ### 5.3 Submit Answer
 
 ```http
-POST https://114.67.169.78/mindiou-api/api/mvp1/sessions/{sessionId}/answers
+POST https://demo.mindiou.top/mindiou-api/api/mvp1/sessions/{sessionId}/answers
 Content-Type: application/json
 Accept: application/json
 
@@ -263,7 +266,7 @@ $.analysis.recommendation
 ### 5.4 End Session
 
 ```http
-POST https://114.67.169.78/mindiou-api/api/mvp1/sessions/{sessionId}/end
+POST https://demo.mindiou.top/mindiou-api/api/mvp1/sessions/{sessionId}/end
 Content-Type: application/json
 Accept: application/json
 
@@ -290,7 +293,7 @@ POST
 URL:
 
 ```text
-https://114.67.169.78/mindiou-api/api/mvp1/sessions
+https://demo.mindiou.top/mindiou-api/api/mvp1/sessions
 ```
 
 Headers:
@@ -362,7 +365,7 @@ POST
 URL:
 
 ```text
-https://114.67.169.78/mindiou-api/api/mvp1/sessions/{{sessionId}}/answers
+https://demo.mindiou.top/mindiou-api/api/mvp1/sessions/{{sessionId}}/answers
 ```
 
 Headers:
@@ -414,7 +417,7 @@ POST
 URL:
 
 ```text
-https://114.67.169.78/mindiou-api/api/mvp1/sessions/{{sessionId}}/end
+https://demo.mindiou.top/mindiou-api/api/mvp1/sessions/{{sessionId}}/end
 ```
 
 Body:
@@ -473,7 +476,7 @@ Current verified build:
 
 ```text
 Rokid AIUI package: 0.2.12
-Backend API: https://114.67.169.78/mindiou-api
+Backend API: https://demo.mindiou.top/mindiou-api
 Demo report: c18ecc67-6725-4b60-bc0a-a73e53150d5e
 Demo card: card-2
 ```
@@ -509,7 +512,7 @@ Remaining hardware validation:
 
 ## 10. Known Boundaries
 
-- OpenAI is not required for the current demo. DeepSeek text generation is the
+- A hosted model provider is not required for the current demo. DeepSeek text generation is the
   active configured provider.
 - Real-time external web research is not available for every arbitrary card in
   the demo environment. The server-diagnostics demo card uses a transparent,

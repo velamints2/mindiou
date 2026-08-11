@@ -25,7 +25,15 @@
  * @param {Map} mvp1Sessions - MVP-1 会话 Map（内存）
  * @returns {object} 统计数据
  */
-export function computeAdminStats(mvp0Store, spiralStore, eventLog, mvp1Sessions) {
+function startOfBeijingDay() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day), -8, 0, 0)).toISOString();
+}
+
+export function computeAdminStats(mvp0Store, spiralStore, eventLog, mvp1Sessions, assessmentStore) {
   const state = mvp0Store.getState()
   const reports = state.clearanceReports || []
   const drafts = state.drafts || []
@@ -137,25 +145,23 @@ export function computeAdminStats(mvp0Store, spiralStore, eventLog, mvp1Sessions
 
   // ── MBAI 协作测试统计（基于 assessment_review 事件埋点） ──
   const assessmentEvents = eventLog.filter(e => e.type === 'assessment_review')
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const assessmentStats = {
+  const legacyAssessmentStats = {
     total: assessmentEvents.length,
     today: assessmentEvents.filter(e => {
       const ts = e.data?.ts || 0
-      return ts && new Date(ts).toISOString().startsWith(todayStr)
+      return ts && new Date(ts).toISOString().startsWith(new Date().toISOString().slice(0, 10))
     }).length,
-    byRole: {},
-    byLocale: {},
-    byMode: {}
+    byRole: {}, byLocale: {}, byMode: {}
   }
   for (const e of assessmentEvents) {
-    const role = e.data?.role || 'unknown'
-    const locale = e.data?.locale || 'unknown'
-    const mode = e.data?.mode || 'unknown'
-    assessmentStats.byRole[role] = (assessmentStats.byRole[role] || 0) + 1
-    assessmentStats.byLocale[locale] = (assessmentStats.byLocale[locale] || 0) + 1
-    assessmentStats.byMode[mode] = (assessmentStats.byMode[mode] || 0) + 1
+    const role = e.data?.role || 'unknown', locale = e.data?.locale || 'unknown', mode = e.data?.mode || 'unknown'
+    legacyAssessmentStats.byRole[role] = (legacyAssessmentStats.byRole[role] || 0) + 1
+    legacyAssessmentStats.byLocale[locale] = (legacyAssessmentStats.byLocale[locale] || 0) + 1
+    legacyAssessmentStats.byMode[mode] = (legacyAssessmentStats.byMode[mode] || 0) + 1
   }
+  const assessmentStats = assessmentStore
+    ? assessmentStore.stats(startOfBeijingDay())
+    : legacyAssessmentStats
 
   return {
     generatedAt: new Date().toISOString(),
@@ -208,7 +214,7 @@ export function handleAdminRoute(req, res, pathname, method, deps) {
 
   if (pathname === '/api/admin/stats' && method === 'GET') {
     const stats = computeAdminStats(
-      deps.mvp0Store, deps.spiralStore, deps.eventLog, deps.mvp1Sessions
+      deps.mvp0Store, deps.spiralStore, deps.eventLog, deps.mvp1Sessions, deps.assessmentStore
     )
     jsonResponse(res, 200, { ok: true, stats })
     return true

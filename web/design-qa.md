@@ -1,6 +1,6 @@
 # MindIOU Cognitive Trajectory Design QA
 
-- Source visual truth: `/Users/macbookair/.codex/generated_images/019fa2a6-4b53-76e2-a162-1e9cf535b476/call_EHDpdIVaPsUwrIObAlFk1aGt.png`
+- Source visual truth: `web/public/qa/reference.png`
 - Implementation URL: `http://localhost:5180/`
 - Final desktop screenshot: `qa/implementation-desktop-final.png`
 - Final mobile screenshot: `qa/implementation-mobile-final.png`
@@ -61,7 +61,7 @@ A separate crop was not required: at 2880 × 1024 the navigation, hero typograph
 
 - `看看它如何工作` navigated successfully to `#/how-it-works` and rendered the heading `MindIOU 的原理`.
 - The page rendered without module/export errors.
-- The in-app browser reported one Statsig request timeout to `ab.chatgpt.com`; it belongs to browser instrumentation, not the MindIOU application.
+- The in-app browser reported one third-party instrumentation request timeout; it belongs to browser instrumentation, not the MindIOU application.
 - TypeScript check, 29 Vitest cases, and the Vite production build passed after the final visual changes.
 - The browser full-page capture repeated a viewport tile, but DOM verification found exactly one `.page-landing` and one `.landing-hero`; this is a capture artifact rather than duplicated application markup. Viewport screenshots are used as the acceptance evidence.
 

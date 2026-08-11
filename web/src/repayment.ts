@@ -5,6 +5,7 @@
 // 证据的 start/end 偏移只用于后端定位，不向用户展示为"原文位置"以外的用途。
 
 import {
+  ApiError,
   dismissRepaymentReviewItem,
   fetchReport,
   getRepaymentGap,
@@ -24,6 +25,7 @@ import type {
   RepaymentReviewItem
 } from './types'
 import { clear, el, navigate } from './router'
+import { t } from './i18n'
 
 // ── 文案映射 ──
 
@@ -86,13 +88,21 @@ function errorMessage(err: unknown): string {
 }
 
 // 页面内错误条（含重试），不白屏、不输出堆栈
-function renderErrorBar(container: HTMLElement, message: string, retry: () => void): void {
+function renderErrorBar(container: HTMLElement, message: string, retry: () => void, cause?: unknown): void {
   const bar = el('div', 'error-box repayment-error-bar')
   bar.appendChild(el('span', 'repayment-error-text', message))
-  const btn = el('button', 'btn btn-ghost btn-sm', '重试')
+  const throttled = cause instanceof ApiError && [429, 503].includes(cause.status)
+  const btn = el('button', 'btn btn-ghost btn-sm', throttled ? '请稍后再试' : '重试') as HTMLButtonElement
+  btn.disabled = throttled
   btn.onclick = retry
   bar.appendChild(btn)
   container.appendChild(bar)
+  if (throttled) {
+    window.setTimeout(() => {
+      btn.disabled = false
+      btn.textContent = t('重试', 'Try again')
+    }, Math.max(4000, (cause.retryAfterSeconds || 0) * 1000))
+  }
 }
 
 function emptyState(title: string, desc: string): HTMLElement {
@@ -130,7 +140,7 @@ export async function renderRepaymentPage(root: HTMLElement): Promise<void> {
   } catch (err) {
     clear(page)
     page.appendChild(header)
-    renderErrorBar(page, errorMessage(err), retry)
+    renderErrorBar(page, errorMessage(err), retry, err)
     return
   }
   if (!enabled) {
@@ -158,37 +168,61 @@ export async function renderRepaymentPage(root: HTMLElement): Promise<void> {
     const reviewItems = (queueRes.items || []).filter(item => item.status === 'pending')
     const reports = reportsRes.reports || []
 
+    const overview = el('section', 'repayment-overview-card')
+    overview.appendChild(el('p', 'repayment-overview-copy', '把报告里的认知缺口变成可作答、可复习、可验证的清偿路径。'))
+    const overviewMetrics = el('div', 'repayment-overview-metrics')
+    ;[
+      [gaps.filter(gap => ACTIVE_STATUSES.includes(gap.status)).length, '待清偿'],
+      [reviewItems.length, '待复习'],
+      [gaps.filter(gap => gap.status === 'repaid').length, '已清偿']
+    ].forEach(([value, label]) => {
+      const metric = el('article', 'repayment-overview-metric')
+      metric.append(el('strong', undefined, String(value)), el('span', undefined, String(label)))
+      overviewMetrics.appendChild(metric)
+    })
+    overview.appendChild(overviewMetrics)
+    page.appendChild(overview)
+
     // 待清偿
-    page.appendChild(el('h2', 'section-title', '待清偿'))
+    const activeSection = el('section', 'repayment-section-card')
+    activeSection.appendChild(el('div', 'repayment-section-heading', '待清偿'))
+    activeSection.appendChild(el('p', 'section-hint', '已生成报告中的危险缺口会自动进入这里，不需要再次手动导入。'))
     const active = gaps.filter(gap => ACTIVE_STATUSES.includes(gap.status))
     if (active.length === 0) {
-      page.appendChild(emptyState('暂无待清偿的认知欠条', '还没有待清偿的认知欠条，从下方报告导入一笔。'))
+      activeSection.appendChild(emptyState('暂无待清偿的认知欠条', '生成报告后，危险缺口会自动出现在这里。'))
     } else {
       const list = el('div', 'gap-list')
       for (const gap of active) list.appendChild(gapRow(gap))
-      page.appendChild(list)
+      activeSection.appendChild(list)
     }
+    page.appendChild(activeSection)
 
     // 复习队列
-    page.appendChild(el('h2', 'section-title', '复习队列'))
+    const reviewSection = el('section', 'repayment-section-card')
+    reviewSection.appendChild(el('div', 'repayment-section-heading', '复习队列'))
+    reviewSection.appendChild(el('p', 'section-hint', '完成第一次清偿作答后，系统会根据结果安排间隔复习。'))
     if (reviewItems.length === 0) {
-      page.appendChild(emptyState('复习队列是空的', '提交一次清偿作答后，系统会按结果自动生成复习项。'))
+      reviewSection.appendChild(emptyState('暂时没有到期复习', '先从“待清偿”选择一条作答，系统会在需要复习时自动放入这里。'))
     } else {
       const list = el('div', 'review-list')
       for (const item of reviewItems) list.appendChild(reviewRow(item, retry))
-      page.appendChild(list)
+      reviewSection.appendChild(list)
     }
+    page.appendChild(reviewSection)
 
     // 清偿记录
-    page.appendChild(el('h2', 'section-title', '清偿记录'))
+    const repaidSection = el('section', 'repayment-section-card')
+    repaidSection.appendChild(el('div', 'repayment-section-heading', '清偿记录'))
+    repaidSection.appendChild(el('p', 'section-hint', '达到系统清偿条件的欠条会在这里保留记录。'))
     const repaid = gaps.filter(gap => gap.status === 'repaid')
     if (repaid.length === 0) {
-      page.appendChild(emptyState('还没有已清偿的欠条', '两次独立通过评估后，欠条才会被标记为已清偿。'))
+      repaidSection.appendChild(emptyState('还没有已清偿的欠条', '两次独立通过评估后，欠条才会被标记为已清偿。'))
     } else {
       const list = el('div', 'gap-list')
       for (const gap of repaid) list.appendChild(repaidRow(gap))
-      page.appendChild(list)
+      repaidSection.appendChild(list)
     }
+    page.appendChild(repaidSection)
 
     // 从报告导入欠条
     const importSec = el('section', 'repayment-import')
@@ -197,7 +231,7 @@ export async function renderRepaymentPage(root: HTMLElement): Promise<void> {
   } catch (err) {
     clear(page)
     page.appendChild(header)
-    renderErrorBar(page, errorMessage(err), retry)
+    renderErrorBar(page, errorMessage(err), retry, err)
   }
 }
 
@@ -225,7 +259,7 @@ function repaidRow(gap: RepaymentGap): HTMLElement {
   meta.appendChild(el('span', 'status-badge status-repaid', gapStatusLabel('repaid')))
   meta.appendChild(el('span', 'gap-repaid-at', `清偿时间：${formatLocal(gap.updatedAt)}`))
   if (gap.latestAttempt?.evaluation) {
-    meta.appendChild(el('span', 'gap-last-score', `最近评估 ${gap.latestAttempt.evaluation.overallScore} 分`))
+    meta.appendChild(el('span', 'gap-last-score', `${t('最近评估 ', 'Latest evaluation ')}${gap.latestAttempt.evaluation.overallScore}${t(' 分', ' points')}`))
   }
   main.appendChild(meta)
   row.appendChild(main)
@@ -257,7 +291,7 @@ function reviewRow(item: RepaymentReviewItem, onChanged: () => void): HTMLElemen
       onChanged()
     } catch {
       dismissBtn.disabled = false
-      dismissBtn.textContent = '失败，再试'
+      dismissBtn.textContent = t('失败，再试', 'Failed. Try again')
     }
   }
   actions.appendChild(dismissBtn)
@@ -267,7 +301,8 @@ function reviewRow(item: RepaymentReviewItem, onChanged: () => void): HTMLElemen
 
 function renderImportSection(container: HTMLElement, reports: ClearanceReport[]): void {
   clear(container)
-  container.appendChild(el('h2', 'section-title', '从报告导入欠条'))
+  container.appendChild(el('h2', 'section-title', '历史报告'))
+  container.appendChild(el('p', 'section-hint', '历史报告仍保留在这里用于回看；新报告的缺口会自动进入待清偿。'))
   if (reports.length === 0) {
     container.appendChild(emptyState('还没有认知债务报告', '先回到工作区粘贴一段 AI 协作材料，生成报告后再来导入欠条。'))
     return
@@ -331,13 +366,13 @@ function importGapRow(reportId: string, gap: { rank: number; gap?: string; title
   const btn = el('button', 'btn btn-primary btn-sm', '导入清偿') as HTMLButtonElement
   btn.onclick = async () => {
     btn.disabled = true
-    btn.textContent = '导入中…'
+    btn.textContent = t('导入中…', 'Importing…')
     try {
       const res = await importRepaymentGap(reportId, gap.rank)
       navigate({ name: 'repayment-detail', gapId: res.gap.gapId })
     } catch (err) {
       btn.disabled = false
-      btn.textContent = '导入清偿'
+      btn.textContent = t('导入清偿', 'Import for repayment')
       row.appendChild(el('p', 'error-inline', errorMessage(err)))
     }
   }
@@ -371,7 +406,7 @@ export async function renderRepaymentDetailPage(root: HTMLElement, gapId: string
   } catch (err) {
     clear(page)
     page.appendChild(header)
-    renderErrorBar(page, errorMessage(err), retry)
+    renderErrorBar(page, errorMessage(err), retry, err)
     return
   }
   clear(page)
@@ -469,7 +504,7 @@ export async function renderRepaymentDetailPage(root: HTMLElement, gapId: string
     sec.appendChild(el('h3', 'section-title', '作答历史'))
     for (const at of [...attempts].reverse().slice(0, 10)) {
       const item = el('div', 'attempt-row')
-      item.appendChild(el('span', 'attempt-score', `${at.evaluation?.overallScore ?? 0} 分`))
+      item.appendChild(el('span', 'attempt-score', `${at.evaluation?.overallScore ?? 0}${t(' 分', ' points')}`))
       item.appendChild(el('span', at.evaluation?.passed ? 'attempt-pass passed' : 'attempt-pass failed', at.evaluation?.passed ? '通过' : '未通过'))
       item.appendChild(el('span', 'attempt-status', gapStatusLabel(at.repaymentStatus)))
       item.appendChild(el('span', 'attempt-date', formatLocal(at.submittedAt)))
@@ -508,7 +543,7 @@ function renderLatestAttempt(attempt: RepaymentAttempt): HTMLElement {
       if (dim) dims.appendChild(dimRow(label, dim))
     }
     sec.appendChild(dims)
-    sec.appendChild(el('p', 'dim-overall', `综合得分：${evaluation.overallScore} 分 · ${evaluation.passed ? '本次通过' : '本次未通过'}`))
+    sec.appendChild(el('p', 'dim-overall', `${t('综合得分：', 'Overall score: ')}${evaluation.overallScore}${t(' 分 · ', ' points · ')}${evaluation.passed ? t('本次通过', 'Passed this time') : t('本次未通过', 'Not passed this time')}`))
   }
   if (attempt.feedback) {
     const fb = el('div', 'feedback-box')
@@ -548,7 +583,7 @@ function renderAnswerForm(root: HTMLElement, gapId: string): HTMLElement {
   sec.appendChild(el('p', 'section-hint', '用自己的话解释这个缺口涉及的概念与因果，系统会从五个维度评估。'))
 
   const textarea = el('textarea', 'answer-textarea') as HTMLTextAreaElement
-  textarea.placeholder = '写下你的解释…'
+  textarea.placeholder = t('写下你的解释…', 'Write your explanation…')
   textarea.rows = 6
   sec.appendChild(textarea)
 
@@ -588,7 +623,7 @@ function renderAnswerForm(root: HTMLElement, gapId: string): HTMLElement {
     const answer = textarea.value.trim()
     if (!answer) return
     submit.disabled = true
-    submit.textContent = '评估中…'
+    submit.textContent = t('评估中…', 'Evaluating…')
     status.textContent = ''
     try {
       const payload: { answer: string; selfConfidence?: number; clientAttemptId: string } = { answer, clientAttemptId }
@@ -600,7 +635,7 @@ function renderAnswerForm(root: HTMLElement, gapId: string): HTMLElement {
     } catch (err) {
       status.textContent = errorMessage(err)
       submit.disabled = false
-      submit.textContent = '提交作答'
+      submit.textContent = t('提交作答', 'Submit answer')
     }
   }
   return sec

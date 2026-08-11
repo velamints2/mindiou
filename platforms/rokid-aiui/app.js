@@ -1,6 +1,7 @@
 export default {
   globalData: {
-    apiBaseUrl: "https://114.67.169.78/mindiou-api",
+    // 114.67.169.78 is deprecated. Use the canonical demo domain.
+    apiBaseUrl: "https://demo.mindiou.top/mindiou-api",
     apiToken: "",
     sessionDuration: 60,
     reportId: "c18ecc67-6725-4b60-bc0a-a73e53150d5e",

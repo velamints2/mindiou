@@ -17,6 +17,7 @@ describe('persistent site navigation', () => {
     expect(navigation?.querySelector('a[href="#/"]')?.textContent).toContain('首页')
     expect(navigation?.querySelector('a[href="#/how-it-works"]')).not.toBeNull()
     expect(navigation?.querySelector('a[href="#/genesis"]')).not.toBeNull()
+    expect(navigation?.querySelector('a[href="#/profile"]')?.textContent).toContain('用户画像')
     expect(navigation?.textContent).toContain('进入工作区')
   })
 

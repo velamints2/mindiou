@@ -1,3 +1,5 @@
+# DEPRECATED: this IP-only certificate service targets 114.67.169.78.
+# Use the demo.mindiou.top deployment instead.
 [Unit]
 Description=Renew the MindIOU short-lived IP TLS certificate
 After=network-online.target

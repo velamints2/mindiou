@@ -1,5 +1,9 @@
 # MindIOU User Guide
 
+> **Server notice:** `114.67.169.78` is **DEPRECATED**. Use
+> `https://demo.mindiou.top/mindiou/` and
+> `https://demo.mindiou.top/mindiou-api/` for all current demos.
+
 Product name: 认知欠条 MindIOU  
 Subtitle: 把 AI 代劳转化为真实能力成长
 
@@ -45,19 +49,19 @@ session on smart glasses.
 Import this clean project folder in Rokid Craft:
 
 ```text
-/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/rokid-craft-project-0.2.12
+platforms/rokid-aiui/release/rokid-craft-project-0.2.12
 ```
 
 The source archive is:
 
 ```text
-/Users/macbookair/Documents/trae_projects/personal_os/evenhub-g2-learning/platforms/rokid-aiui/release/learn-coach-rokid-aiui-0.2.12.zip
+platforms/rokid-aiui/release/learn-coach-rokid-aiui-0.2.12.zip
 ```
 
 Backend address:
 
 ```text
-https://114.67.169.78/mindiou-api
+https://demo.mindiou.top/mindiou-api
 ```
 
 ### 3.2 Basic Controls
@@ -224,7 +228,7 @@ Start -> HTTP request -> JSON deserialize -> output question
 The first HTTP node should call:
 
 ```text
-POST https://114.67.169.78/mindiou-api/api/mvp1/sessions
+POST https://demo.mindiou.top/mindiou-api/api/mvp1/sessions
 ```
 
 Body:
@@ -250,7 +254,7 @@ After JSON deserialize, output:
 Second HTTP node:
 
 ```text
-POST https://114.67.169.78/mindiou-api/api/mvp1/sessions/{{sessionId}}/answers
+POST https://demo.mindiou.top/mindiou-api/api/mvp1/sessions/{{sessionId}}/answers
 ```
 
 Body:
@@ -277,7 +281,7 @@ Output:
 End HTTP node:
 
 ```text
-POST https://114.67.169.78/mindiou-api/api/mvp1/sessions/{{sessionId}}/end
+POST https://demo.mindiou.top/mindiou-api/api/mvp1/sessions/{{sessionId}}/end
 ```
 
 Output:
@@ -336,7 +340,7 @@ parsing. Version 0.2.12 supports standard Web Speech `results`, Rokid
 Check:
 
 - The phone connected to the glasses can reach
-  `https://114.67.169.78/mindiou-api/health?live=1`.
+  `https://demo.mindiou.top/mindiou-api/health?live=1`.
 - The workflow timeout is at least 30 seconds.
 - The server model key is configured.
 - The client is not pointing to `localhost` or a LAN-only address.

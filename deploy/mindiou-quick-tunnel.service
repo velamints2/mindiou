@@ -1,3 +1,5 @@
+# DEPRECATED: this fallback tunnel targets 114.67.169.78.
+# Use the canonical demo.mindiou.top origin instead.
 [Unit]
 Description=MindIOU public HTTPS quick tunnel
 After=network-online.target nginx.service

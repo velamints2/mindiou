@@ -1,0 +1,22 @@
+[Unit]
+Description=MindIOU Remote MCP (Streamable HTTP)
+After=network.target mindiou.service
+Wants=mindiou.service
+
+[Service]
+Type=simple
+User=mindiou
+Group=mindiou
+WorkingDirectory=/opt/mindiou-mcp
+EnvironmentFile=/etc/mindiou-mcp.env
+ExecStart=/usr/bin/node /opt/mindiou-mcp/mcp/remote-server.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mindiou-mcp
+
+[Install]
+WantedBy=multi-user.target

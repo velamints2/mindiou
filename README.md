@@ -1,36 +1,35 @@
-# Learn Coach
+# MindIOU 认知欠条
 
-Learn Coach is now focused on a local-first understanding coach workflow for
-desktop. The current MVP converts raw source text into small learning cards that
-help the user explain, compare, restate, and recall content in their own words.
+MindIOU 把 AI 代劳跳过的理解过程转化为用户可解释、可验证、可追踪的认知欠条，
+并通过费曼式解释、来源研究和谨慎反馈帮助用户清偿一笔重要欠条。
 
-The current priority is not flashcards for memorization. It is a local learning
-tool that turns mixed source material into cards that are stable enough to
-preview, edit, save into a deck, and later review in a lightweight session.
+## 核心闭环
 
-See:
+```text
+输入 AI 辅助材料
+  -> 协作时间线与用户标注困惑
+  -> 七部分认知债务报告
+  -> 选择一笔欠条
+  -> 费曼解释
+  -> 来源扎根反馈
+  -> 可选追问
+  -> 谨慎清偿状态
+  -> 下一步行动
+```
 
-- [CARD_GENERATION.md](./CARD_GENERATION.md)
-- [DESKTOP_APP.md](./DESKTOP_APP.md)
+Web 是主要产品、报告和管理界面。智能眼镜是同一笔认知欠条的低信息密度清偿终端。
 
-## What it does
+## 关键文档
 
-- Accepts pasted text or `.txt` / `.md` files.
-- Normalizes and chunks text locally.
-- Generates candidate cards locally with no AI API.
-- Scores card quality and keeps warnings visible for review.
-- Lets the user edit, delete, keep, and export cards.
-- Saves confirmed cards into local decks.
-- Opens a minimal session view from saved decks.
-- Keeps the desktop MVP focused on understanding, not memorization.
-
-The longer-term direction is a daily learning reflection system, not a larger
-flashcard interface. See:
-
-- [PRODUCT_DIRECTION.md](./PRODUCT_DIRECTION.md)
-- [PRODUCT_STRATEGY.md](./PRODUCT_STRATEGY.md)
-- [DEV_GUIDE.md](./DEV_GUIDE.md)
-- [ACCEPTANCE_CRITERIA.md](./ACCEPTANCE_CRITERIA.md)
+- 产品定位：[../docs/PRODUCT.md](../docs/PRODUCT.md)
+- 当前状态：[../docs/CURRENT_STATE.md](../docs/CURRENT_STATE.md)
+- 决策记录：[../docs/DECISIONS.md](../docs/DECISIONS.md)
+- 质量门禁：[../docs/QUALITY_GATES.md](../docs/QUALITY_GATES.md)
+- 桌面应用：[DESKTOP_APP.md](./DESKTOP_APP.md)
+- 卡片生成：[CARD_GENERATION.md](./CARD_GENERATION.md)
+- 产品方向：[PRODUCT_DIRECTION.md](./PRODUCT_DIRECTION.md)
+- 开发指南：[DEV_GUIDE.md](./DEV_GUIDE.md)
+- 验收标准：[ACCEPTANCE_CRITERIA.md](./ACCEPTANCE_CRITERIA.md)
 
 ## Run
 

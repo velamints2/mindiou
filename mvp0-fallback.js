@@ -47,6 +47,7 @@ const MAX_GAPS = 4;
 const FALLBACK_GAP_COUNT = 3;
 const MIN_CARDS = 3;
 const MAX_CARDS = 5;
+const TEXT_ONLY_INTERACTION_PATTERN = /画出|画图|绘制|手绘|流程图|系统图|数据流图|架构图|示意图|拍照|上传|图片|照片|附件|录音|音频|视频|截图|draw|sketch|diagram|flowchart|upload|photo|image|audio|video/i;
 
 function clean(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -55,6 +56,31 @@ function clean(value) {
 function truncate(value, max) {
   const text = clean(value);
   return text.length > max ? text.slice(0, max) : text;
+}
+
+// Web and glasses clearance currently accept text only. Keep this guard in
+// normalization as a second line of defense when a model ignores the prompt.
+function normalizeTextOnlyText(value, max = 500) {
+  let text = truncate(value, max);
+  if (!text) return "";
+  text = text
+    .replace(/你可以[^。！？\n]*(?:手绘|拍照|上传|图片|照片|附件)[^。！？\n]*[。！？]?/giu, "")
+    .replace(/(?:请你?|请)?\s*(?:画出|画图|绘制|手绘|画一张|draw|sketch)/giu, "请用文字说明")
+    .replace(/数据流图/giu, "文字数据流")
+    .replace(/流程图/giu, "文字流程")
+    .replace(/系统图/giu, "文字系统关系")
+    .replace(/架构图/giu, "文字架构关系")
+    .replace(/(?:示意图|图示|diagram|flowchart)/giu, "文字步骤与关键关系")
+    .replace(/(?:拍照|上传|图片|照片|附件|录音|音频|视频|截图|upload|photo|image|audio|video)/giu, "")
+    .replace(/\s+([，。！？：；])/g, "$1")
+    .trim();
+  return text.length >= 8 && !TEXT_ONLY_INTERACTION_PATTERN.test(text) ? text : "";
+}
+
+function normalizeTextOnlyQuestion(value, fallback = "请用自己的话说明关键步骤、判断依据和边界。") {
+  const text = normalizeTextOnlyText(value, 500);
+  if (!text) return fallback;
+  return text.startsWith("请只用文字回答") ? text : `请只用文字回答：${text}`;
 }
 
 function clamp01(value) {
@@ -265,7 +291,7 @@ export function normalizeReport(raw) {
           transferScenarios: textArray(gap.transferScenarios, 4, 300),
           confidence,
           alternativeExplanations: textArray(gap.alternativeExplanations, 4, 300),
-          diagnosticQuestion: truncate(gap.diagnosticQuestion, 500),
+          diagnosticQuestion: normalizeTextOnlyQuestion(gap.diagnosticQuestion, "请用自己的话解释这个理解缺口，并说明你的判断依据。"),
           masteryCriteria: textArray(gap.masteryCriteria, 5, 300)
         };
       })
@@ -327,10 +353,10 @@ export function normalizeReport(raw) {
         id: clean(card.id || uuid()).slice(0, 100),
         target: normalizeCardTarget(card.target),
         cardType: VALID_CARD_TYPES.includes(card.cardType) ? card.cardType : "system_map",
-        prompt: truncate(card.prompt, 300),
+        prompt: normalizeTextOnlyQuestion(card.prompt),
         targetLevel: validLevels.includes(card.targetLevel) ? card.targetLevel : "L1",
         difficulty: validDifficulties.includes(card.difficulty) ? card.difficulty : "foundation",
-        evaluationCriteria: textArray(card.evaluationCriteria, 5, 300),
+        evaluationCriteria: textArray(card.evaluationCriteria, 5, 300).map(item => normalizeTextOnlyText(item, 300) || "回答应包含关键步骤、判断依据或边界"),
         userAnswer: truncate(card.userAnswer, 2000),
         aiFollowUp: truncate(card.aiFollowUp, 500),
         answeredAt: card.answeredAt || null

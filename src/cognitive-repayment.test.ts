@@ -21,6 +21,7 @@ import {
   upsertReviewItemForGap,
   refreshReviewDue,
   completePendingReviewItems,
+  ensureCapabilityProfileDomain,
   updateCapabilityProfile,
   DIMENSIONS
 } from "../cognitive-repayment.js";
@@ -553,6 +554,44 @@ describe("capability profile", () => {
       ...overrides
     };
   }
+
+  it("creates a zero-evidence domain from a newly generated report", () => {
+    const profiles: any[] = [];
+    const profile = ensureCapabilityProfileDomain({
+      profiles,
+      userId: "user-1",
+      domain: "3D打印",
+      reportId: "report-3d-printing",
+      now: NOW
+    });
+    expect(profile.domain).toBe("3D打印");
+    expect(profile.source).toBe("report_inferred");
+    expect(profile.sourceReportIds).toEqual(["report-3d-printing"]);
+    expect(Object.keys(profile.dimensions)).toEqual(DIMENSIONS);
+    expect(profile.dimensions.conceptualUnderstanding).toMatchObject({
+      score: 0,
+      level: "L1",
+      stability: "unverified",
+      evidence: []
+    });
+  });
+
+  it("does not create a fake domain for unknown or general reports", () => {
+    const profiles: any[] = [];
+    expect(ensureCapabilityProfileDomain({ profiles, userId: "user-1", domain: "unknown", now: NOW })).toBeNull();
+    expect(ensureCapabilityProfileDomain({ profiles, userId: "user-1", domain: "general", now: NOW })).toBeNull();
+    expect(profiles).toHaveLength(0);
+  });
+
+  it("deduplicates a domain while retaining source report ids", () => {
+    const profiles: any[] = [];
+    const first = ensureCapabilityProfileDomain({ profiles, userId: "user-1", domain: "3D打印", reportId: "report-1", now: NOW });
+    const second = ensureCapabilityProfileDomain({ profiles, userId: "user-1", domain: "3D打印", reportId: "report-2", now: NOW });
+    expect(profiles).toHaveLength(1);
+    expect(second).toBe(first);
+    expect(second.sourceReportIds).toEqual(["report-1", "report-2"]);
+    expect(second.dimensions.conceptualUnderstanding.score).toBe(0);
+  });
 
   it("never lets one perfect answer jump multiple levels (±20 clamp)", () => {
     const profiles: any[] = [];

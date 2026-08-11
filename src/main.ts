@@ -1017,7 +1017,7 @@ async function syncSpiralToday(replaceCards = true): Promise<void> {
 async function ingestLearningIncrement(): Promise<void> {
   const rawText = importTextEl.value.trim();
   if (!rawText) {
-    captureStatusEl.textContent = "Add a Codex goal, failure, decision, and result first.";
+    captureStatusEl.textContent = "Add the goal, key failure, decision, and verified result first.";
     return;
   }
   ingestButton.disabled = true;
@@ -1029,7 +1029,7 @@ async function ingestLearningIncrement(): Promise<void> {
       atoms: KnowledgeAtom[];
       cards: LearningCard[];
       today: SpiralDashboard;
-    }>("/v1/events/codex", {
+    }>("/api/spiral/ingest", {
       source: captureSourceEl.value,
       projectId: captureProjectEl.value.trim() || "general",
       event_type: "ManualImport",

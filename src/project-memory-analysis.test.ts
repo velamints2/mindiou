@@ -43,5 +43,20 @@ describe('Project Memory session analysis', () => {
     expect(sanitizeRepositoryPath('/Users/alice/private/src/app.ts')).toBe('src/app.ts')
     expect(sanitizeRepositoryPath('/Users/alice/private/secret.txt')).not.toContain('/Users/')
   })
-})
 
+  it('turns an explicit hook debt candidate into a structured candidate even without chat text', () => {
+    const session = normalizeSessionImport({
+      platform: 'trae',
+      events: [
+        { type: 'file_changed', payload: { path: 'src/redeem.ts' } },
+        { type: 'debt_candidate', payload: { gapText: '尚未掌握并发窗口', reason: '关键方案由 Agent 完成', risk: '可能重复发放权益' } }
+      ]
+    })
+    const result = analyzeNormalizedSession(session)
+    expect(result.cognitiveDebtCandidates).toContainEqual(expect.objectContaining({
+      description: '尚未掌握并发窗口',
+      reason: '关键方案由 Agent 完成',
+      priority: 'high'
+    }))
+  })
+})

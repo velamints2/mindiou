@@ -1,4 +1,5 @@
-export const DEFAULT_API_BASE_URL = "https://114.67.169.78/mindiou-api";
+// 114.67.169.78 is deprecated. Use the canonical demo domain.
+export const DEFAULT_API_BASE_URL = "https://demo.mindiou.top/mindiou-api";
 export const LEGACY_API_BASE_URLS = [
   "https://launch-wonder-construction-unto.trycloudflare.com/mindiou-api"
 ];

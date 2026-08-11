@@ -120,7 +120,12 @@ function resolveGapFromReport(report, gapRef) {
   if (!matched) {
     throw new Error(`Gap not found in report: rank ${rank}`);
   }
-  return { gap: matched, card: null };
+  const cards = Array.isArray(report?.sections?.feynmanCards) ? report.sections.feynmanCards : [];
+  const matchedCard = cards.find(item => [item?.target, item?.prompt]
+    .some(value => clean(value || "") === clean(matched?.title || matched?.gap || "")))
+    || cards[rank - 1]
+    || null;
+  return { gap: matched, card: matchedCard };
 }
 
 function buildEvidence(gap, artifactText) {
@@ -603,6 +608,63 @@ function levelForScore(score) {
 
 function emptyProfileDimension() {
   return { score: 0, level: "L1", stability: "one_shot", evidence: [] };
+}
+
+const NON_SPECIFIC_CAPABILITY_DOMAINS = new Set([
+  "unknown",
+  "general",
+  "通用",
+  "认知债务",
+  "未识别",
+  "未命名"
+]);
+
+/**
+ * Create a zero-evidence domain as soon as a report identifies a specific
+ * topic. This records that the domain exists without claiming that the user
+ * understands it; scores and user evidence are still updated by repayment
+ * attempts through updateCapabilityProfile().
+ */
+export function ensureCapabilityProfileDomain({ profiles, userId, domain, reportId, now = new Date().toISOString() } = {}) {
+  if (!Array.isArray(profiles)) throw new Error("A profiles array is required");
+  const profileDomain = clean(domain || "");
+  if (!profileDomain || NON_SPECIFIC_CAPABILITY_DOMAINS.has(profileDomain.toLowerCase())) return null;
+  let profile = profiles.find(item => item.userId === userId && item.domain === profileDomain);
+  if (!profile) {
+    profile = {
+      userId,
+      domain: profileDomain,
+      dimensions: Object.fromEntries(DIMENSIONS.map(dimension => [dimension, {
+        score: 0,
+        level: "L1",
+        stability: "unverified",
+        evidence: []
+      }])),
+      source: "report_inferred",
+      sourceReportIds: reportId ? [reportId] : [],
+      createdAt: now,
+      updatedAt: now,
+      dataSchemaVersion: DATA_SCHEMA_VERSION
+    };
+    profiles.push(profile);
+    return profile;
+  }
+  const sourceReportIds = Array.isArray(profile.sourceReportIds) ? profile.sourceReportIds : [];
+  if (reportId && !sourceReportIds.includes(reportId)) sourceReportIds.push(reportId);
+  profile.sourceReportIds = sourceReportIds.slice(-50);
+  profile.updatedAt = now;
+  for (const dimension of DIMENSIONS) {
+    if (!profile.dimensions?.[dimension]) {
+      profile.dimensions = profile.dimensions || {};
+      profile.dimensions[dimension] = {
+        score: 0,
+        level: "L1",
+        stability: "unverified",
+        evidence: []
+      };
+    }
+  }
+  return profile;
 }
 
 /**

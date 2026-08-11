@@ -186,6 +186,24 @@ function extractDebtCandidates(body, decisions, artifacts, title) {
   return [{ ...candidate, relatedDecisionIndexes: decisions.map((_, index) => index), relatedArtifactIndexes: artifacts.map((_, index) => index), priority: sensitive ? "high" : "medium", confidence: sensitive && userAccepted ? 0.9 : 0.68 }];
 }
 
+function normalizeExplicitDebtCandidates(candidates, decisions, artifacts) {
+  return (Array.isArray(candidates) ? candidates : []).map(candidate => {
+    const description = compact(candidate?.description || candidate?.gapText || candidate?.title, 500);
+    if (!description) return null;
+    return {
+      title: compact(candidate.title || description, 300),
+      description,
+      reason: compact(candidate.reason || "由 Agent 显式标记，需要用户确认是否形成认知欠条。", 1000),
+      risk: compact(candidate.risk, 1000) || undefined,
+      requiredEvidence: Array.isArray(candidate.requiredEvidence) ? candidate.requiredEvidence.slice(0, 8).map(item => compact(item, 300)).filter(Boolean) : [],
+      relatedDecisionIndexes: decisions.map((_, index) => index),
+      relatedArtifactIndexes: artifacts.map((_, index) => index),
+      priority: candidate.priority === "medium" ? "medium" : "high",
+      confidence: Math.max(0, Math.min(1, Number(candidate.confidence ?? 0.9)))
+    };
+  }).filter(Boolean);
+}
+
 export function analyzeNormalizedSession(session) {
   const body = sessionText(session);
   const user = userText(session.messages || []);
@@ -194,7 +212,12 @@ export function analyzeNormalizedSession(session) {
   const title = inferTitle(session.messages || [], body);
   const decisions = extractDecisions(body, artifacts);
   const workItem = { title, summary: compact(user || body.slice(0, 500), 500), type: inferWorkItemType(body), confidence: title !== "Agent 协作实现任务" ? 0.9 : 0.62 };
-  const debtCandidates = extractDebtCandidates(body, decisions, artifacts, title);
+  const inferredDebtCandidates = extractDebtCandidates(body, decisions, artifacts, title);
+  const explicitDebtCandidates = normalizeExplicitDebtCandidates(session.explicitDebtCandidates, decisions, artifacts);
+  // An explicit debt_candidate event is already a deliberate signal from the
+  // caller. Prefer it over the heuristic candidate for this session so the
+  // acceptance UI does not show two versions of the same gap.
+  const debtCandidates = explicitDebtCandidates.length ? explicitDebtCandidates : inferredDebtCandidates;
   const keyTopics = unique([title, ...decisions.map(item => item.title), ...(body.match(/\b(?:JWT|WebSocket|SQLite|MIPI|API|MCP|Git|TypeScript|JavaScript|Python|SQL|OAuth|CORS|idempotency|幂等|并发|事务)\b/gi) || [])]).slice(0, 20);
   const technologies = unique(body.match(/\b(?:Node(?:\.js)?|TypeScript|JavaScript|Python|SQLite|PostgreSQL|Redis|React|Vite|Express|JWT|WebSocket|Git|Docker|MCP|API)\b/gi) || []).slice(0, 20);
   return {
@@ -231,6 +254,11 @@ export function normalizeSessionImport(input = {}, method = "manual_paste") {
     changedArtifacts: Array.isArray(input.changedArtifacts) ? input.changedArtifacts : [],
     commits: Array.isArray(input.commits) ? input.commits : [],
     testResults: Array.isArray(input.testResults) ? input.testResults : [],
+    explicitDebtCandidates: Array.isArray(input.explicitDebtCandidates)
+      ? input.explicitDebtCandidates
+      : Array.isArray(input.events)
+        ? input.events.filter(event => event?.type === "debt_candidate").map(event => event.payload || {})
+        : [],
     importMethod: method,
     rawContent: raw
   };
@@ -253,7 +281,13 @@ export function createHookAdapter() {
     async parse(input) {
       const events = Array.isArray(input.events) ? input.events : [];
       const messages = events.filter(event => ["user_prompted", "agent_message"].includes(event.type)).map(event => ({ id: event.id, role: event.type === "user_prompted" ? "user" : "assistant", content: event.payload?.content || event.payload?.text || "", createdAt: event.occurredAt }));
-      return normalizeSessionImport({ ...input, messages, changedArtifacts: events.filter(event => event.type === "file_changed").map(event => event.payload || {}), commits: events.filter(event => event.type === "commit_created").map(event => event.payload || {}) }, "hook");
+      return normalizeSessionImport({
+        ...input,
+        messages,
+        changedArtifacts: events.filter(event => event.type === "file_changed").map(event => event.payload || {}),
+        commits: events.filter(event => event.type === "commit_created").map(event => event.payload || {}),
+        explicitDebtCandidates: events.filter(event => event.type === "debt_candidate").map(event => event.payload || {})
+      }, "hook");
     }
   };
 }

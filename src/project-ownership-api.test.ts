@@ -12,10 +12,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import path from "node:path";
 
-const API_PORT = 8813;
-const BASE = `http://127.0.0.1:${API_PORT}`;
+let API_PORT;
+let BASE;
 const OWNERSHIP_STORE = path.resolve("tmp/ownership-api-test-store.json");
 const TRAINING_STORE = path.resolve("tmp/ownership-api-test-training.json");
 const MVP0_STORE = path.resolve("tmp/ownership-api-test-mvp0.json");
@@ -25,11 +26,31 @@ const SESSION_SECRET = "test-secret-for-ownership-api-tests-32chars!";
 
 let appProcess;
 
+async function findFreePort() {
+  const probe = createServer();
+  await new Promise((resolve, reject) => {
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", resolve);
+  });
+  const address = probe.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  await new Promise((resolve, reject) => {
+    probe.close(error => (error ? reject(error) : resolve()));
+  });
+  if (!port) throw new Error("Could not reserve a local test port");
+  return port;
+}
+
 async function waitFor(url, attempts = 40) {
   for (let i = 0; i < attempts; i += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 500);
     try {
-      if ((await fetch(url)).ok) return;
+      if ((await fetch(url, { signal: controller.signal })).ok) return;
     } catch {}
+    finally {
+      clearTimeout(timeout);
+    }
     await new Promise(r => setTimeout(r, 100));
   }
   throw new Error(`Server did not start: ${url}`);
@@ -166,6 +187,8 @@ async function removeStores() {
 }
 
 beforeAll(async () => {
+  API_PORT = await findFreePort();
+  BASE = `http://127.0.0.1:${API_PORT}`;
   await mkdir(path.dirname(OWNERSHIP_STORE), { recursive: true });
   await removeStores();
 
@@ -201,8 +224,12 @@ beforeAll(async () => {
     },
     stdio: "pipe",
   });
+  // Prevent a noisy child process from filling the pipe while other test files
+  // start their own API servers in parallel.
+  appProcess.stdout?.resume();
+  appProcess.stderr?.resume();
   await waitFor(`${BASE}/health`);
-});
+}, 30000);
 
 afterAll(async () => {
   appProcess?.kill("SIGTERM");
@@ -228,6 +255,26 @@ describe("项目所有权 API — 基础访问", () => {
     expect(data.ok).toBe(true);
     expect(data.projects).toHaveLength(1);
     expect(data.projects[0].id).toBe(ALICE_PROJECT_ID);
+  });
+
+  it("Project Memory 项目可以打开所有权入口", async () => {
+    const { cookie } = await loginEarlyAccess("code-alice");
+    const create = await fetch(`${BASE}/api/projects`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "关系型项目记忆测试", description: "验证两套项目存储可以共用详情入口" }),
+    });
+    const created = await create.json();
+    expect(create.status).toBe(201);
+
+    const res = await fetch(`${BASE}/api/projects/${created.project.id}/ownership`, {
+      headers: { cookie },
+    });
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(data.project.id).toBe(created.project.id);
+    expect(data.summary).toBeTruthy();
   });
 });
 

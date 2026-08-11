@@ -213,10 +213,8 @@ AI：重启 nginx 只是缓解了症状。根因可能是：
 但我不确定根因是否真的修复了，因为只是减少了写入量而不是解决了 I/O 瓶颈。`
 
 const ARTIFACT_TYPES = [
-  { value: 'chatgpt', label: 'ChatGPT 对话' },
-  { value: 'claude', label: 'Claude 对话' },
-  { value: 'cursor', label: 'Cursor 对话' },
-  { value: 'codex', label: 'AI 编程记录' },
+  { value: 'ai_conversation', label: 'AI 协作对话' },
+  { value: 'ai_code', label: 'AI 编程记录' },
   { value: 'hackathon', label: '黑客松方案' },
   { value: 'meeting', label: '会议纪要' },
   { value: 'article', label: 'AI 辅助文章' },
@@ -261,19 +259,14 @@ const EVIDENCE_STATUS_LABELS: Record<string, string> = {
 function detectArtifactType(text: string): string {
   const lower = text.toLowerCase()
 
-  if (/chatgpt|gpt-4|gpt-3\.5|gpt-3\b/i.test(text)) return 'chatgpt'
-  if (lower.includes('user:') && lower.includes('assistant:')) return 'chatgpt'
-  if (lower.includes('你是一个') && lower.includes('请')) return 'chatgpt'
-
-  if (/claude|anthropic/i.test(text)) return 'claude'
-  if (lower.includes('human:') && lower.includes('assistant:')) return 'claude'
-
-  if (/cursor|cursor\s+ide|cursor\s+chat/i.test(text)) return 'cursor'
-  if (lower.includes('@@codebase') || lower.includes('cmd+k') || lower.includes('ctrl+k')) return 'cursor'
-
-  if (/codex|copilot|git\s+commit|diff\s+--git|patch/i.test(text)) return 'codex'
-  if (lower.includes('function ') && lower.includes('import ') && lower.includes('const ')) return 'codex'
-  if (/```[\s\S]*```/.test(text) && /function|class|const|import/.test(text)) return 'codex'
+  if (/gpt-4|gpt-3\.5|gpt-3\b/i.test(text)) return 'ai_conversation'
+  if (lower.includes('user:') && lower.includes('assistant:')) return 'ai_conversation'
+  if (lower.includes('你是一个') && lower.includes('请')) return 'ai_conversation'
+  if (lower.includes('human:') && lower.includes('assistant:')) return 'ai_conversation'
+  if (lower.includes('@@codebase') || lower.includes('cmd+k') || lower.includes('ctrl+k')) return 'ai_code'
+  if (/git\s+commit|diff\s+--git|patch/i.test(text)) return 'ai_code'
+  if (lower.includes('function ') && lower.includes('import ') && lower.includes('const ')) return 'ai_code'
+  if (/```[\s\S]*```/.test(text) && /function|class|const|import/.test(text)) return 'ai_code'
 
   if (/hackathon|黑客松|demo\s+day|pitch|项目展示|路演/i.test(text)) return 'hackathon'
   if (lower.includes('评委') && lower.includes('项目')) return 'hackathon'
@@ -360,7 +353,8 @@ async function generateTimeline(artifactText: string, artifactType: string): Pro
   const res = await fetch(`${API_BASE}/api/mvp0/timelines`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ artifactText, artifactType })
+    body: JSON.stringify({ artifactText, artifactType }),
+    credentials: 'same-origin'
   })
   const data = await apiJson<{ draft: Draft; fallback: boolean }>(res)
   return { draft: data.draft, fallback: Boolean(data.fallback) }
@@ -370,21 +364,26 @@ async function generateReport(body: { draftId?: string; artifactText?: string; a
   const res = await fetch(`${API_BASE}/api/mvp0/report`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    credentials: 'same-origin'
   })
   const data = await apiJson<{ report: ClearanceReport; fallback: boolean }>(res)
   return { report: data.report, fallback: Boolean(data.fallback) }
 }
 
 async function fetchReport(reportId: string): Promise<ClearanceReport> {
-  const res = await fetch(`${API_BASE}/api/mvp0/reports/${reportId}`)
+  const res = await fetch(`${API_BASE}/api/mvp0/reports/${reportId}`, {
+    credentials: 'same-origin'
+  })
   if (!res.ok) throw new Error(`Report not found: ${reportId}`)
   const data = await res.json()
   return data.report
 }
 
 async function fetchDraft(draftId: string): Promise<Draft> {
-  const res = await fetch(`${API_BASE}/api/mvp0/drafts/${draftId}`)
+  const res = await fetch(`${API_BASE}/api/mvp0/drafts/${draftId}`, {
+    credentials: 'same-origin'
+  })
   if (!res.ok) throw new Error(`Draft not found: ${draftId}`)
   const data = await res.json()
   return data.draft
@@ -395,7 +394,8 @@ async function saveDraftConfusions(draftId: string): Promise<Draft> {
   const res = await fetch(`${API_BASE}/api/mvp0/drafts/${draftId}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ confusions })
+    body: JSON.stringify({ confusions }),
+    credentials: 'same-origin'
   })
   const data = await apiJson<{ draft: Draft }>(res)
   return data.draft
@@ -591,7 +591,7 @@ function renderInputForm(): HTMLElement {
   demoBtn.textContent = '使用演示样本（服务器事故排查）'
   demoBtn.onclick = () => {
     state._lastInputText = DEMO_SAMPLE_TEXT
-    state.detectedType = 'codex'
+    state.detectedType = 'ai_code'
     state.typeEditing = false
     render()
   }
@@ -599,7 +599,7 @@ function renderInputForm(): HTMLElement {
   form.appendChild(demoBar)
 
   const textarea = document.createElement('textarea')
-  textarea.placeholder = '粘贴 AI 辅助工作的材料：ChatGPT/Claude 对话、AI 生成的方案、黑客松记录、会议纪要…'
+  textarea.placeholder = '粘贴 AI 辅助工作的材料：AI 协作对话、AI 生成的方案、黑客松记录、会议纪要…'
   textarea.id = 'artifact-text'
   textarea.value = state._lastInputText || ''
   textarea.oninput = () => {

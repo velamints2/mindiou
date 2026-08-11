@@ -185,7 +185,7 @@ describe("renderRepaymentPage", () => {
     expect(root.textContent).toContain("待清偿");
     expect(root.textContent).toContain("复习队列");
     expect(root.textContent).toContain("清偿记录");
-    expect(root.textContent).toContain("从报告导入欠条");
+    expect(root.textContent).toContain("历史报告");
     // 状态徽章
     expect(root.querySelector(".status-identified")?.textContent).toBe("已识别");
     expect(root.querySelector(".status-repaid")?.textContent).toBe("已清偿");
@@ -203,8 +203,8 @@ describe("renderRepaymentPage", () => {
 
   it("shows specific empty states when nothing exists", async () => {
     await renderRepaymentPage(root);
-    expect(root.textContent).toContain("还没有待清偿的认知欠条，从下方报告导入一笔");
-    expect(root.textContent).toContain("复习队列是空的");
+    expect(root.textContent).toContain("暂无待清偿的认知欠条");
+    expect(root.textContent).toContain("暂时没有到期复习");
     expect(root.textContent).toContain("还没有已清偿的欠条");
     expect(root.textContent).toContain("还没有认知债务报告");
   });

@@ -1,3 +1,5 @@
+import { translateText } from './i18n'
+
 // 极简 hash 路由器。
 // 路由格式：#/path，支持参数段。
 // 分公开区（landing/how-it-works/register）与产品区（app/report/session/devices）。
@@ -23,7 +25,7 @@ export type Route =
   | { name: 'training-debt'; debtId: string }  // 产品区：认知欠条详情
   | { name: 'repayment' }            // 产品区：认知清偿 V1 列表
   | { name: 'repayment-detail'; gapId: string }  // 产品区：认知清偿欠条详情
-  | { name: 'projects' }
+  | { name: 'profile' }              // 产品区：用户能力画像
   | { name: 'project'; projectId: string }
   | { name: 'work-item'; projectId: string; workItemId: string }
   | { name: 'agent-session'; sessionId: string }
@@ -74,6 +76,8 @@ export function parseRoute(): Route {
       return rest[0] ? { name: 'training-debt', debtId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     case 'repayment':
       return rest[0] ? { name: 'repayment-detail', gapId: decodeURIComponent(rest[0]) } : { name: 'repayment' }
+    case 'profile':
+      return { name: 'profile' }
     case 'projects':
       if (!rest[0]) return { name: 'projects' }
       if (rest[1] === 'work-items' && rest[2]) {
@@ -81,6 +85,7 @@ export function parseRoute(): Route {
       }
       return { name: 'project', projectId: decodeURIComponent(rest[0]) }
     case 'agent-sessions':
+      return rest[0] ? { name: 'agent-session', sessionId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     case 'project-ownership': {
       const projectId = rest[0]
       if (!projectId) return { name: 'not-found' }
@@ -96,7 +101,6 @@ export function parseRoute(): Route {
         moduleId: decodeURIComponent(moduleId)
       }
     }
-      return rest[0] ? { name: 'agent-session', sessionId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     default:
       return { name: 'not-found' }
   }
@@ -121,6 +125,7 @@ export function navigate(route: Route): void {
     case 'training': path = '/training'; break
     case 'training-debt': path = `/training-debt/${encodeURIComponent(route.debtId)}`; break
     case 'repayment': path = '/repayment'; break
+    case 'profile': path = '/profile'; break
     case 'projects': path = '/projects'; break
     case 'project': path = '/projects/' + encodeURIComponent(route.projectId); break
     case 'work-item': path = '/projects/' + encodeURIComponent(route.projectId) + '/work-items/' + encodeURIComponent(route.workItemId); break
@@ -143,7 +148,7 @@ export function el<K extends keyof HTMLElementTagNameMap>(
 ): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag)
   if (className) node.className = className
-  if (text != null) node.textContent = text
+  if (text != null) node.textContent = translateText(text)
   return node
 }
 
@@ -155,6 +160,7 @@ export function clear(node: HTMLElement): void {
 const REPORT_ID_KEY = 'mindiou_report_id'
 const SESSION_ID_KEY = 'mindiou_session_id'
 const DRAFT_ID_KEY = 'mindiou_draft_id'
+const PROJECT_MEMORY_PROJECT_ID_KEY = 'mindiou_project_memory_project_id'
 
 export function rememberReportId(id: string): void {
   sessionStorage.setItem(REPORT_ID_KEY, id)
@@ -176,4 +182,13 @@ export function recallSessionId(): string | null {
 }
 export function forgetSessionId(): void {
   sessionStorage.removeItem(SESSION_ID_KEY)
+}
+
+export function rememberProjectMemoryProjectId(id: string | null): void {
+  if (id) sessionStorage.setItem(PROJECT_MEMORY_PROJECT_ID_KEY, id)
+  else sessionStorage.removeItem(PROJECT_MEMORY_PROJECT_ID_KEY)
+}
+
+export function recallProjectMemoryProjectId(): string | null {
+  return sessionStorage.getItem(PROJECT_MEMORY_PROJECT_ID_KEY)
 }

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { createSession, fetchDashboard, fetchReport, fetchSession } from "./api";
-import { renderAppPage, renderGenesisPage, renderReportPage, renderSessionPage } from "./pages";
+import { ApiError, createSession, fetchDashboard, fetchReport, fetchSession, fetchTodayTraining } from "./api";
+import { renderAppPage, renderDevicesPage, renderGenesisPage, renderReportPage, renderSessionPage, renderTrainingPage } from "./pages";
 import { el } from "./router";
+import { setLocale, translateText } from "./i18n";
 
 // Mock API module to avoid network calls
 vi.mock("./api", () => ({
@@ -15,7 +16,15 @@ vi.mock("./api", () => ({
   generateTimeline: vi.fn().mockResolvedValue({ draft: { id: "d-1" } }),
   checkHealth: vi.fn().mockResolvedValue({ ok: true }),
   createSession: vi.fn(),
+  createDeviceToken: vi.fn().mockResolvedValue({ id: "device-1", name: "眼镜", createdAt: "2026-08-01T00:00:00.000Z", lastUsedAt: null, token: "device-token" }),
+  listDeviceTokens: vi.fn().mockResolvedValue([]),
+  revokeDeviceToken: vi.fn(),
+  listProjects: vi.fn().mockResolvedValue([{ id: "project-1", name: "认知欠条" }]),
+  listProjectHookTokens: vi.fn().mockResolvedValue([]),
+  createProjectHookToken: vi.fn().mockResolvedValue({ id: "hook-1", projectId: "project-1", name: "评委演示", createdAt: "2026-08-01T00:00:00.000Z", revokedAt: null, token: "hook-token-plaintext" }),
+  revokeProjectHookToken: vi.fn(),
   fetchReport: vi.fn(),
+  fetchTodayTraining: vi.fn(),
   logoutAccess: vi.fn(),
   getAccessToken: vi.fn().mockReturnValue("fake-token"),
   setAccessToken: vi.fn(),
@@ -31,10 +40,10 @@ vi.mock("./api", () => ({
       dates: { start: null, end: null },
       capacity: 300,
       estimates: { completed: 87 },
-      actual: { registered: 12, joined: 3, completedFirstClearance: 1, adoptedSuggestions: 0 },
-      adoptedSuggestions: [],
+      actual: { registered: 12, joined: 3, completedFirstClearance: 1, adoptedSuggestions: 4 },
+      adoptedSuggestions: ["建议一", "建议二", "建议三", "建议四"],
       productImprovements: [],
-      members: [],
+      members: [1, 2, 3, 4, 5].map(index => ({ number: `MIOU-001-000${index}`, activatedAt: null, visibility: "anonymous" as const })),
       participant: null
     }
   }),
@@ -66,6 +75,7 @@ describe("renderAppPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    setLocale("zh-CN");
     root = el("div");
     document.body.appendChild(root);
   });
@@ -85,6 +95,28 @@ describe("renderAppPage", () => {
     const demoBtn = root.querySelector(".btn-demo-sample");
     expect(demoBtn).not.toBeNull();
     expect(demoBtn?.textContent).toContain("演示样本");
+  });
+
+  it("renders the English workbench without Chinese UI chrome", async () => {
+    setLocale("en");
+    await renderAppPage(root);
+    const text = root.textContent || "";
+    expect(text).toContain("My cognitive dashboard");
+    expect(text).toContain("Find the cognitive work AI skipped for you");
+    expect(text).toContain("Attach to project memory");
+    expect(text).toContain("Generate a cognitive debt report");
+    expect(text).not.toContain("我的认知仪表盘");
+    expect(text).not.toContain("识别你跳过的认知债务");
+    expect(text).not.toContain("归入项目记忆");
+    expect(text).not.toContain("生成认知债务报告");
+    expect(text).not.toMatch(/[\u4e00-\u9fff]/);
+  });
+
+  it("translates compound enum labels instead of leaving a Chinese suffix", () => {
+    setLocale("en");
+    expect(translateText("协作测试")).toBe("Collaborative test");
+    expect(translateText("Collaborative测试")).not.toContain("测试");
+    setLocale("zh-CN");
   });
 
   it("demo button fills textarea with sample text", async () => {
@@ -174,13 +206,69 @@ describe("renderGenesisPage", () => {
     const root = el("div");
     document.body.appendChild(root);
     await renderGenesisPage(root);
-    expect(root.textContent).toContain("已正式加入");
+    expect(root.textContent).toContain("注册用户");
+    expect(root.textContent).toContain("36");
     expect(root.textContent).toContain("已完成首次清偿");
     expect(root.textContent).toContain("首发体验者名录");
     expect(root.textContent).toContain("当前已支持");
-    expect(root.textContent).toContain("上线前需补齐");
+    expect(root.textContent).not.toContain("上线前需补齐");
+    expect(root.textContent).toContain("共创建议已采纳");
+    expect(root.textContent).toContain("已注册首发用户");
+    expect(root.querySelectorAll(".genesis-member")).toHaveLength(5);
     expect(root.textContent).not.toContain("预期完成者");
     expect(root.textContent).not.toContain("这 15 天会发生什么");
+  });
+});
+
+describe("renderTrainingPage", () => {
+  it("shows a sign-in recovery state when the account session has expired", async () => {
+    const root = el("div");
+    const error = new ApiError(401, "Your session has expired. Please sign in again.");
+    vi.mocked(fetchTodayTraining).mockRejectedValueOnce(error);
+
+    await renderTrainingPage(root);
+
+    expect(root.querySelector(".training-session-expired")?.textContent).toContain("登录状态已失效");
+    expect(root.querySelector(".training-error-card")).toBeNull();
+    expect(root.querySelector(".training-session-expired button")?.textContent).toContain("重新登录");
+  });
+});
+
+describe("renderDevicesPage", () => {
+  it("separates project Hook Token management from glasses tokens and shows plaintext only after creation", async () => {
+    const root = el("div");
+    document.body.appendChild(root);
+
+    await renderDevicesPage(root);
+
+    expect(root.textContent).toContain("设备 Token 管理");
+    expect(root.textContent).toContain("项目 MCP / Hook Token");
+    const projectSelect = root.querySelector(".project-hook-section select") as HTMLSelectElement;
+    expect(projectSelect.value).toBe("project-1");
+    expect(root.querySelector(".project-hook-section .token-display")?.getAttribute("style")).toContain("display: none");
+
+    const nameInput = root.querySelector(".project-hook-section input") as HTMLInputElement;
+    nameInput.value = "评委演示";
+    const form = root.querySelector(".hook-token-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(root.querySelector(".project-hook-section .token-plaintext")?.getAttribute("value")).toBe(null);
+    expect((root.querySelector(".project-hook-section .token-plaintext") as HTMLInputElement).value).toBe("hook-token-plaintext");
+    expect(root.textContent).toContain("明文只在生成成功后显示一次");
+  });
+
+  it("renders the new token management UI in English", async () => {
+    setLocale("en");
+    const root = el("div");
+    document.body.appendChild(root);
+    await renderDevicesPage(root);
+    const text = root.textContent || "";
+    expect(text).toContain("Project MCP / Hook tokens");
+    expect(text).toContain("Generate project token");
+    expect(text).not.toContain("项目 MCP / Hook Token");
+    expect(text).not.toContain("生成项目 Token");
+    setLocale("zh-CN");
   });
 });
 

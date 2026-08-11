@@ -200,12 +200,17 @@ export function createAuthStore(dbPath) {
     const members = db.prepare(
       `SELECT display_name, genesis_number, genesis_activated_at, genesis_visibility, genesis_avatar_url
        FROM users
-       WHERE genesis_activated_at IS NOT NULL AND genesis_visibility IN ('public', 'anonymous')
+       WHERE genesis_number IS NOT NULL
+         AND (
+           genesis_number <= 5
+           OR (genesis_activated_at IS NOT NULL AND genesis_visibility IN ('public', 'anonymous'))
+         )
        ORDER BY genesis_number ASC`
     ).all().map(row => ({
       number: formatGenesisNumber(row.genesis_number),
       activatedAt: row.genesis_activated_at,
-      visibility: row.genesis_visibility,
+      // 首批五位注册用户作为真实首发体验者展示，但未主动公开前只显示匿名编号。
+      visibility: row.genesis_number <= 5 && row.genesis_visibility === "private" ? "anonymous" : row.genesis_visibility,
       ...(row.genesis_visibility === "public" ? {
         nickname: row.display_name || "首发体验者",
         avatarUrl: row.genesis_avatar_url || undefined

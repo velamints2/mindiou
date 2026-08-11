@@ -70,10 +70,12 @@ export function clearAccessToken(): void {
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  retryAfterSeconds?: number
+  constructor(status: number, message: string, retryAfterSeconds?: number) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.retryAfterSeconds = retryAfterSeconds
   }
 }
 
@@ -85,6 +87,9 @@ export async function projectMemoryRequest<T>(
 }
 
 function defaultErrorMessage(status: number): string {
+  if (status === 401) {
+    return t('登录状态已失效，请重新登录', 'Your session has expired. Please sign in again.')
+  }
   if ([502, 503, 504].includes(status)) {
     return t('服务暂时不可用，请稍后重试')
   }
@@ -140,8 +145,17 @@ async function apiFetch<T>(
       : typeof body?.message === 'string'
         ? body.message.trim()
         : ''
-    const msg = bodyMessage ? t(bodyMessage) : defaultErrorMessage(res.status)
-    throw new ApiError(res.status, msg)
+    const retryAfterHeader = res.headers.get('retry-after')
+    const retryAfterSeconds = retryAfterHeader && /^\d+$/.test(retryAfterHeader)
+      ? Number(retryAfterHeader)
+      : undefined
+    const baseMessage = res.status === 401
+      ? defaultErrorMessage(401)
+      : bodyMessage ? t(bodyMessage) : defaultErrorMessage(res.status)
+    const msg = retryAfterSeconds && [429, 503].includes(res.status)
+      ? `${baseMessage}（约 ${retryAfterSeconds} 秒后重试）`
+      : baseMessage
+    throw new ApiError(res.status, msg, retryAfterSeconds)
   }
 
   return data as T
@@ -187,7 +201,7 @@ export type GenesisArchive = {
   actual: { registered: number; joined: number; completedFirstClearance: number; adoptedSuggestions: number }
   adoptedSuggestions: string[]
   productImprovements: string[]
-  members: Array<{ number: string; activatedAt: string; visibility: 'public' | 'anonymous'; nickname?: string; avatarUrl?: string }>
+  members: Array<{ number: string; activatedAt: string | null; visibility: 'public' | 'anonymous'; nickname?: string; avatarUrl?: string }>
   participant: null | {
     registered: boolean
     officiallyJoined: boolean
@@ -204,6 +218,16 @@ export type DeviceTokenInfo = {
   createdAt: string
   lastUsedAt: string | null
   // 列表接口不返回明文 token，只有创建时返回一次
+  token?: string
+}
+
+export type ProjectHookTokenInfo = {
+  id: string
+  projectId: string
+  name: string
+  createdAt: string
+  revokedAt: string | null
+  // Hook token 明文只在创建响应中返回一次，列表接口不会返回。
   token?: string
 }
 
@@ -229,11 +253,15 @@ export async function login(email: string, password: string): Promise<AuthUser> 
 
 /** 登出 */
 export async function logoutAuth(): Promise<void> {
+  // Clear the local marker before the request so the UI cannot keep offering
+  // a workspace while the server is clearing the HttpOnly session cookie.
+  clearAccessToken()
   try {
     await fetch(`${API_BASE}/api/auth/logout`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      credentials: 'same-origin'
+      credentials: 'include',
+      cache: 'no-store'
     })
   } finally {
     clearAccessToken()
@@ -250,9 +278,14 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
   }
 }
 
-/** 检查是否已登录（先看本地标记，再用 /api/auth/me 验证） */
+/**
+ * 检查是否已登录。
+ *
+ * localStorage 里的值只是页面状态标记，不能证明 HttpOnly session Cookie
+ * 仍然有效。因此每次受保护页面需要恢复/确认会话时，都以 /api/auth/me
+ * 的服务端结果为准；服务端会话失效时同时清掉过期的本地标记。
+ */
 export async function checkAuthSession(): Promise<AuthUser | null> {
-  if (!getAccessToken()) return null
   const user = await fetchCurrentUser()
   if (!user) {
     clearAccessToken()
@@ -282,6 +315,33 @@ export async function revokeDeviceToken(tokenId: string): Promise<void> {
   await apiFetch<{ ok: boolean }>(`/api/auth/device-token/${encodeURIComponent(tokenId)}`, {
     method: 'DELETE'
   })
+}
+
+// ── 项目 MCP / Hook Token 管理 ──
+
+/** 列出当前用户在指定项目下的 Hook Token；列表不含明文。 */
+export async function listProjectHookTokens(projectId: string): Promise<ProjectHookTokenInfo[]> {
+  const res = await apiFetch<{ ok: boolean; tokens: ProjectHookTokenInfo[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/hook-token`
+  )
+  return res.tokens
+}
+
+/** 创建项目 Hook Token；明文仅在创建响应中返回一次。 */
+export async function createProjectHookToken(projectId: string, name: string): Promise<ProjectHookTokenInfo> {
+  const res = await apiFetch<{ ok: boolean; hook: ProjectHookTokenInfo }>(
+    `/api/projects/${encodeURIComponent(projectId)}/hook-token`,
+    { method: 'POST', body: JSON.stringify({ name }) }
+  )
+  return res.hook
+}
+
+/** 撤销项目 Hook Token。 */
+export async function revokeProjectHookToken(projectId: string, tokenId: string): Promise<void> {
+  await apiFetch<{ ok: boolean }>(
+    `/api/projects/${encodeURIComponent(projectId)}/hook-token/${encodeURIComponent(tokenId)}`,
+    { method: 'DELETE' }
+  )
 }
 
 // ── 核心闭环接口 ──
@@ -328,6 +388,17 @@ export async function generateReport(
 /** 获取报告详情 */
 export async function fetchReport(reportId: string): Promise<ApiResult<{ report: ClearanceReport }>> {
   return apiFetch(`/api/mvp0/reports/${encodeURIComponent(reportId)}`)
+}
+
+/** 将已经生成的认知欠条报告归入项目记忆；服务端按报告+项目幂等处理。 */
+export async function linkReportToProjectMemory(
+  reportId: string,
+  projectId: string
+): Promise<{ ok: boolean; project: { id: string; name: string }; session: { id: string }; workItem?: { id: string; title: string }; linkedDebtIds: string[]; idempotent?: boolean }> {
+  return projectMemoryRequest(`/api/mvp0/reports/${encodeURIComponent(reportId)}/project-memory`, {
+    method: 'POST',
+    body: JSON.stringify({ projectId })
+  })
 }
 
 /** MVP-0 卡片轻量追问（可选路径） */
@@ -380,42 +451,28 @@ export async function endSession(sessionId: string): Promise<EndSessionResponse>
 // ── 训练系统 API ──
 
 export async function fetchTodayTraining(): Promise<ApiResult<TodayTrainingResponse>> {
-  const res = await fetch(`${API_BASE}/api/training/today`, {
-    credentials: 'include'
-  })
-  return res.json()
+  return apiFetch<ApiResult<TodayTrainingResponse>>('/api/training/today')
 }
 
 export async function fetchTrainingDebts(): Promise<ApiResult<DebtsListResponse>> {
-  const res = await fetch(`${API_BASE}/api/training/debts`, {
-    credentials: 'include'
-  })
-  return res.json()
+  return apiFetch<ApiResult<DebtsListResponse>>('/api/training/debts')
 }
 
 export async function fetchTrainingDebtDetail(debtId: string): Promise<ApiResult<DebtDetailResponse>> {
-  const res = await fetch(`${API_BASE}/api/training/debts/${encodeURIComponent(debtId)}`, {
-    credentials: 'include'
-  })
-  return res.json()
+  return apiFetch<ApiResult<DebtDetailResponse>>(`/api/training/debts/${encodeURIComponent(debtId)}`)
 }
 
 export async function startReviewTask(taskId: string): Promise<ApiResult<StartReviewResponse>> {
-  const res = await fetch(`${API_BASE}/api/training/reviews/${encodeURIComponent(taskId)}/start`, {
+  return apiFetch<ApiResult<StartReviewResponse>>(`/api/training/reviews/${encodeURIComponent(taskId)}/start`, {
     method: 'POST',
-    credentials: 'include'
   })
-  return res.json()
 }
 
 export async function submitReviewAnswer(taskId: string, answer: string): Promise<ApiResult<SubmitReviewResponse>> {
-  const res = await fetch(`${API_BASE}/api/training/reviews/${encodeURIComponent(taskId)}/submit`, {
+  return apiFetch<ApiResult<SubmitReviewResponse>>(`/api/training/reviews/${encodeURIComponent(taskId)}/submit`, {
     method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ answer })
   })
-  return res.json()
 }
 
 // ── 认知清偿 V1 API ──
@@ -498,6 +555,7 @@ export type DashboardSummary = {
   outstandingDebts: Array<{
     reportId: string
     cardId: string
+    gapId?: string
     title: string
     status: string
     locale?: string
@@ -533,7 +591,7 @@ export type AssessmentOpenReview = {
   reason: string
 }
 
-export async function reviewAssessment(payload: { version: string; role: string; locale: string; answers: Record<string,string>; questions: Array<{ id:string; title:string; context?:string; rubric?:string }> }): Promise<ApiResult<{ reviews: AssessmentOpenReview[]; mode: 'model_structured'|'rule_fallback' }>> {
+export async function reviewAssessment(payload: { version: string; role: string; locale: string; completionId?: string; answers: Record<string,string>; questions: Array<{ id:string; title:string; context?:string; rubric?:string }> }): Promise<ApiResult<{ reviews: AssessmentOpenReview[]; mode: 'model_structured'|'rule_fallback' }>> {
   return apiFetch('/api/assessment/review', { method: 'POST', body: JSON.stringify(payload) })
 }
 
