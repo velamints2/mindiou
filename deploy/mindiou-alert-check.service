@@ -6,7 +6,7 @@ After=mindiou.service
 Type=oneshot
 User=mindiou
 Group=mindiou
-WorkingDirectory=/opt/mindiou/current
+WorkingDirectory=/opt/mindiou
 EnvironmentFile=/etc/mindiou.env
 Environment=MINDIOU_DATA_VOLUME=/var/lib/mindiou
 Environment=MINDIOU_TRACE_FILE=/var/lib/mindiou/traces.ndjson
