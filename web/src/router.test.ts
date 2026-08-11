@@ -47,6 +47,17 @@ describe("parseRoute", () => {
     expect(parseRoute()).toEqual({ name: "profile" });
   });
 
+  it("parses the weekly Cognitive Loop route", () => {
+    location.hash = "#/cognitive-loop";
+    expect(parseRoute()).toEqual({ name: "cognitive-loop" });
+  });
+
+  it("parses the public Fluency Loop preview route", () => {
+    location.hash = "#/fluency-loop-preview";
+    expect(parseRoute()).toEqual({ name: "fluency-loop-preview" });
+    expect(isPublicRoute({ name: "fluency-loop-preview" })).toBe(true);
+  });
+
   it("parses timeline with draftId", () => {
     location.hash = "#/timeline/draft-123";
     const route = parseRoute();
@@ -125,6 +136,16 @@ describe("navigate", () => {
   it("sets hash for the user profile", () => {
     navigate({ name: "profile" });
     expect(location.hash).toBe("#/profile");
+  });
+
+  it("sets hash for the weekly Cognitive Loop", () => {
+    navigate({ name: "cognitive-loop" });
+    expect(location.hash).toBe("#/cognitive-loop");
+  });
+
+  it("sets hash for the public Fluency Loop preview", () => {
+    navigate({ name: "fluency-loop-preview" });
+    expect(location.hash).toBe("#/fluency-loop-preview");
   });
 
   it("sets hash for genesis", () => {

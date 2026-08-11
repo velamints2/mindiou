@@ -548,3 +548,131 @@ export type RepaymentProfile = {
   updatedAt: string
   dataSchemaVersion: string
 }
+
+// ── Cognitive Loop MVP ──
+
+export type CognitiveLoopActivityInput = {
+  id?: string
+  title?: string
+  occurredAt?: string
+  source?: string
+  content: string
+}
+
+export type CognitiveLoopContentCandidateInput = {
+  id?: string
+  title: string
+  url?: string
+  sourceName?: string
+  sourceType?: string
+  summary?: string
+  transcript?: string
+  keyPoints?: string[]
+  segments?: Array<{ startSeconds?: number; endSeconds?: number; title?: string; reason?: string }>
+  evidenceStrength?: number
+  durationMinutes?: number
+}
+
+export type CognitiveLoopProfile = {
+  dimension: string
+  label: string
+  labelEn: string
+  score: number
+  confidence: 'low' | 'medium' | 'high'
+  evidenceStatus: 'observed' | 'missing_evidence'
+  evidence: Array<{ activityId: string; occurredAt: string; excerpt: string; signal: string }>
+  diagnosis: string
+  diagnosisEn: string
+  nextAction: string
+}
+
+export type CognitiveLoopContentItem = CognitiveLoopContentCandidateInput & {
+  id: string
+  title: string
+  sourceName: string
+  sourceType: string
+  summary: string
+  relevance: number
+  novelty: number
+  score: number
+  decision: 'watch_segment' | 'read_summary' | 'skip'
+  decisionReason: string
+  keyPoints: string[]
+  contentRecord: {
+    coreArgument: string
+    evidenceStrength: number
+    timeline: Array<{ startSeconds: number; endSeconds: number; title: string; reason: string }>
+    action: string
+  }
+}
+
+export type CognitiveLoopResult = {
+  schemaVersion: string
+  source: string
+  sourceLabel: string
+  generatedAt: string
+  window: { days: number; start: string; end: string }
+  projectContext: string
+  inputSummary: { activityCount: number; sourceTypes: string[]; contentCandidateCount: number; previousFeedbackCount: number }
+  activities: Array<{ id: string; title: string; occurredAt: string; source: string; contentHash: string; excerpt: string }>
+  aiCollaborationProfile: CognitiveLoopProfile[]
+  aiUsageDebts: Array<{
+    id: string
+    kind: string
+    dimension: string
+    title: string
+    status: string
+    priority: 'now' | 'next' | 'later'
+    score: number
+    confidence: string
+    why: string
+    evidence: CognitiveLoopProfile['evidence']
+    nextAction: string
+    successCriteria: string[]
+  }>
+  briefing: {
+    title: string
+    attentionBudget: number
+    items: CognitiveLoopContentItem[]
+    noRecommendation: boolean
+    explanation: string
+    informationDiet: { candidateCount: number; uniqueCount: number; duplicateCount: number; recommendedCount: number }
+  }
+  experiment: {
+    id: string
+    type: string
+    status: string
+    debtId: string
+    title: string
+    instruction: string
+    successCriteria: string[]
+    createdAt: string
+    dueAt: string
+    verification: { status: string; method: string }
+  }
+  verification: { status: string; dueAt: string; nextInput: string }
+  evidencePolicy: string
+}
+
+export type CognitiveLoopRun = {
+  id: string
+  userId?: string
+  projectId: string
+  clientRunId: string
+  activitySessionId?: string
+  windowStart: string
+  windowEnd: string
+  source: string
+  result: CognitiveLoopResult
+  createdAt: string
+  updatedAt: string
+}
+
+export type CognitiveLoopFeedback = {
+  id: string
+  runId: string
+  kind: 'recommendation' | 'correction' | 'experiment'
+  targetId?: string
+  payload: Record<string, unknown>
+  createdAt: string
+}

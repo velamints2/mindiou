@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { traceEvent } from "./ops/observability.mjs";
 
 export function openApplicationDatabase(dbPath) {
   const resolvedPath = path.resolve(dbPath);
@@ -11,6 +12,7 @@ export function openApplicationDatabase(dbPath) {
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
+  traceEvent("sqlite.open", { dbPath: resolvedPath, journalMode: "wal" });
   db.exec(`
     CREATE TABLE IF NOT EXISTS application_state (
       namespace TEXT PRIMARY KEY,

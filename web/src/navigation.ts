@@ -2,7 +2,7 @@ import { getAccessToken } from './api'
 import { t } from './i18n'
 import { el, navigate, type Route } from './router'
 
-const publicHeaderRoutes = new Set<Route['name']>(['landing', 'how-it-works', 'challenge'])
+const publicHeaderRoutes = new Set<Route['name']>(['landing', 'how-it-works', 'challenge', 'fluency-loop-preview'])
 
 export function renderPersistentNavigation(route: Route): void {
   document.querySelector('.persistent-site-navigation')?.remove()
@@ -19,7 +19,8 @@ export function renderPersistentNavigation(route: Route): void {
     ['#/how-it-works', t('原理', 'How it works'), 'how-it-works', 'how-it-works'],
     ['#/genesis', t('创始档案', 'Genesis archive'), 'genesis', 'genesis'],
     ['#/projects', t('项目记忆', 'Project memory'), 'projects', 'projects'],
-    ['#/profile', t('用户画像', 'User profile'), 'profile', 'profile']
+    ['#/profile', t('用户画像', 'User profile'), 'profile', 'profile'],
+    ['#/cognitive-loop', t('Fluency Loop', 'Fluency Loop'), 'cognitive-loop', 'cognitive-loop']
   ]
   links.forEach(([href, label, _key, routeName]) => {
     const link = el('a', `site-nav-link ${route.name === routeName ? 'is-active' : ''}`, label) as HTMLAnchorElement
@@ -50,6 +51,7 @@ export function renderSiteFooter(): HTMLElement {
     ['#/genesis', t('创始档案', 'Genesis archive')],
     ['#/assessment', t('认知债务测试', 'AI collaboration test')],
     ['#/challenge/001', t('001 期挑战', 'Cohort 001 challenge')],
+    ['#/fluency-loop-preview', t('Fluency Loop 预告', 'Fluency Loop preview')],
     ['#/app', getAccessToken() ? t('进入工作区', 'Open dashboard') : t('开始体验', 'Get started')]
   ].forEach(([href, label]) => {
     const link = el('a', 'footer-link', label) as HTMLAnchorElement

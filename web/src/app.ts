@@ -28,6 +28,7 @@ import { renderPersistentNavigation } from './navigation'
 import { renderAssessmentPage } from './assessment'
 import { renderChallengePage } from './challenge'
 import { renderAgentSessionPage, renderProjectListPage, renderProjectPage, renderWorkItemPage } from './projectMemory'
+import { renderCognitiveLoopPage, renderFluencyLoopPreviewPage } from './cognitiveLoop'
 
 const app = document.getElementById('app') as HTMLElement
 observeTranslations(app)
@@ -35,7 +36,7 @@ observeTranslations(app)
 function renderLanguageSwitch(route: Route): void {
   document.querySelector('.language-switch')?.remove()
   if (route.name === 'admin') return
-  const publicRoute = route.name === 'landing' || route.name === 'how-it-works' || route.name === 'genesis'
+  const publicRoute = route.name === 'landing' || route.name === 'how-it-works' || route.name === 'genesis' || route.name === 'fluency-loop-preview'
   const wrap = el('div', `language-switch${publicRoute ? ' language-switch-public' : ''}`)
   wrap.setAttribute('aria-label', 'Language')
   const zh = el('button', `language-switch-option ${getLocale() === 'zh-CN' ? 'is-active' : ''}`, '中文')
@@ -100,6 +101,11 @@ async function render(route: Route): Promise<void> {
   if (route.name === 'register') {
     renderRegisterPage(app)
     trackRoute('register')
+    return
+  }
+  if (route.name === 'fluency-loop-preview') {
+    renderFluencyLoopPreviewPage(app)
+    trackRoute('fluency-loop-preview')
     return
   }
 
@@ -177,6 +183,10 @@ async function render(route: Route): Promise<void> {
     case 'profile':
       await renderProfilePage(app)
       trackRoute('profile')
+      return
+    case 'cognitive-loop':
+      await renderCognitiveLoopPage(app)
+      trackRoute('cognitive-loop')
       return
     case 'projects':
       await renderProjectListPage(app)

@@ -26,6 +26,8 @@ export type Route =
   | { name: 'repayment' }            // 产品区：认知清偿 V1 列表
   | { name: 'repayment-detail'; gapId: string }  // 产品区：认知清偿欠条详情
   | { name: 'profile' }              // 产品区：用户能力画像
+  | { name: 'fluency-loop-preview' } // 公开：Fluency Loop 功能预告
+  | { name: 'cognitive-loop' }       // 产品区：每周 Cognitive Loop
   | { name: 'project'; projectId: string }
   | { name: 'work-item'; projectId: string; workItemId: string }
   | { name: 'agent-session'; sessionId: string }
@@ -33,7 +35,7 @@ export type Route =
 
 // 判断是否为公开路由（无需登录）
 export function isPublicRoute(route: Route): boolean {
-  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register' || route.name === 'genesis' || route.name === 'assessment' || route.name === 'challenge'
+  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register' || route.name === 'genesis' || route.name === 'assessment' || route.name === 'challenge' || route.name === 'fluency-loop-preview'
 }
 
 export function parseRoute(): Route {
@@ -57,6 +59,8 @@ export function parseRoute(): Route {
       return { name: 'assessment' }
     case 'challenge':
       return { name: 'challenge', slug: rest[0] ? decodeURIComponent(rest[0]) : '001' }
+    case 'fluency-loop-preview':
+      return { name: 'fluency-loop-preview' }
     case 'app':
     case 'home':   // 兼容旧路径
       return { name: 'app' }
@@ -78,6 +82,8 @@ export function parseRoute(): Route {
       return rest[0] ? { name: 'repayment-detail', gapId: decodeURIComponent(rest[0]) } : { name: 'repayment' }
     case 'profile':
       return { name: 'profile' }
+    case 'cognitive-loop':
+      return { name: 'cognitive-loop' }
     case 'projects':
       if (!rest[0]) return { name: 'projects' }
       if (rest[1] === 'work-items' && rest[2]) {
@@ -126,6 +132,8 @@ export function navigate(route: Route): void {
     case 'training-debt': path = `/training-debt/${encodeURIComponent(route.debtId)}`; break
     case 'repayment': path = '/repayment'; break
     case 'profile': path = '/profile'; break
+    case 'cognitive-loop': path = '/cognitive-loop'; break
+    case 'fluency-loop-preview': path = '/fluency-loop-preview'; break
     case 'projects': path = '/projects'; break
     case 'project': path = '/projects/' + encodeURIComponent(route.projectId); break
     case 'work-item': path = '/projects/' + encodeURIComponent(route.projectId) + '/work-items/' + encodeURIComponent(route.workItemId); break

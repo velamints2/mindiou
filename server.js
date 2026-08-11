@@ -81,6 +81,8 @@ import {
   normalizeSessionImport
 } from "./project-memory-analysis.js";
 import { createProjectMemoryStore } from "./project-memory-store.js";
+import { createCognitiveLoopStore } from "./cognitive-loop-store.js";
+import { analyzeCognitiveLoop } from "./cognitive-loop.js";
 import { createOwnershipStore } from "./project-ownership-store.js";
 import {
   calculateDecisionOwnershipStatus,
@@ -101,6 +103,7 @@ import {
 import { generateModuleRecommendation, generateProjectRecommendations } from "./learning-orchestrator.js";
 import { seedOwnershipData } from "./ownership-seed.js";
 import { reportEnvValidation } from "./env-validation.js";
+import { createTraceContext, runWithTrace, traceEvent, traceSpan } from "./ops/observability.mjs";
 
 // 启动期环境验证：值非法时打印变量级错误并退出（绝不打印值）。
 if (!reportEnvValidation(process.env)) {
@@ -183,6 +186,7 @@ await repaymentStore.load();
 const authStore = createAuthStore(authDbPath);
 const usageLedger = createUsageLedger(dataDbPath);
 const projectMemoryStore = createProjectMemoryStore(dataDbPath);
+const cognitiveLoopStore = createCognitiveLoopStore(dataDbPath);
 const projectMemoryHookToken = process.env.PROJECT_MEMORY_HOOK_TOKEN || "";
 const projectMemoryAdapters = createAgentSessionAdapters();
 const GENESIS_ADOPTED_SUGGESTIONS = [
@@ -368,13 +372,14 @@ function readRequestId(req) {
   return /^[A-Za-z0-9._-]{1,128}$/.test(incoming) ? incoming : crypto.randomUUID();
 }
 
-function logRequestCompletion(req, res, requestId, startedAt) {
+function logRequestCompletion(req, res, requestId, startedAt, traceId = "") {
   let pathname = "/";
   try {
     pathname = new URL(req.url || "/", "http://localhost").pathname;
   } catch { /* 保留默认值 */ }
   logEvent(res.statusCode >= 500 ? "error" : "info", "http_request", {
     requestId,
+    traceId,
     method: String(req.method || "GET"),
     path: pathname,
     status: res.statusCode,
@@ -1689,11 +1694,12 @@ async function chatJson(messages, fallback, maxTokens = 4096) {
       __fallbackError: disableAi ? "SPIRAL_DISABLE_AI=1" : "AI_API_KEY is not set"
     };
   }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), openAiChatTimeoutMs);
-  let response;
-  try {
-    response = await fetch(`${aiBaseUrl}/chat/completions`, {
+  return traceSpan("ai.chat_completion", { provider: aiProvider, model: chatModel, maxTokens }, async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), openAiChatTimeoutMs);
+    let response;
+    try {
+      response = await fetch(`${aiBaseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "authorization": `Bearer ${aiApiKey}`,
@@ -1709,15 +1715,20 @@ async function chatJson(messages, fallback, maxTokens = 4096) {
         messages
       }),
       signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error?.message || `OpenAI HTTP ${response.status}`);
-  const content = payload.choices?.[0]?.message?.content || "{}";
-  return parseJsonObject(content);
+    const payload = await response.json();
+    if (!response.ok) {
+      const error = new Error(payload.error?.message || `OpenAI HTTP ${response.status}`);
+      error.code = `AI_HTTP_${response.status}`;
+      throw error;
+    }
+    const content = payload.choices?.[0]?.message?.content || "{}";
+    return parseJsonObject(content);
+  });
 }
 
 function classifyRepaymentError(error) {
@@ -2633,10 +2644,20 @@ async function reviewAssessmentAnswers(payload) {
 
 const server = createServer(async (req, res) => {
   const requestId = readRequestId(req);
+  const traceContext = createTraceContext(req, requestId);
   const startedAt = Date.now();
   res.setHeader("x-request-id", requestId);
-  res.on("finish", () => logRequestCompletion(req, res, requestId, startedAt));
-  try {
+  res.setHeader("x-trace-id", traceContext.traceId);
+  res.on("finish", () => {
+    logRequestCompletion(req, res, requestId, startedAt, traceContext.traceId);
+    traceEvent("http_request", {
+      ...traceContext,
+      status: res.statusCode,
+      method: String(req.method || "GET"),
+      durationMs: Date.now() - startedAt
+    });
+  });
+  return runWithTrace(traceContext, async () => { try {
     if (req.method === "OPTIONS") {
       optionsResponse(res);
       return;
@@ -3410,6 +3431,161 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── Cognitive Loop MVP: activity → profile → debt → briefing → experiment ──
+    const cognitiveLoopRunMatch = url.pathname.match(/^\/api\/cognitive-loop\/runs\/([^/]+)$/);
+    const cognitiveLoopFeedbackMatch = url.pathname.match(/^\/api\/cognitive-loop\/runs\/([^/]+)\/feedback$/);
+    const isCognitiveLoopRoute =
+      (req.method === "GET" && (url.pathname === "/api/cognitive-loop/latest" || cognitiveLoopRunMatch)) ||
+      (req.method === "POST" && (url.pathname === "/api/cognitive-loop/runs" || cognitiveLoopFeedbackMatch));
+    if (isCognitiveLoopRoute) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      let body = {};
+      if (req.method !== "GET") {
+        requireJsonRequest(req);
+        body = parseJson(await readBody(req));
+      }
+      try {
+        if (req.method === "GET" && url.pathname === "/api/cognitive-loop/latest") {
+          const projectId = clean(url.searchParams.get("projectId"));
+          if (!projectId) {
+            jsonResponse(res, 400, { ok: false, error: "projectId is required" });
+            return;
+          }
+          projectMemoryStore.getProject(projectId, user.id);
+          const run = cognitiveLoopStore.getLatestRun(projectId, user.id);
+          jsonResponse(res, 200, {
+            ok: true,
+            run,
+            feedback: run ? cognitiveLoopStore.listFeedback(run.id, user.id) : []
+          });
+          return;
+        }
+        if (req.method === "GET" && cognitiveLoopRunMatch) {
+          const run = cognitiveLoopStore.getRun(decodeURIComponent(cognitiveLoopRunMatch[1]), user.id);
+          if (!run) {
+            jsonResponse(res, 404, { ok: false, error: "Cognitive Loop run not found" });
+            return;
+          }
+          jsonResponse(res, 200, {
+            ok: true,
+            run,
+            feedback: cognitiveLoopStore.listFeedback(run.id, user.id)
+          });
+          return;
+        }
+        if (req.method === "POST" && url.pathname === "/api/cognitive-loop/runs") {
+          const projectId = clean(body.projectId);
+          if (!projectId) throw new Error("projectId is required");
+          projectMemoryStore.getProject(projectId, user.id);
+          if (!Array.isArray(body.activities) || body.activities.length === 0) {
+            throw new Error("At least one AI conversation activity is required");
+          }
+          const clientRunId = clean(body.clientRunId) || "client-run-" + crypto.randomUUID();
+          const existing = cognitiveLoopStore.getByClientRunId(clientRunId, user.id);
+          if (existing) {
+            jsonResponse(res, 200, {
+              ok: true,
+              run: existing,
+              feedback: cognitiveLoopStore.listFeedback(existing.id, user.id),
+              idempotent: true
+            });
+            return;
+          }
+          const runId = clean(body.runId) || "loop-" + crypto.randomUUID();
+          const now = new Date().toISOString();
+          const result = analyzeCognitiveLoop({
+            ...body,
+            runId,
+            now,
+            previousFeedback: cognitiveLoopStore.listRecentFeedback(projectId, user.id)
+          });
+          const activityText = body.activities
+            .slice(0, 100)
+            .map(item => clean(item?.content || item?.transcript || item?.text))
+            .filter(Boolean)
+            .join("\n\n")
+            .slice(0, 12000);
+          const activitySession = projectMemoryStore.saveAgentSession({
+            projectId,
+            platform: "ai_conversation",
+            externalSessionId: "cognitive-loop:" + runId,
+            sourceFingerprint: fingerprint({
+              kind: "cognitive-loop-activity",
+              projectId,
+              clientRunId,
+              activityHashes: result.activities.map(item => item.contentHash)
+            }),
+            title: "Cognitive Loop · " + projectMemoryStore.getProject(projectId, user.id).name,
+            rawTitle: "Cognitive Loop activity import",
+            startedAt: result.window.start,
+            endedAt: result.window.end,
+            userIntentSummary: clean(body.projectContext || body.context),
+            implementationSummary: "Structured AI collaboration activity analysis",
+            outcomeSummary: result.aiUsageDebts[0]?.title || "No new AI Usage Debt selected",
+            keyTopics: result.aiCollaborationProfile.filter(item => item.evidence.length).map(item => item.label),
+            technologies: [],
+            importMethod: "cognitive_loop",
+            rawContentStorage: "redacted",
+            rawContent: activityText,
+            processingStatus: "completed",
+            analysis: {
+              schemaVersion: result.schemaVersion,
+              source: result.source,
+              profile: result.aiCollaborationProfile,
+              selectedDebt: result.aiUsageDebts[0]
+            }
+          }, user.id);
+          const run = cognitiveLoopStore.saveRun({
+            id: runId,
+            userId: user.id,
+            projectId,
+            clientRunId,
+            activitySessionId: activitySession.id,
+            windowStart: result.window.start,
+            windowEnd: result.window.end,
+            source: result.source,
+            result
+          });
+          jsonResponse(res, 201, {
+            ok: true,
+            run,
+            feedback: [],
+            activitySessionId: activitySession.id
+          });
+          return;
+        }
+        if (req.method === "POST" && cognitiveLoopFeedbackMatch) {
+          const runId = decodeURIComponent(cognitiveLoopFeedbackMatch[1]);
+          const run = cognitiveLoopStore.getRun(runId, user.id);
+          if (!run) {
+            jsonResponse(res, 404, { ok: false, error: "Cognitive Loop run not found" });
+            return;
+          }
+          const feedback = cognitiveLoopStore.recordFeedback({
+            runId,
+            userId: user.id,
+            kind: body.kind,
+            targetId: body.targetId,
+            payload: body.payload || body
+          });
+          jsonResponse(res, 201, {
+            ok: true,
+            feedback,
+            run,
+            feedbackHistory: cognitiveLoopStore.listFeedback(runId, user.id)
+          });
+          return;
+        }
+        jsonResponse(res, 405, { ok: false, error: "Method not allowed" });
+      } catch (error) {
+        const message = clean(error?.message || "Cognitive Loop request failed");
+        const status = /not found/i.test(message) ? 404 : /required|activity/i.test(message) ? 400 : 500;
+        jsonResponse(res, status, { ok: false, error: message });
+      }
+      return;
+    }
+
     // ── Web MVP-0/MVP-1 routes: cookie session auth, per-user data isolation ──
 
     const mvp1SessionMatch = url.pathname.match(/^\/api\/mvp1\/sessions\/([^/]+)$/);
@@ -3670,16 +3846,17 @@ const server = createServer(async (req, res) => {
           ? confusionsFromTimeline(draft.timeline)
           : (Array.isArray(payload.confusions) ? payload.confusions : []);
         const chatFn = (!aiApiKey || disableAi) ? null : chatJson;
-        const report = await generateClearanceReport(artifactText, artifactType, chatFn, {
+        const report = await traceSpan("report.generate", { artifactType, userId: user.id }, () => generateClearanceReport(artifactText, artifactType, chatFn, {
           researchFn: mvp0ResearchFn,
           timeline,
           confusions,
           locale: draft?.locale || (payload.locale === "en" ? "en" : "zh-CN")
-        });
+        }));
         if (draft) report.draftId = draft.id;
         report.userId = user.id;
         report.locale = draft?.locale || (payload.locale === "en" ? "en" : "zh-CN");
-        const saved = await mvp0Store.saveReport(report);
+        const saved = await traceSpan("sqlite.report_save", { userId: user.id, reportId: report.id || "new" }, () => mvp0Store.saveReport(report));
+        traceEvent("report.generated", { reportId: saved.id, userId: user.id });
         // 报告生成即建立“领域占位画像”：只记录主题存在，不伪造用户掌握证据。
         try {
           const reportDomain = deriveReportCapabilityDomain(saved);
@@ -4014,7 +4191,8 @@ const server = createServer(async (req, res) => {
           clientAttemptId,
           now
         });
-        const { record: savedAttempt } = await repaymentStore.saveAttempt(attempt);
+        const { record: savedAttempt } = await traceSpan("sqlite.repayment_save", { userId: user.id, gapId: gap.gapId }, () => repaymentStore.saveAttempt(attempt));
+        traceEvent("repayment.updated", { userId: user.id, gapId: gap.gapId, status: savedAttempt.repaymentStatus });
         completePendingReviewItems({ reviewQueue: repaymentStore.getState().reviewQueue, gapId: gap.gapId, now });
         applyAttemptOutcome(gap, savedAttempt, { now, previousAttempts });
         upsertReviewItemForGap({ reviewQueue: repaymentStore.getState().reviewQueue, gap, attempt: savedAttempt, now });
@@ -4936,6 +5114,7 @@ const server = createServer(async (req, res) => {
       ...(error.code ? { code: error.code } : {})
     });
   }
+  });
 });
 
 server.listen(port, host, () => {

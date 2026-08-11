@@ -6,6 +6,10 @@ import type {
   ApiResult,
   ClearanceReport,
   ClearanceSession,
+  CognitiveLoopActivityInput,
+  CognitiveLoopContentCandidateInput,
+  CognitiveLoopFeedback,
+  CognitiveLoopRun,
   Confusion,
   CreateSessionResponse,
   DebtDetailResponse,
@@ -33,7 +37,7 @@ import { getLocale, t } from './i18n'
 //   本地开发 → 可用 ?api=http://host:8793 覆盖，默认同源
 const runtimeParams = new URLSearchParams(location.search)
 const isPublicDeployment = location.pathname.startsWith('/mindiou/')
-export const API_BASE = isPublicDeployment ? '/mindiou-api' : runtimeParams.get('api') || ''
+export const API_BASE = runtimeParams.get('api') || (isPublicDeployment ? '/mindiou-api' : '')
 
 // ── 登录标记 ──
 // 仅作为"已登录"的本地标记，不存储任何敏感凭据。
@@ -810,6 +814,47 @@ export type ModuleDetailResponse = {
 export async function listProjects(): Promise<ProjectInfo[]> {
   const res = await apiFetch<{ ok: boolean; projects: ProjectInfo[] }>('/api/projects')
   return res.projects
+}
+
+export type CognitiveLoopRunResponse = {
+  ok: boolean
+  run: CognitiveLoopRun | null
+  feedback: CognitiveLoopFeedback[]
+  idempotent?: boolean
+}
+
+export async function fetchLatestCognitiveLoop(projectId: string): Promise<CognitiveLoopRunResponse> {
+  return projectMemoryRequest<CognitiveLoopRunResponse>(
+    '/api/cognitive-loop/latest?projectId=' + encodeURIComponent(projectId)
+  )
+}
+
+export async function runCognitiveLoop(input: {
+  projectId: string
+  projectContext: string
+  activities: CognitiveLoopActivityInput[]
+  contentCandidates?: CognitiveLoopContentCandidateInput[]
+  windowDays?: number
+  clientRunId: string
+}): Promise<CognitiveLoopRunResponse & { activitySessionId?: string }> {
+  return projectMemoryRequest<CognitiveLoopRunResponse & { activitySessionId?: string }>(
+    '/api/cognitive-loop/runs',
+    { method: 'POST', body: JSON.stringify(input) }
+  )
+}
+
+export async function submitCognitiveLoopFeedback(
+  runId: string,
+  input: {
+    kind: CognitiveLoopFeedback['kind']
+    targetId?: string
+    payload: Record<string, unknown>
+  }
+): Promise<{ ok: boolean; feedback: CognitiveLoopFeedback; run: CognitiveLoopRun; feedbackHistory: CognitiveLoopFeedback[] }> {
+  return projectMemoryRequest(
+    '/api/cognitive-loop/runs/' + encodeURIComponent(runId) + '/feedback',
+    { method: 'POST', body: JSON.stringify(input) }
+  )
 }
 
 /** 获取项目详情 */
