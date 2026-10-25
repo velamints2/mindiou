@@ -173,7 +173,21 @@ export function createProjectMemoryStore(dbPath) {
     return rowProject(row);
   }
   function ensureProject(input, userId) {
-    if (input?.id) return requireProject(input.id, userId);
+    if (input?.id) {
+      try {
+        return requireProject(input.id, userId);
+      } catch (error) {
+        // Older ownership-store projects are exposed by /api/projects as a
+        // compatibility view. Preserve that stable ID when the first
+        // Project Memory activity is imported so downstream stores (including
+        // Cognitive Loop) can use the same project without a user-visible
+        // "Project not found" error.
+        const projectId = clean(input.id, 100);
+        const conflicting = db.prepare("SELECT id FROM pm_projects WHERE id = ? LIMIT 1").get(projectId);
+        if (conflicting) throw error;
+        return createProject({ ...input, id: projectId }, userId, { preserveId: true });
+      }
+    }
     const workspace = clean(input?.localWorkspaceFingerprint, 200);
     if (workspace) {
       const existing = db.prepare("SELECT * FROM pm_projects WHERE user_id = ? AND local_workspace_fingerprint = ? AND status = 'active' LIMIT 1").get(userId, workspace);
@@ -181,8 +195,8 @@ export function createProjectMemoryStore(dbPath) {
     }
     return createProject({ ...input, localWorkspaceFingerprint: workspace || undefined }, userId);
   }
-  function createProject(input = {}, userId) {
-    const projectId = id("project");
+  function createProject(input = {}, userId, options = {}) {
+    const projectId = options.preserveId && clean(input.id, 100) ? clean(input.id, 100) : id("project");
     const timestamp = now();
     const project = { id: projectId, userId: clean(userId, 120), name: clean(input.name || "未命名项目", 200) || "未命名项目", description: clean(input.description, 2000) || null, projectType: PROJECT_TYPES.has(input.projectType) ? input.projectType : "software", repositoryUrl: clean(input.repositoryUrl, 1000) || null, localWorkspaceFingerprint: clean(input.localWorkspaceFingerprint, 200) || null, defaultBranch: clean(input.defaultBranch, 120) || null, status: input.status === "archived" ? "archived" : "active", createdAt: timestamp, updatedAt: timestamp };
     db.prepare(`INSERT INTO pm_projects (id,user_id,name,description,project_type,repository_url,local_workspace_fingerprint,default_branch,status,created_at,updated_at) VALUES (@id,@userId,@name,@description,@projectType,@repositoryUrl,@localWorkspaceFingerprint,@defaultBranch,@status,@createdAt,@updatedAt)`).run(project);

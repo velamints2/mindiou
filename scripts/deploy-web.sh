@@ -61,7 +61,7 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 
 # ─── 2. 上传 ───
 echo "==> [2/6] 上传构建包到 ${SSH_TARGET}"
-scp -o StrictHostKeyChecking=no "${TMP_TAR}" "${SSH_TARGET}:${REMOTE_TAR}"
+scp -O -o StrictHostKeyChecking=no "${TMP_TAR}" "${SSH_TARGET}:${REMOTE_TAR}"
 
 # ─── 3. 远程部署 ───
 echo "==> [3/6] 远程部署（备份 → 清空 → 恢复全部旧入口 → 覆盖主 SPA）"
@@ -137,8 +137,10 @@ fi
 # ─── 6. 验证后端 API ───
 echo "==> [6/6] 验证训练系统后端 API"
 verify_url "/mindiou-api/health"
-verify_url "/mindiou-api/api/training/today"
-verify_url "/mindiou-api/api/training/debts"
+# Training data is account-scoped. The public deployment probe must confirm
+# the unauthenticated boundary instead of treating the expected 401 as a failure.
+verify_url "/mindiou-api/api/training/today" 401
+verify_url "/mindiou-api/api/training/debts" 401
 verify_url "/mindiou-api/api/genesis"
 
 echo ""

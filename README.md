@@ -127,7 +127,7 @@ npm run pack:ehpk
 The current upload artifact is:
 
 ```text
-release/learn-coach-0.3.3.ehpk
+release/learn-coach-0.9.0.ehpk
 ```
 
 Version `0.3.3` repairs the G2 runtime after the desktop workbench was added.

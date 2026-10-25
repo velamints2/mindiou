@@ -48,6 +48,15 @@ export function createAuthStore(dbPath) {
       revoked_at TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id)
     );
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token TEXT UNIQUE NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    );
   `);
 
   const userColumns = new Set(db.prepare("PRAGMA table_info(users)").all().map(column => column.name));
@@ -81,11 +90,15 @@ export function createAuthStore(dbPath) {
   }
 
   function publicUser(row) {
+    const verified = row.email_verified === 1;
     return {
       id: row.id,
       email: row.email,
       name: row.display_name || undefined,
-      genesisIdentity: row.genesis_number ? {
+      emailVerified: verified,
+      // A reserved number is only a candidate until email verification. Never
+      // expose it as a formal Genesis identity before that gate is complete.
+      genesisIdentity: verified && row.genesis_number ? {
         number: formatGenesisNumber(row.genesis_number),
         reservedAt: row.genesis_reserved_at,
         activatedAt: row.genesis_activated_at,
@@ -124,8 +137,9 @@ export function createAuthStore(dbPath) {
     db.prepare(
       "INSERT INTO users (id, email, password_hash, created_at, display_name, genesis_number, genesis_reserved_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
     ).run(user.id, user.email, user.passwordHash, user.createdAt, cleanName(name), nextNumber, user.createdAt);
-    const sessionId = createSession(user.id);
-    return { user: getUserById(user.id), sessionId };
+    // Registration creates a candidate only. No authenticated session is
+    // issued until the email ownership check succeeds.
+    return { user: getUserById(user.id), sessionId: null };
   }
 
   function login(email, password) {
@@ -137,6 +151,13 @@ export function createAuthStore(dbPath) {
     const matches = bcrypt.compareSync(String(password || ""), hash);
     if (!row || !matches) {
       throw new Error("Invalid email or password");
+    }
+    if (row.email_verified !== 1) {
+      const error = new Error("EMAIL_NOT_VERIFIED");
+      error.code = "EMAIL_NOT_VERIFIED";
+      error.userId = row.id;
+      error.email = row.email;
+      throw error;
     }
     const sessionId = createSession(row.id);
     return { user: publicUser(row), sessionId };
@@ -172,6 +193,7 @@ export function createAuthStore(dbPath) {
   }
 
   function activateGenesisIdentity(userId, activatedAt = new Date().toISOString()) {
+    if (!isEmailVerified(userId)) throw new Error("Email must be verified before activating Genesis identity");
     db.prepare(
       "UPDATE users SET genesis_activated_at = COALESCE(genesis_activated_at, ?) WHERE id = ?"
     ).run(activatedAt, String(userId));
@@ -195,12 +217,12 @@ export function createAuthStore(dbPath) {
     const totals = db.prepare(
       `SELECT COUNT(*) AS joined,
        SUM(CASE WHEN genesis_activated_at IS NOT NULL THEN 1 ELSE 0 END) AS completed
-       FROM users WHERE genesis_number IS NOT NULL`
+       FROM users WHERE genesis_number IS NOT NULL AND email_verified = 1`
     ).get();
     const members = db.prepare(
       `SELECT display_name, genesis_number, genesis_activated_at, genesis_visibility, genesis_avatar_url
        FROM users
-       WHERE genesis_number IS NOT NULL
+       WHERE genesis_number IS NOT NULL AND email_verified = 1
          AND (
            genesis_number <= 5
            OR (genesis_activated_at IS NOT NULL AND genesis_visibility IN ('public', 'anonymous'))
@@ -217,6 +239,49 @@ export function createAuthStore(dbPath) {
       } : {})
     }));
     return { joined: Number(totals.joined || 0), completed: Number(totals.completed || 0), members };
+  }
+
+  const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+  function createEmailVerificationToken(userId) {
+    db.prepare("DELETE FROM email_verification_tokens WHERE user_id = ?").run(String(userId));
+    const token = crypto.randomBytes(32).toString("hex");
+    const now = new Date();
+    db.prepare("INSERT INTO email_verification_tokens (id, user_id, token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)")
+      .run(crypto.randomUUID(), String(userId), token, now.toISOString(), new Date(now.getTime() + VERIFICATION_TOKEN_TTL_MS).toISOString());
+    return token;
+  }
+
+  function verifyEmailToken(token) {
+    const raw = String(token || "");
+    if (!raw) return { ok: false, error: "Token is required" };
+    const row = db.prepare("SELECT * FROM email_verification_tokens WHERE token = ?").get(raw);
+    if (!row || row.used_at || new Date(row.expires_at).getTime() <= Date.now()) {
+      if (row && new Date(row.expires_at).getTime() <= Date.now()) db.prepare("DELETE FROM email_verification_tokens WHERE id = ?").run(row.id);
+      return { ok: false, error: "Invalid or expired token" };
+    }
+    db.transaction(() => {
+      db.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").run(row.user_id);
+      db.prepare("UPDATE email_verification_tokens SET used_at = ? WHERE id = ?").run(new Date().toISOString(), row.id);
+    })();
+    return { ok: true, userId: row.user_id };
+  }
+
+  function isEmailVerified(userId) {
+    const row = db.prepare("SELECT email_verified FROM users WHERE id = ?").get(String(userId || ""));
+    return row ? row.email_verified === 1 : false;
+  }
+
+  function getUserEmail(userId) {
+    const row = db.prepare("SELECT email FROM users WHERE id = ?").get(String(userId || ""));
+    return row ? row.email : null;
+  }
+
+  function findUserForVerification(email) {
+    const normalized = normalizeEmail(email);
+    if (!normalized) return null;
+    const row = db.prepare("SELECT id, email, email_verified FROM users WHERE email = ?").get(normalized);
+    return row ? { id: row.id, email: row.email, emailVerified: row.email_verified === 1 } : null;
   }
 
   // The plaintext token is returned exactly once here; only its bcrypt hash
@@ -306,6 +371,11 @@ export function createAuthStore(dbPath) {
     listUsersWithStats,
     activateGenesisIdentity,
     updateGenesisIdentity,
-    getGenesisArchive
+    getGenesisArchive,
+    createEmailVerificationToken,
+    verifyEmailToken,
+    isEmailVerified,
+    getUserEmail,
+    findUserForVerification
   };
 }

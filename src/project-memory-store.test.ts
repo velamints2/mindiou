@@ -106,6 +106,23 @@ describe('Project Memory relational store', () => {
     })
   })
 
+  it('materializes a legacy project with its stable id on first import', () => {
+    const legacyId = 'mindiou-web-legacy-compat'
+    const project = store.ensureProject({
+      id: legacyId,
+      name: 'Legacy MindIOU project',
+      description: 'Read-only ownership project before Project Memory'
+    }, 'legacy-user')
+
+    expect(project).toMatchObject({
+      id: legacyId,
+      userId: 'legacy-user',
+      name: 'Legacy MindIOU project'
+    })
+    expect(store.getProject(legacyId, 'legacy-user')).toMatchObject({ id: legacyId })
+    expect(store.ensureProject({ id: legacyId, name: 'ignored' }, 'legacy-user').name).toBe('Legacy MindIOU project')
+  })
+
   it('keeps the same session idempotent and stores hook tokens as revocable hashes', () => {
     const project = store.createProject({ name: 'Hook project' }, 'hook-user')
     const session = store.saveAgentSession({

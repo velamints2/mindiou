@@ -1,11 +1,14 @@
 import crypto from "node:crypto";
 
-export const COGNITIVE_LOOP_SCHEMA_VERSION = "cognitive-loop-mvp-1";
+export const COGNITIVE_LOOP_SCHEMA_VERSION = "cognitive-loop-mvp-2";
 export const AI_COLLABORATION_DIMENSIONS = [
   "problem_modeling",
+  "task_decomposition",
   "context",
   "verification",
-  "workflow"
+  "iteration",
+  "workflow",
+  "ai_world_model"
 ];
 
 const DIMENSION_CONFIG = {
@@ -17,6 +20,15 @@ const DIMENSION_CONFIG = {
     diagnosis: "把目标、约束和成功标准写清楚，再让 AI 反向澄清。",
     diagnosisEn: "State the goal, constraints, and success criteria before asking AI to act.",
     action: "在下一次 AI 请求前，先写下目标、约束和可验收结果。"
+  },
+  task_decomposition: {
+    label: "任务拆解与委派",
+    labelEn: "Task decomposition and delegation",
+    positive: /(拆解|分解|步骤|子任务|委派|并行|delegate|decompose|subtask|parallel)/i,
+    negative: /(一步到位|全部手动|每一步都要|一问一答|one step at a time|do every step myself)/i,
+    diagnosis: "把完整目标交给 AI 判断执行路径，只保留必要的边界和验收点。",
+    diagnosisEn: "Give AI the complete goal and guardrails, keeping only the necessary boundaries and acceptance checks.",
+    action: "选择一个低风险完整任务，只定义目标、上下文、约束和验收标准，不预先设计中间步骤。"
   },
   context: {
     label: "上下文构造",
@@ -36,6 +48,15 @@ const DIMENSION_CONFIG = {
     diagnosisEn: "Treat the first output as a hypothesis and design independent evidence for high-impact results.",
     action: "挑一个高影响结论，用测试、独立来源或可回滚实验核验。"
   },
+  iteration: {
+    label: "多轮协作与反馈",
+    labelEn: "Iterative collaboration and feedback",
+    positive: /(多轮|迭代|追问|修改|反馈|比较|版本|refine|iterate|feedback|revise|follow[- ]?up|compare)/i,
+    negative: /(一问一答|直接接受|不再修改|第一版就用|first answer|no revision|accept immediately)/i,
+    diagnosis: "把 AI 输出当成可以被反馈和修订的工作材料，而不是一次性交付。",
+    diagnosisEn: "Treat AI output as work material that can be revised through feedback, not as a one-shot delivery.",
+    action: "在下一次任务中明确一次反馈回合，并记录结果如何因此改变。"
+  },
   workflow: {
     label: "工作流与委派",
     labelEn: "Workflow and delegation",
@@ -44,6 +65,15 @@ const DIMENSION_CONFIG = {
     diagnosis: "把重复的一问一答升级为目标 → 智能代理执行 → 测试 → 复核的闭环。",
     diagnosisEn: "Upgrade repeated one-off chats into goal → agent execution → test → review.",
     action: "选择一个低风险重复任务，试做一次可复用的智能代理工作流。"
+  },
+  ai_world_model: {
+    label: "AI 能力边界认知",
+    labelEn: "AI capability-boundary awareness",
+    positive: /(能力边界|模型限制|适合|不适合|不确定|风险|来源|最新|工具选择|capability|limitation|uncertain|risk|source|tool choice)/i,
+    negative: /(万能|什么都能|完全准确|无需判断|always correct|can do anything|no judgment needed)/i,
+    diagnosis: "持续更新对 AI 能做什么、不能做什么以及何时需要人类负责的判断。",
+    diagnosisEn: "Keep updating what AI can and cannot do, and when a human must remain accountable.",
+    action: "为一个真实任务写出 AI 可以做、不能做、必须由人最终判断的三栏边界。"
   }
 };
 
@@ -113,8 +143,25 @@ function normalizeActivity(input, index, fallbackNow) {
     title: clean(input?.title, 200) || "AI 协作活动 " + (index + 1),
     content,
     occurredAt,
-    source: clean(input?.source || input?.platform, 80) || "ai_conversation"
+    source: clean(input?.source || input?.platform, 80) || "ai_conversation",
+    eventType: clean(input?.eventType, 80) || "ai_collaboration"
   };
+}
+
+/**
+ * Normalize once at the ingestion boundary. The returned event objects are
+ * intentionally reusable by both the AI-collaboration and domain engines so
+ * the two profiles cannot silently score different activity inputs.
+ */
+export function normalizeActivityEvents(inputs, fallbackNow = new Date().toISOString()) {
+  return (Array.isArray(inputs) ? inputs : [])
+    .map((item, index) => normalizeActivity(item, index, fallbackNow))
+    .filter(Boolean)
+    .slice(0, 100)
+    .map(item => ({
+      ...item,
+      contentHash: stableHash(item.content)
+    }));
 }
 
 function normalizeCandidate(input, index) {
@@ -199,6 +246,24 @@ function debtForProfile(profile, runId, createdAt) {
   const why = profile.evidence.length
     ? "近 7 天活动显示「" + profile.label + "」仍有可观察风险；下一步应该改变行为，而不是继续消费相似内容。"
     : "近 7 天没有足够的「" + profile.label + "」行为证据，先用一个真实任务补齐验证。";
+  const interventionType = {
+    problem_modeling: "behavior_experiment",
+    task_decomposition: "delegation",
+    context: "context",
+    verification: "verification",
+    iteration: "behavior_experiment",
+    workflow: "workflow_upgrade",
+    ai_world_model: "boundary_judgment"
+  }[profile.dimension] || "behavior_experiment";
+  const successCriteria = {
+    problem_modeling: ["写出目标、约束和成功标准", "让 AI 先反向澄清一个问题"],
+    task_decomposition: ["只定义目标、上下文、约束和验收标准", "让 AI 自己决定至少一个中间执行路径"],
+    context: ["形成一份可复用的项目上下文", "下一次不再重复解释稳定背景"],
+    verification: ["至少保留一条独立证据", "明确结论仍有哪些不确定性"],
+    iteration: ["至少完成一轮有记录的反馈和修订", "说明反馈如何改变了最终结果"],
+    workflow: ["把一个重复任务拆成可委派步骤", "保留测试与人类复核环节"],
+    ai_world_model: ["写出 AI 可以做、不能做和必须由人判断的边界", "为一个高影响判断保留责任归属"]
+  }[profile.dimension] || ["完成一次真实任务行为实验", "保留结果证据并复盘" ];
   return {
     id: "ai-usage-debt-" + profile.dimension,
     kind: "ai_usage_debt",
@@ -211,13 +276,8 @@ function debtForProfile(profile, runId, createdAt) {
     why,
     evidence: profile.evidence.slice(0, 3),
     nextAction: config.action,
-    successCriteria: profile.dimension === "verification"
-      ? ["至少保留一条独立证据", "明确结论仍有哪些不确定性"]
-      : profile.dimension === "context"
-        ? ["形成一份可复用的项目上下文", "下一次不再重复解释稳定背景"]
-        : profile.dimension === "problem_modeling"
-          ? ["写出目标、约束和成功标准", "让 AI 先反向澄清一个问题"]
-          : ["把一个重复任务拆成可委派步骤", "保留测试与人类复核环节"],
+    interventionType,
+    successCriteria,
     createdAt,
     runId
   };
@@ -372,6 +432,30 @@ function buildExperiment(debt, runId, now) {
       successCriteria: debt.successCriteria
     };
   }
+  if (debt.dimension === "task_decomposition") {
+    return {
+      ...common,
+      title: "把一个完整任务交给智能代理",
+      instruction: "只定义目标、上下文、约束和验收标准，不预先设计中间步骤；观察智能代理如何选择执行路径。",
+      successCriteria: debt.successCriteria
+    };
+  }
+  if (debt.dimension === "iteration") {
+    return {
+      ...common,
+      title: "记录一次反馈如何改变 AI 结果",
+      instruction: "保留第一版、你的反馈和最终版，明确指出反馈带来的具体变化。",
+      successCriteria: debt.successCriteria
+    };
+  }
+  if (debt.dimension === "ai_world_model") {
+    return {
+      ...common,
+      title: "画出一次 AI 协作的责任边界",
+      instruction: "为一个真实任务分别写下 AI 可以做、不能做、必须由人最终判断的内容。",
+      successCriteria: debt.successCriteria
+    };
+  }
   return {
     ...common,
     title: "把一个重复任务升级成智能代理工作流",
@@ -388,7 +472,7 @@ export function analyzeCognitiveLoop(input = {}) {
   const now = normalizeDate(input.now, new Date().toISOString());
   const windowDays = Math.max(1, Math.min(30, Number(input.windowDays || 7)));
   const windowStart = addDays(now, -windowDays);
-  const activities = (Array.isArray(input.activities) ? input.activities : [])
+  const activities = (Array.isArray(input.activityEvents) ? input.activityEvents : normalizeActivityEvents(input.activities, now))
     .map((item, index) => normalizeActivity(item, index, now))
     .filter(Boolean)
     .filter(item => new Date(item.occurredAt).getTime() >= new Date(windowStart).getTime())
@@ -404,7 +488,8 @@ export function analyzeCognitiveLoop(input = {}) {
   });
   const selectedProfile = rankedProfiles[0];
   const generatedAt = now;
-  const debt = debtForProfile(selectedProfile, runId, generatedAt);
+  const debts = rankedProfiles.map(item => debtForProfile(item, runId, generatedAt));
+  const debt = debts[0];
   const candidates = (Array.isArray(input.contentCandidates) && input.contentCandidates.length
     ? input.contentCandidates
     : defaultContentCandidates())
@@ -413,6 +498,7 @@ export function analyzeCognitiveLoop(input = {}) {
   const briefing = buildBriefing(candidates, debt, context, previousFeedback);
   return {
     schemaVersion: COGNITIVE_LOOP_SCHEMA_VERSION,
+    runId,
     source: "rule_fallback",
     sourceLabel: "结构化行为规则（可审计降级）",
     generatedAt,
@@ -433,7 +519,7 @@ export function analyzeCognitiveLoop(input = {}) {
       excerpt: item.content.slice(0, 160)
     })),
     aiCollaborationProfile: profile,
-    aiUsageDebts: [debt],
+    aiUsageDebts: debts,
     briefing,
     experiment: buildExperiment(debt, runId, generatedAt),
     verification: {

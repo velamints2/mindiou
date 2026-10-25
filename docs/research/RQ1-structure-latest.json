@@ -1,0 +1,22 @@
+{
+ "generated_at": "2026-10-13T01:08:22.538Z",
+ "warning": "样本量 n(profiles)=9, n(attempts)=9 — 仅作描述性基线，不具推断力；推断性检验待 EXP-2 后 n≥40",
+ "s1a_monotonicity": {
+  "n": 9,
+  "spearman_level_vs_effort": null,
+  "verdict": "样本不足"
+ },
+ "s1b_discrimination": {
+  "0": {
+   "n": 9,
+   "firstPassRate": 0
+  }
+ },
+ "s2_internal_structure": {
+  "dimension_pairs": 0,
+  "mean_r": null,
+  "redundancy_threshold": 0.8,
+  "independence_threshold": 0.2,
+  "verdict": "样本不足"
+ }
+}

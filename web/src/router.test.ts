@@ -58,6 +58,11 @@ describe("parseRoute", () => {
     expect(isPublicRoute({ name: "fluency-loop-preview" })).toBe(true);
   });
 
+  it("keeps the legacy Cognitive Loop URL parseable for the production preview fallback", () => {
+    location.hash = "#/cognitive-loop";
+    expect(parseRoute()).toEqual({ name: "cognitive-loop" });
+  });
+
   it("parses timeline with draftId", () => {
     location.hash = "#/timeline/draft-123";
     const route = parseRoute();

@@ -67,7 +67,8 @@ describe("MVP-1 clearance session", () => {
     });
     expect(session.scaffold).toHaveLength(3);
     expect(publicSession(session).scaffold).toBeUndefined();
-    expect(publicSession(session).clearanceQuestion).toContain("reachability");
+    expect(publicSession(session).clearanceQuestion).toBe(report.sections.feynmanCards[0].prompt);
+    expect(session.researchQuestion).toContain("reachability");
   });
 
   it("reveals the scaffold and teaches after an insufficient answer", async () => {
@@ -92,6 +93,104 @@ describe("MVP-1 clearance session", () => {
     expect(attempt.analysis.status).toBe("needs_practice");
     expect(attempt.analysis.teaching).toContain("server");
     expect(publicSession(session, { revealScaffold: true }).scaffold).toHaveLength(3);
+  });
+
+  it("does not repeat the original or a previous follow-up question", async () => {
+    const session = await startClearanceSession({ report, cardId: "card-1", researchFn: async () => research });
+    const repeated = "How do reachability, CORS, and a WebView network policy fail at different stages?";
+    const first = await submitClearanceAnswer({
+      session,
+      answer: "The request can reach the server but the browser may not expose the response.",
+      analyzeFn: async input => ({
+        status: "needs_practice",
+        coverage: 0.4,
+        demonstrated: [],
+        missing: ["WebView policy boundary"],
+        misconceptions: [],
+        evidence: [],
+        materialSourceIds: [],
+        feedback: "Add the device boundary.",
+        teaching: "The device can apply an additional policy.",
+        nextQuestion: repeated,
+        recommendation: "continue",
+        receivedPreviousQuestions: input.previousQuestions
+      })
+    });
+    expect(first.analysis.nextQuestion).not.toBe(repeated);
+    expect(first.analysis.nextQuestion).toContain("换一个场景");
+    expect(session.clearanceQuestion).toBe(first.analysis.nextQuestion);
+
+    let secondQuestion = "";
+    const second = await submitClearanceAnswer({
+      session,
+      answer: "A WebView can apply its own network policy.",
+      analyzeFn: async input => {
+        secondQuestion = input.question;
+        return {
+          status: "needs_practice",
+          coverage: 0.6,
+          demonstrated: [],
+          missing: ["verification signal"],
+          misconceptions: [],
+          evidence: [],
+          materialSourceIds: [],
+          feedback: "Add a verification signal.",
+          teaching: "A concrete signal separates the two failure modes.",
+          nextQuestion: first.analysis.nextQuestion,
+          recommendation: "continue",
+          receivedPreviousQuestions: input.previousQuestions
+        };
+      }
+    });
+    expect(second.analysis.nextQuestion).not.toBe(first.analysis.nextQuestion);
+    expect(second.analysis.nextQuestion).not.toBe(repeated);
+    expect(secondQuestion).toBe(first.analysis.nextQuestion);
+  });
+
+  it("rejects a follow-up that changes the debt topic", async () => {
+    const session = await startClearanceSession({ report, cardId: "card-1", researchFn: async () => research });
+    const attempt = await submitClearanceAnswer({
+      session,
+      answer: "The request can reach the server but CORS controls whether the browser can read it.",
+      analyzeFn: async () => ({
+        status: "needs_practice",
+        coverage: 0.5,
+        demonstrated: [],
+        missing: ["Explain the WebView policy boundary"],
+        misconceptions: [],
+        evidence: [],
+        materialSourceIds: [],
+        feedback: "Keep the explanation within the network boundaries in this card.",
+        teaching: "Compare transport, browser access, and the device policy.",
+        nextQuestion: "快速坐下时，加速度通常比跌倒低，对吗？",
+        recommendation: "continue"
+      })
+    });
+    expect(attempt.analysis.nextQuestion).not.toContain("快速坐下");
+    expect(attempt.analysis.nextQuestion).toContain("WebView");
+  });
+
+  it("removes a follow-up when the evaluator recommends ending", async () => {
+    const session = await startClearanceSession({ report, cardId: "card-1", researchFn: async () => research });
+    const attempt = await submitClearanceAnswer({
+      session,
+      answer: "Reachability is transport, CORS controls script access, and WebView policy is a separate boundary.",
+      analyzeFn: async () => ({
+        status: "provisionally_cleared",
+        coverage: 0.9,
+        demonstrated: ["Separates the boundaries"],
+        missing: [],
+        misconceptions: [],
+        evidence: ["The answer explains the sequence"],
+        materialSourceIds: ["source-official"],
+        feedback: "Core model demonstrated.",
+        teaching: "",
+        nextQuestion: "What evidence would falsify this explanation?",
+        recommendation: "end"
+      })
+    });
+    expect(attempt.analysis.nextQuestion).toBe("");
+    expect(session.state).toBe("ready_to_end");
   });
 
   it("requires review when provisional clearance depends on ordinary web evidence", async () => {

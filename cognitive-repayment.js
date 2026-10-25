@@ -109,7 +109,9 @@ function resolveGapFromReport(report, gapRef) {
       throw new Error(`Card not found in report: ${gapRef.cardId}`);
     }
     const target = clean(card.target || "");
-    const matched = gaps.find(item => clean(item?.gap || "") === target || clean(item?.title || "") === target);
+    const matched = gaps.find(item => clean(item?.sourceGapId) === clean(card?.sourceGapId))
+      || gaps.find(item => Number(item?.rank) === Number(card?.gapRank))
+      || gaps.find(item => clean(item?.gap || "") === target || clean(item?.title || "") === target);
     return { gap: matched || gaps[0], card };
   }
   const rank = Number(gapRef?.gapRank);
@@ -121,8 +123,10 @@ function resolveGapFromReport(report, gapRef) {
     throw new Error(`Gap not found in report: rank ${rank}`);
   }
   const cards = Array.isArray(report?.sections?.feynmanCards) ? report.sections.feynmanCards : [];
-  const matchedCard = cards.find(item => [item?.target, item?.prompt]
-    .some(value => clean(value || "") === clean(matched?.title || matched?.gap || "")))
+  const matchedCard = cards.find(item => clean(item?.sourceGapId) === clean(matched?.sourceGapId))
+    || cards.find(item => Number(item?.gapRank) === rank)
+    || cards.find(item => [item?.target, item?.prompt]
+      .some(value => clean(value || "") === clean(matched?.title || matched?.gap || "")))
     || cards[rank - 1]
     || null;
   return { gap: matched, card: matchedCard };
@@ -206,6 +210,7 @@ export function createGapFromReport({ report, gapRef, userId, now = new Date().t
     userId: clean(userId || ""),
     reportId: report.id,
     cardId: card ? card.id : null,
+    sourceGapId: clean(gap?.sourceGapId || `gap-${Number(gap?.rank) || Number(gapRef?.gapRank) || 0}`).slice(0, 100),
     gapRank: Number.isFinite(Number(gap?.rank)) ? Number(gap.rank) : (Number(gapRef?.gapRank) || null),
     title: clean(gap?.title || gap?.gap || "").slice(0, 200),
     whyItMatters: clean(gap?.whyDangerous || ""),
@@ -493,6 +498,7 @@ export function createFallbackEvaluation({ gap, answer } = {}) {
 export function getRepaymentEvaluationPrompt() {
   return [
     "你是 MindIOU 认知清偿评估器。你只评估学习者在本次回答中实际展示出的理解，不评估其潜力或过往表现。",
+    "本次评估严格绑定到输入中的 gapTitle、evidence 和 verificationMethod。反馈与 nextQuestion 不得引入其中没有出现的新人物、产品、指标、症状或应用场景；如果回答跑题，只指出它与当前欠条的关系缺失。",
     "必须使用学习者回答所使用的语言撰写全部 feedback 与追问。",
     "严格返回一个 JSON 对象，结构如下：",
     '{ "dimensions": { "conceptualUnderstanding": { "score": 0-100 整数, "evidence": "引用学习者回答的真实片段", "feedback": "具体反馈", "uncertainty": "low|medium|high" }, "causalExplanation": {同上}, "practicalReproduction": {同上}, "boundariesAndRisks": {同上}, "transferAbility": {同上} }, "overallFeedback": "先指出回答中正确的内容，再指出一个具体的遗漏或误解，最后给出一个有用的下一步", "nextQuestion": "一个简短的追问" }',

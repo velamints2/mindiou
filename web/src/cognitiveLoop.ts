@@ -10,7 +10,10 @@ import type {
   CognitiveLoopContentCandidateInput,
   CognitiveLoopProfile,
   CognitiveLoopResult,
-  CognitiveLoopRun
+  CognitiveLoopRun,
+  DomainCapabilityProfile,
+  PriorityIntervention,
+  UserCognitiveProfile
 } from './types'
 import { t } from './i18n'
 import { el, navigate } from './router'
@@ -114,6 +117,60 @@ export const FLUENCY_LOOP_PREVIEW = {
       focusEn: 'Make risk awareness a fixed checkpoint in the workflow.',
       accent: 'green',
       priority: false
+    },
+    {
+      title: '任务拆解',
+      titleEn: 'Task decomposition',
+      question: '你是否把完整目标交给 AI 决定执行路径？',
+      questionEn: 'Do you give AI the full goal and let it choose the path?',
+      score: 55,
+      judgment: '你能拆出步骤，但还没有稳定地把中间路径交给 AI 自主选择。',
+      judgmentEn: 'You can decompose work, but do not yet consistently let AI choose the middle path.',
+      observations: [
+        { zh: '定义目标和边界', en: 'Define the goal and boundaries' },
+        { zh: '判断哪些步骤可以委派', en: 'Choose what to delegate' },
+        { zh: '保留验收点而不是控制每一步', en: 'Keep acceptance checks, not every step' }
+      ],
+      focus: '从人工拆解，升级到目标驱动的委派。',
+      focusEn: 'Move from human decomposition to goal-driven delegation.',
+      accent: 'violet',
+      priority: false
+    },
+    {
+      title: '多轮协作',
+      titleEn: 'Iterative collaboration',
+      question: '你是否用反馈让 AI 结果真正改变？',
+      questionEn: 'Do you use feedback to materially change the AI result?',
+      score: 66,
+      judgment: '你会追问和修改，但还需要记录反馈如何改变最终结果。',
+      judgmentEn: 'You iterate and follow up, but should record how feedback changes the final result.',
+      observations: [
+        { zh: '提供具体反馈', en: 'Give concrete feedback' },
+        { zh: '比较第一版与最终版', en: 'Compare first and final versions' },
+        { zh: '保留可复用的改进方式', en: 'Keep reusable improvements' }
+      ],
+      focus: '把多轮对话变成可观察的反馈闭环。',
+      focusEn: 'Turn multi-turn chat into an observable feedback loop.',
+      accent: 'blue',
+      priority: false
+    },
+    {
+      title: 'AI 边界认知',
+      titleEn: 'AI boundary awareness',
+      question: '你知道 AI 能做什么、不能做什么吗？',
+      questionEn: 'Do you know what AI can and cannot do?',
+      score: 44,
+      judgment: '你已经开始关注风险，但还需要把能力边界转成每次工作的责任检查。',
+      judgmentEn: 'You notice risk, but still need to turn capability boundaries into a responsibility check.',
+      observations: [
+        { zh: '识别 AI 能力限制', en: 'Identify capability limits' },
+        { zh: '区分事实、不确定性和推断', en: 'Separate facts, uncertainty, and inference' },
+        { zh: '明确人类最终责任', en: 'Keep human accountability explicit' }
+      ],
+      focus: '把对 AI 能力的判断放进真实工作流。',
+      focusEn: 'Put capability-boundary judgment into the real workflow.',
+      accent: 'orange',
+      priority: false
     }
   ],
   harness: [
@@ -173,6 +230,20 @@ export const FLUENCY_LOOP_PREVIEW = {
   ]
 } as const
 
+const DOMAIN_CAPABILITY_PREVIEW: DomainCapabilityProfile = {
+  domain: 'MindIOU 产品与认知科学',
+  overallMastery: 58,
+  stage: 'L2',
+  source: 'preview',
+  dimensions: {
+    conceptualUnderstanding: { score: 64, level: 'L3', stability: 'observed', evidence: [] },
+    causalExplanation: { score: 49, level: 'L2', stability: 'one_shot', evidence: [] },
+    practicalReproduction: { score: 73, level: 'L3', stability: 'observed', evidence: [] },
+    boundariesAndRisks: { score: 42, level: 'L2', stability: 'one_shot', evidence: [] },
+    transferAbility: { score: 51, level: 'L2', stability: 'one_shot', evidence: [] }
+  }
+}
+
 const RESEARCH_EVIDENCE = [
   {
     source: 'NBER · 2025',
@@ -229,15 +300,14 @@ function formatDate(value: string): string {
 function renderFluencyPreview(startExperiment: () => void): HTMLElement {
   const preview = el('section', 'fluency-preview')
 
-  const hero = el('section', 'fluency-hero')
+  const hero = el('section', 'fluency-section fluency-assistant-hero')
   const heroCopy = el('div', 'fluency-hero-copy')
   heroCopy.append(
     el('span', 'fluency-eyebrow', copy({ zh: '功能更新 · 预告', en: 'FEATURE UPDATE · PREVIEW' })),
-    el('h2', 'fluency-hero-title', copy({ zh: 'AI 协作循环', en: 'Fluency Loop' })),
-    el('p', 'fluency-hero-lead', copy({ zh: '你的 AI 一直在进化。', en: 'Your AI keeps evolving.' })),
-    el('p', 'fluency-hero-lead fluency-hero-lead-muted', copy({ zh: '你与它一起工作的方式，也应该持续进化。', en: 'The way you work with it should too.' })),
-    el('p', 'fluency-hero-cn', copy({ zh: 'AI 的能力每天都在变化。MindIOU 持续观察你真实的 AI 使用行为，理解你的协作习惯，并判断你现在最值得升级的 AI 使用方式。', en: 'AI capabilities change every day. MindIOU observes how you actually work with AI, understands your collaboration habits, and identifies the next behavior worth upgrading.' })),
-    el('div', 'fluency-hero-tag', copy({ zh: '个人 AI 协作底座', en: 'Personal AI Harness' }))
+    el('h1', 'fluency-hero-title', copy({ zh: 'MindIOU Loop', en: 'MindIOU Loop' })),
+    el('p', 'fluency-hero-lead', copy({ zh: '一个一直在后台工作的认知助理。', en: 'A cognitive assistant that always works in the background.' })),
+    el('p', 'fluency-hero-cn', copy({ zh: '它持续整理你的能力、认知欠条和 AI 使用状态，也替你阅读外面的文章、帖子和视频，帮你判断：现在的我，下一步最值得理解什么？', en: 'It keeps organizing your capabilities, cognitive debts, and AI usage. It also reads articles, posts, and videos for you, helping answer one question: what is most worth understanding next for me?' })),
+    el('div', 'fluency-hero-tag', copy({ zh: '能力 · 欠条 · 信息', en: 'CAPABILITIES · DEBTS · SIGNALS' }))
   )
   const heroArt = el('div', 'fluency-hero-art')
   heroArt.setAttribute('aria-hidden', 'true')
@@ -245,198 +315,244 @@ function renderFluencyPreview(startExperiment: () => void): HTMLElement {
     el('span', 'fluency-orbit fluency-orbit-one'),
     el('span', 'fluency-orbit fluency-orbit-two'),
     el('span', 'fluency-orbit fluency-orbit-three'),
-    el('strong', undefined, copy({ zh: '循环', en: 'LOOP' })),
-    el('small', undefined, copy({ zh: '持续学习', en: 'ALWAYS LEARNING' }))
+    el('strong', undefined, copy({ zh: '后台运行', en: 'ALWAYS ON' })),
+    el('small', undefined, copy({ zh: '持续整理你的认知状态', en: 'KEEPING YOUR COGNITIVE STATE IN ORDER' }))
   )
   hero.append(heroCopy, heroArt)
+  const outcomes = el('div', 'fluency-outcome-grid')
+  ;[
+    { title: { zh: '我现在会什么', en: 'What I know now' }, body: { zh: '专业能力与正在形成的能力', en: 'Domain skills and emerging capabilities' }, accent: 'violet' },
+    { title: { zh: '我还有哪些认知欠条', en: 'What I still owe' }, body: { zh: '还没有稳定掌握、但已经影响工作的理解', en: 'Understanding I have used but not yet made stable' }, accent: 'orange' },
+    { title: { zh: '最近有什么真正值得我看', en: 'What is worth my attention' }, body: { zh: 'Loop 已经替我读过、筛过的外部信息', en: 'Outside signals the Loop has already read and filtered' }, accent: 'blue' }
+  ].forEach(outcome => {
+    const card = el('article', `fluency-outcome-card fluency-outcome-${outcome.accent}`)
+    card.append(el('span', 'fluency-outcome-mark', '↗'), el('h3', undefined, copy(outcome.title)), el('p', undefined, copy(outcome.body)))
+    outcomes.appendChild(card)
+  })
+  hero.appendChild(outcomes)
+  hero.appendChild(el('p', 'fluency-release-note', copy({ zh: '预计 8 月下旬上线第一版', en: 'First version expected in late August' })))
   preview.appendChild(hero)
 
-  const running = el('section', 'fluency-section fluency-running')
-  const runningHeader = el('div', 'fluency-section-header')
-  const runningTitle = el('div')
-  runningTitle.append(el('span', 'fluency-eyebrow', copy({ zh: '你的循环正在运行', en: 'YOUR LOOP IS RUNNING' })), el('h2', undefined, copy({ zh: 'MindIOU 正在持续学习你的 AI 工作方式', en: 'MindIOU is continuously learning how you work with AI' })))
-  const lastLoop = el('div', 'fluency-last-loop')
-  lastLoop.append(el('span', 'fluency-live-dot'), el('span', undefined, copy({ zh: '最近一轮', en: 'Last Loop' })), el('strong', undefined, copy({ zh: '刚刚完成', en: 'Just completed' })))
-  runningHeader.append(runningTitle, lastLoop)
+  const running = el('section', 'fluency-section fluency-background-loop')
+  const runningHeader = el('div', 'fluency-section-header fluency-section-header-stacked')
+  runningHeader.append(
+    el('span', 'fluency-eyebrow', copy({ zh: '02 · 后台循环', en: '02 · THE BACKGROUND LOOP' })),
+    el('h2', undefined, copy({ zh: 'MindIOU 在后台一直做这件事', en: 'This is what MindIOU keeps doing in the background' })),
+    el('p', undefined, copy({ zh: '你不需要每次重新整理自己。Loop 会把真实行为、项目和外部信息接起来，持续更新下一步判断。', en: 'You do not have to reorganize yourself every time. The Loop connects real behavior, projects, and outside signals to keep updating what comes next.' }))
+  )
   running.appendChild(runningHeader)
+  const loopMechanism = el('div', 'fluency-loop-mechanism-grid')
+  const loopFlow = el('div', 'fluency-loop-flow')
+  const loopItems: LocalizedText[] = [
+    { zh: '我的 AI 对话 / 项目 / 学习记录', en: 'My AI conversations / projects / learning records' },
+    { zh: '整理我的能力状态', en: 'Organize my capability state' },
+    { zh: '更新我的认知欠条', en: 'Update my cognitive debts' },
+    { zh: '判断最近最值得补的方向', en: 'Decide what is most worth filling next' },
+    { zh: '去网上读文章 / 帖子 / 视频', en: 'Read articles / posts / videos from the outside world' },
+    { zh: '筛掉重复和无关内容', en: 'Filter out repetition and irrelevant content' },
+    { zh: '给我下一步建议和训练', en: 'Give me a next step and a practice' },
+    { zh: '根据新行为再更新', en: 'Update again from new behavior' }
+  ]
+  loopItems.forEach((item, index) => {
+    const step = el('div', `fluency-flow-step${index === 0 ? ' is-source' : ''}${index === loopItems.length - 1 ? ' is-loop-back' : ''}`)
+    step.append(el('span', 'fluency-flow-index', String(index + 1).padStart(2, '0')), el('strong', undefined, copy(item)))
+    loopFlow.appendChild(step)
+    if (index < loopItems.length - 1) loopFlow.appendChild(el('span', 'fluency-flow-arrow', '↓'))
+  })
+  loopMechanism.appendChild(loopFlow)
   const metricGrid = el('div', 'fluency-metric-grid')
-  FLUENCY_LOOP_PREVIEW.metrics.forEach(metric => {
+  const loopMetrics: LocalizedText[] = [
+    { zh: '42 次 AI 对话', en: '42 AI conversations' },
+    { zh: '7 个项目', en: '7 projects' },
+    { zh: '126 条信息', en: '126 information signals' },
+    { zh: '18 个视频', en: '18 videos' }
+  ]
+  ;['42', '7', '126', '18'].forEach((value, index) => {
     const card = el('article', 'fluency-metric-card')
-    card.append(el('strong', undefined, metric.value), el('span', undefined, copy({ zh: metric.label, en: metric.labelEn })))
+    const metric = loopMetrics[index]
+    card.append(el('strong', undefined, value), el('span', undefined, copy(metric)))
     metricGrid.appendChild(card)
   })
-  running.appendChild(metricGrid)
-  const updateRow = el('div', 'fluency-update-row')
-  updateRow.appendChild(el('span', 'fluency-update-label', copy({ zh: '本轮更新', en: 'THIS LOOP UPDATED' })))
-  const updateList = el('div', 'fluency-update-list')
-  FLUENCY_LOOP_PREVIEW.updates.forEach(update => updateList.appendChild(el('span', undefined, copy(update))))
-  updateRow.appendChild(updateList)
-  running.appendChild(updateRow)
-  running.appendChild(el('p', 'fluency-running-note', copy({ zh: '下一次真实行为发生后，循环会继续更新。', en: 'The loop will update again when your next real behavior arrives.' })))
+  const evidence = el('article', 'fluency-loop-evidence-card')
+  evidence.append(
+    el('span', 'fluency-eyebrow', copy({ zh: '本轮 Loop 已处理', en: 'THIS LOOP PROCESSED' })),
+    metricGrid,
+    el('p', undefined, copy({ zh: 'Loop 会根据你的下一次真实行为继续更新。', en: 'The Loop will update again when your next real behavior arrives.' }))
+  )
+  loopMechanism.appendChild(evidence)
+  running.appendChild(loopMechanism)
   preview.appendChild(running)
 
-  const fluency = el('section', 'fluency-section')
-  const fluencyHeader = el('div', 'fluency-section-header fluency-section-header-stacked')
-  fluencyHeader.append(el('span', 'fluency-eyebrow', copy({ zh: 'AI 协作能力', en: 'AI FLUENCY' })), el('h2', undefined, copy({ zh: '不是你懂多少 AI。', en: 'It is not how much AI you know.' })), el('p', undefined, copy({ zh: '而是：你是否知道怎样与 AI 一起完成工作。MindIOU 持续理解你在四件事情上的真实表现。', en: 'It is whether you know how to get work done with AI. MindIOU keeps learning how you perform across four observable behaviors.' })))
-  fluency.appendChild(fluencyHeader)
-  const dimensionGrid = el('div', 'fluency-dimension-grid')
-  FLUENCY_LOOP_PREVIEW.dimensions.forEach(dimension => {
-    const card = el('article', `fluency-dimension-card fluency-accent-${dimension.accent}${dimension.priority ? ' is-priority' : ''}`)
-    const top = el('div', 'fluency-dimension-top')
-    top.append(el('span', 'fluency-dimension-name', copy({ zh: dimension.title, en: dimension.titleEn })), el('strong', 'fluency-dimension-score', String(dimension.score)))
-    card.appendChild(top)
-    const meter = el('div', 'fluency-dimension-meter')
-    const fill = el('span', 'fluency-dimension-meter-fill')
-    fill.style.width = `${dimension.score}%`
-    meter.appendChild(fill)
-    card.appendChild(meter)
-    card.appendChild(el('h3', undefined, copy({ zh: dimension.question, en: dimension.questionEn })))
-    card.appendChild(el('p', 'fluency-dimension-observation', copy({ zh: dimension.judgment, en: dimension.judgmentEn })))
-    const observations = el('ul', 'fluency-observation-list')
-    dimension.observations.forEach(item => observations.appendChild(el('li', undefined, copy(item))))
-    card.appendChild(observations)
-    card.appendChild(el('p', `fluency-dimension-focus${dimension.priority ? ' fluency-dimension-focus-priority' : ''}`, copy({ zh: dimension.focus, en: dimension.focusEn })))
-    dimensionGrid.appendChild(card)
-  })
-  fluency.appendChild(dimensionGrid)
-  preview.appendChild(fluency)
-
-  const gapSection = el('section', 'fluency-section fluency-gap-layout')
-  const gapCard = el('article', 'fluency-gap-card')
-  gapCard.append(
-    el('span', 'fluency-eyebrow', copy({ zh: '你的 AI 协作缺口', en: 'YOUR FLUENCY GAP' })),
-    el('h2', undefined, copy({ zh: '你现在的问题已经不是提示词。', en: 'Your problem is no longer prompting.' })),
-    el('p', undefined, copy({ zh: '根据最近两周的真实行为，你已经能够清楚表达复杂需求，也会通过多轮对话改善答案。', en: 'Based on the last two weeks of behavior, you can express complex needs clearly and improve answers through multiple turns.' })),
-    el('p', undefined, copy({ zh: '但你的工作方式仍然大量停留在：', en: 'But your workflow still looks like:' })),
-    el('strong', 'fluency-gap-chain', copy({ zh: '人拆解 → 人监督 → AI 执行一个小步骤 → 人继续下一步', en: 'Human decomposes → human supervises → AI executes one small step → human continues' })),
-    el('p', undefined, copy({ zh: '与此同时，智能代理的长期执行能力已经开始让这种工作方式显得低效。', en: 'Meanwhile, agents are getting better at sustained execution, making this workflow less efficient.' }))
+  const capabilitySplit = el('section', 'fluency-section fluency-profile-section')
+  const splitHeader = el('div', 'fluency-section-header fluency-section-header-stacked')
+  splitHeader.append(
+    el('span', 'fluency-eyebrow', copy({ zh: '03 · 认知画像', en: '03 · COGNITIVE PROFILE' })),
+    el('h2', undefined, copy({ zh: '它越来越了解你，不只是给你打分。', en: 'It is learning you, not just scoring you.' })),
+    el('p', undefined, copy({ zh: '专业能力和 AI 协作能力仍然分别观察，但它们只是更大一张认知画像的一部分。', en: 'Domain capability and AI collaboration are still observed separately, but they are only parts of a larger cognitive profile.' }))
   )
-  const transition = el('div', 'fluency-gap-transition')
-  transition.append(el('span', undefined, copy({ zh: 'AI 使用者', en: 'AI User' })), el('span', undefined, '→'), el('span', undefined, copy({ zh: 'AI 委派者', en: 'AI Delegator' })))
-  gapCard.appendChild(transition)
-  const experimentCard = el('article', 'fluency-experiment-card')
-  experimentCard.append(
-    el('span', 'fluency-eyebrow', copy({ zh: '你的下一项实验', en: 'YOUR NEXT EXPERIMENT' })),
-    el('h2', undefined, copy({ zh: '本周只升级一种行为', en: 'Upgrade one behavior this week' })),
-    el('h3', undefined, copy({ zh: '把一个完整任务交给智能代理', en: 'Delegate one complete task to an agent' })),
-    el('p', undefined, copy({ zh: '选择一个低风险任务，只定义目标、上下文、约束和验收标准。不要设计中间步骤，让智能代理自己决定执行路径。', en: 'Choose a low-risk task. Define only the goal, context, constraints, and acceptance criteria. Do not design the intermediate steps; let the agent choose the path.' }))
-  )
-  const experimentFields = el('div', 'fluency-experiment-fields')
+  capabilitySplit.appendChild(splitHeader)
+  const profileGrid = el('div', 'fluency-profile-grid')
+  const profileCard = el('article', 'fluency-profile-card')
+  profileCard.append(el('span', 'fluency-profile-kicker', copy({ zh: '你的认知状态', en: 'YOUR COGNITIVE STATE' })), el('h3', undefined, copy({ zh: '一张会随真实行为更新的画像', en: 'A profile updated by real behavior' })))
   ;[
-    [{ zh: '目标', en: 'Goal' }, { zh: '最终要完成什么？', en: 'What must be completed?' }],
-    [{ zh: '上下文', en: 'Context' }, { zh: 'AI 可以使用哪些信息？', en: 'What information can AI use?' }],
-    [{ zh: '约束', en: 'Constraints' }, { zh: '哪些事情不能做？', en: 'What must not happen?' }],
-    [{ zh: '验收标准', en: 'Acceptance criteria' }, { zh: '怎样才算真正完成？', en: 'What counts as complete?' }]
-  ].forEach(([label, body]) => {
-    const field = el('div', 'fluency-experiment-field')
-    field.append(el('strong', undefined, copy(label)), el('span', undefined, copy(body)))
-    experimentFields.appendChild(field)
+    [{ zh: '专业能力', en: 'Domain capability' }, { zh: 'MindIOU 产品与认知科学', en: 'MindIOU product and cognitive science' }],
+    [{ zh: '正在形成的能力', en: 'Emerging capability' }, { zh: 'AI Agent Harness', en: 'AI agent harness' }],
+    [{ zh: 'AI 协作能力', en: 'AI collaboration' }, { zh: '连续迭代已稳定', en: 'Iterative collaboration is stable' }],
+    [{ zh: '认知欠条', en: 'Cognitive debts' }, { zh: '3 项待补齐', en: '3 items to revisit' }],
+    [{ zh: '最近高频主题', en: 'Frequent topics' }, { zh: 'AI Agent · Context Engineering', en: 'AI agents · Context engineering' }],
+    [{ zh: '当前项目目标', en: 'Current project goal' }, { zh: '把真实 AI 协作变成可验证成长', en: 'Turn real AI collaboration into verifiable growth' }]
+  ].forEach(([label, value]) => {
+    const row = el('div', 'fluency-profile-row')
+    row.append(el('span', undefined, copy(label)), el('strong', undefined, copy(value)))
+    profileCard.appendChild(row)
   })
-  experimentCard.appendChild(experimentFields)
-  const startButton = el('button', 'btn btn-primary fluency-start-button', copy({ zh: '开始实验', en: 'Start experiment' })) as HTMLButtonElement
+  profileGrid.appendChild(profileCard)
+  const insight = el('article', 'fluency-profile-insight')
+  const profileTags = el('div', 'fluency-profile-tags')
+  profileTags.append(el('span', undefined, copy({ zh: '已稳定 · 多轮迭代', en: 'Stable · Iteration' })), el('span', undefined, copy({ zh: '下一步 · 委派与验证', en: 'Next · Delegation and verification' })))
+  insight.append(
+    el('span', 'fluency-profile-kicker', copy({ zh: 'Loop 最近对你的理解', en: 'WHAT THE LOOP UNDERSTANDS' })),
+    el('h3', undefined, copy({ zh: '你最近在大量研究 AI Agent。', en: 'You have been spending time understanding AI agents.' })),
+    el('p', undefined, copy({ zh: '你对产品概念已经比较熟悉，但对 Harness、上下文构造的理解仍然比较零散。同时，你在实际使用 AI 时已经很擅长连续迭代，但任务委派和结果验证仍有明显提升空间。', en: 'You are becoming familiar with the product concepts, while your understanding of harnesses and context assembly is still fragmented. In real AI work, you are already strong at iteration, while delegation and result verification still have room to grow.' })),
+    profileTags,
+    el('small', 'fluency-profile-footnote', copy({ zh: '分数会在画像详情中展开；这里先看见整体状态。', en: 'Scores can be expanded in the profile detail; here you see the overall state first.' }))
+  )
+  profileGrid.appendChild(insight)
+  capabilitySplit.appendChild(profileGrid)
+  const debts = el('div', 'fluency-debt-panel')
+  const debtsHeader = el('div', 'fluency-debt-header')
+  const debtsTitle = el('div')
+  debtsTitle.append(el('span', 'fluency-eyebrow', copy({ zh: '认知欠条', en: 'COGNITIVE DEBTS' })), el('h3', undefined, copy({ zh: 'Loop 也在替你照看还没补完的东西。', en: 'The Loop also keeps watch over what you have not finished learning.' })))
+  debtsHeader.append(debtsTitle, el('p', undefined, copy({ zh: '它不会要求你一次补完所有欠条。Loop 会根据你现在正在做的事情，重新决定哪些值得优先处理。', en: 'It will not ask you to repay every debt at once. The Loop reorders them based on what you are doing now.' })))
+  debts.appendChild(debtsHeader)
+  const debtGrid = el('div', 'fluency-debt-grid')
+  ;[
+    [{ zh: '为什么长期 Agent 需要 Harness？', en: 'Why do long-running agents need a harness?' }, { zh: '最近出现 4 次 · 尚未稳定掌握', en: 'Appeared 4 times recently · Not stable yet' }],
+    [{ zh: '如何解释循环采购的商业价值？', en: 'How do I explain the business value of circular procurement?' }, { zh: '与当前项目高度相关 · 建议本周补齐', en: 'Highly relevant to the current project · Suggested this week' }],
+    [{ zh: '英语里如何自然解释 trade-off？', en: 'How do I explain “trade-off” naturally in English?' }, { zh: '最近口语训练中出现 6 次', en: 'Appeared 6 times in recent speaking practice' }]
+  ].forEach(([title, meta], index) => {
+    const card = el('article', 'fluency-debt-card')
+    card.append(el('span', 'fluency-debt-index', `0${index + 1}`), el('h4', undefined, copy(title)), el('p', undefined, copy(meta)))
+    debtGrid.appendChild(card)
+  })
+  debts.appendChild(debtGrid)
+  capabilitySplit.appendChild(debts)
+  preview.appendChild(capabilitySplit)
+
+  const reading = el('section', 'fluency-section fluency-reading-section')
+  const readingHeader = el('div', 'fluency-section-header fluency-section-header-stacked')
+  readingHeader.append(
+    el('span', 'fluency-eyebrow', copy({ zh: '04 · 替你读外部世界', en: '04 · READING FOR YOU' })),
+    el('h2', undefined, copy({ zh: '你不用自己刷完这些东西。', en: 'You do not have to read through all of this yourself.' })),
+    el('p', undefined, copy({ zh: 'Loop 不只看标题。对于视频，它会读取字幕、语音和关键画面，再判断这条信息是否真的与你有关。', en: 'The Loop does not only read titles. For videos, it reads subtitles, audio, and key frames before deciding whether a signal is truly relevant to you.' }))
+  )
+  reading.appendChild(readingHeader)
+  const readingGrid = el('div', 'fluency-reading-grid')
+  const intake = el('article', 'fluency-reading-intake')
+  intake.append(el('span', 'fluency-reading-kicker', copy({ zh: '今天 Loop 已替你阅读', en: 'TODAY THE LOOP READ' })), el('h3', undefined, copy({ zh: '84 篇文章 / 帖子', en: '84 articles / posts' })))
+  ;[
+    [{ zh: '18 个视频', en: '18 videos' }, 'violet'],
+    [{ zh: '7 个产品更新', en: '7 product updates' }, 'blue'],
+    [{ zh: '3 份研究资料', en: '3 research documents' }, 'green']
+  ].forEach(([label, accent]) => {
+    intake.appendChild(el('div', `fluency-reading-count fluency-reading-count-${accent}`, copy(label as LocalizedText)))
+  })
+  intake.appendChild(el('p', undefined, copy({ zh: '你得到的不是更长的信息流，而是已经被理解和整理过的候选。', en: 'You get not a longer feed, but candidates that have already been understood and organized.' })))
+  readingGrid.appendChild(intake)
+  const filter = el('article', 'fluency-reading-filter')
+  filter.append(el('span', 'fluency-reading-kicker', copy({ zh: 'Loop 自动筛选', en: 'THE LOOP FILTERED' })), el('h3', undefined, copy({ zh: '先替你排除不值得花时间的内容', en: 'It first removes what is not worth your time' })))
+  ;[
+    [{ value: '47', label: { zh: '条与你已知内容重复', en: 'repeated what you already know' } }, 'violet'],
+    [{ value: '21', label: { zh: '条和当前工作无关', en: 'unrelated to your current work' } }, 'blue'],
+    [{ value: '16', label: { zh: '条只有新闻价值', en: 'news-only updates' } }, 'orange'],
+    [{ value: '22', label: { zh: '条信息密度过低', en: 'low-density items' } }, 'gray']
+  ].forEach(([item, accent]) => {
+    const filterItem = item as { value: string; label: LocalizedText }
+    const row = el('div', `fluency-filter-row fluency-filter-${accent}`)
+    row.append(el('strong', undefined, filterItem.value), el('span', undefined, copy(filterItem.label)))
+    filter.appendChild(row)
+  })
+  readingGrid.appendChild(filter)
+  const kept = el('article', 'fluency-reading-kept')
+  kept.append(el('span', 'fluency-reading-kicker', copy({ zh: '真正值得你看的', en: 'WORTH YOUR ATTENTION' })), el('h3', undefined, copy({ zh: '只留下 3 条', en: 'Only 3 signals remain' })))
+  ;[
+    [{ zh: 'Agent 正在走向更长周期的独立执行', en: 'Agents are moving toward longer-horizon independent execution' }, { zh: '可能改变你最近的任务委派方式', en: 'May change how you delegate recent work' }],
+    [{ zh: '上下文工程正在成为长期协作的关键', en: 'Context engineering is becoming key to long-term collaboration' }, { zh: '与你反复补充项目背景的行为有关', en: 'Connected to your repeated project re-explanations' }],
+    [{ zh: '一份与你当前项目直接相关的研究', en: 'One study directly connected to your current project' }, { zh: '预计阅读时间：8 分钟', en: 'Estimated reading time: 8 minutes' }]
+  ].forEach(([title, reason], index) => {
+    const item = el('div', 'fluency-kept-item')
+    const keptBody = el('div')
+    keptBody.append(el('strong', undefined, copy(title)), el('p', undefined, copy(reason)))
+    item.append(el('span', undefined, `0${index + 1}`), keptBody)
+    kept.appendChild(item)
+  })
+  readingGrid.appendChild(kept)
+  reading.appendChild(readingGrid)
+  preview.appendChild(reading)
+
+  const next = el('section', 'fluency-section fluency-next-section')
+  const nextHeader = el('div', 'fluency-section-header fluency-section-header-stacked')
+  nextHeader.append(
+    el('span', 'fluency-eyebrow', copy({ zh: '05 · 为什么推荐给你', en: '05 · WHY THIS MATTERS' })),
+    el('h2', undefined, copy({ zh: 'Loop 不只告诉你看什么，也告诉你为什么。', en: 'The Loop tells you why it matters, not only what to read.' })),
+    el('p', undefined, copy({ zh: '我整理了最近的情况，这里有一个可能对你有帮助的发现。', en: 'I organized what has been happening recently. Here is one finding that may help you.' }))
+  )
+  next.appendChild(nextHeader)
+  const recommendation = el('article', 'fluency-recommendation-card')
+  recommendation.append(
+    el('span', 'fluency-recommendation-kicker', copy({ zh: '为什么把它给你？', en: 'Why are we showing this to you?' })),
+    el('h3', undefined, copy({ zh: '本周，不妨把一个低风险任务完整交给 Agent。', en: 'This week, try handing one low-risk task to an agent end to end.' })),
+    el('p', 'fluency-recommendation-note', copy({ zh: '不需要继续看 10 篇相关文章。先用一次真实工作，验证这条变化对你有没有帮助。', en: 'You do not need to read ten more articles. Use one real task to test whether this change helps you.' }))
+  )
+  const recommendationRows = el('div', 'fluency-recommendation-rows')
+  ;[
+    [{ zh: '外面发生了什么', en: 'What changed outside' }, { zh: 'Agent 开始支持更长周期的独立任务。', en: 'Agents are beginning to support longer-horizon independent tasks.' }],
+    [{ zh: '和你有什么关系', en: 'Why it matters to you' }, { zh: '过去 7 天，你仍有 11 个任务采用逐步骤人工监督。', en: 'You still used step-by-step human supervision for 11 tasks in the last 7 days.' }],
+    [{ zh: '建议你做什么', en: 'What to do next' }, { zh: '只定义目标、上下文、约束和验收标准，然后观察 Agent 自己的执行路径。', en: 'Define the goal, context, constraints, and acceptance criteria, then observe the agent’s path.' }]
+  ].forEach(([label, body]) => {
+    const row = el('div', 'fluency-recommendation-row')
+    row.append(el('span', undefined, copy(label)), el('p', undefined, copy(body)))
+    recommendationRows.appendChild(row)
+  })
+  recommendation.appendChild(recommendationRows)
+  const startButton = el('button', 'btn btn-primary fluency-start-button', copy({ zh: '开始这个实验', en: 'Start this experiment' })) as HTMLButtonElement
   startButton.type = 'button'
   startButton.onclick = startExperiment
-  experimentCard.appendChild(startButton)
-  gapSection.append(gapCard, experimentCard)
-  preview.appendChild(gapSection)
-
-  const harness = el('section', 'fluency-section fluency-harness')
-  const harnessHeader = el('div', 'fluency-section-header fluency-section-header-stacked')
-  harnessHeader.append(el('span', 'fluency-eyebrow', copy({ zh: '你的个人 AI 协作底座', en: 'YOUR PERSONAL AI HARNESS' })), el('h2', undefined, copy({ zh: '模型负责生成。协作底座决定 AI 怎样真正参与工作。', en: 'Models generate. A harness determines how AI participates in real work.' })), el('p', undefined, copy({ zh: 'MindIOU 正在逐渐为你建立一层长期运行的个人 AI 协作底座。', en: 'MindIOU is gradually building a long-running Personal AI Harness around you.' })))
-  harness.appendChild(harnessHeader)
-  const harnessGrid = el('div', 'fluency-harness-grid')
-  FLUENCY_LOOP_PREVIEW.harness.forEach((pillar, index) => {
-    const card = el('article', 'fluency-harness-card')
-    card.append(el('span', 'fluency-harness-index', String(index + 1).padStart(2, '0')), el('h3', undefined, copy({ zh: pillar.title, en: pillar.titleEn })), el('p', undefined, copy({ zh: pillar.body, en: pillar.bodyEn })))
-    harnessGrid.appendChild(card)
+  recommendation.appendChild(startButton)
+  next.appendChild(recommendation)
+  const nextActions = el('div', 'fluency-next-actions')
+  ;[
+    [{ zh: '理解', en: 'Understand' }, { zh: '知道 Agent 能力边界发生了什么变化。', en: 'Understand what changed in agent capabilities.' }],
+    [{ zh: '练习', en: 'Practice' }, { zh: '把目标、上下文与验收标准说清楚。', en: 'Define the goal, context, and acceptance criteria.' }],
+    [{ zh: '尝试', en: 'Try' }, { zh: '让 Agent 自己选择路径，再检查结果。', en: 'Let the agent choose the path, then verify the result.' }]
+  ].forEach(([title, body], index) => {
+    const card = el('article', 'fluency-next-action')
+    card.append(el('span', 'fluency-next-action-index', `0${index + 1}`), el('h3', undefined, copy(title)), el('p', undefined, copy(body)))
+    nextActions.appendChild(card)
   })
-  harness.appendChild(harnessGrid)
-  preview.appendChild(harness)
+  next.appendChild(nextActions)
+  preview.appendChild(next)
 
-  const awareness = el('section', 'fluency-section')
-  const awarenessHeader = el('div', 'fluency-section-header fluency-section-header-stacked')
-  awarenessHeader.append(el('span', 'fluency-eyebrow', copy({ zh: '能力感知', en: 'CAPABILITY AWARENESS' })), el('h2', undefined, copy({ zh: '不追踪 AI 新闻。追踪 AI 能力边界的变化。', en: 'Do not track AI news. Track changes in AI capability boundaries.' })), el('p', undefined, copy({ zh: 'AI 世界每天都有大量信息。循环更关心：发生了什么变化？为什么与你有关？你应该改变什么？', en: 'The AI world produces endless information. The loop asks: What changed? Why does it matter to you? What should change?' })))
-  awareness.appendChild(awarenessHeader)
-  const shiftGrid = el('div', 'fluency-shift-grid')
-  FLUENCY_LOOP_PREVIEW.capabilityShifts.forEach(shift => {
-    const card = el('article', 'fluency-shift-card')
-    const shiftTop = el('div', 'fluency-shift-top')
-    shiftTop.append(el('span', 'fluency-shift-number', shift.number), el('span', 'fluency-relevance', `${copy({ zh: '与你的相关性', en: 'Relevance to you' })} · ${shift.relevance}`))
-    card.appendChild(shiftTop)
-    card.append(el('h3', undefined, copy({ zh: shift.title, en: shift.titleEn })), el('p', 'fluency-shift-label', copy({ zh: '能力变化', en: 'Capability shift' })), el('p', undefined, copy({ zh: shift.shift, en: shift.shiftEn })), el('p', 'fluency-shift-label', copy({ zh: '对你的影响', en: 'Impact on you' })), el('p', undefined, copy({ zh: shift.impact, en: shift.impactEn })), el('p', 'fluency-shift-label', copy({ zh: '协作启示', en: 'Fluency implication' })), el('strong', 'fluency-shift-implication', copy({ zh: shift.implication, en: shift.implicationEn })), el('p', 'fluency-shift-action', copy({ zh: shift.action, en: shift.actionEn })))
-    const shiftButton = el('button', 'btn btn-ghost btn-sm', shift.number === '01' ? copy({ zh: '开始实验', en: 'Start experiment' }) : copy({ zh: '为什么推荐？', en: 'Why this one?' })) as HTMLButtonElement
-    shiftButton.type = 'button'
-    shiftButton.onclick = startExperiment
-    card.appendChild(shiftButton)
-    shiftGrid.appendChild(card)
+  const always = el('section', 'fluency-section fluency-future-section')
+  const alwaysHeader = el('div', 'fluency-section-header fluency-section-header-stacked')
+  alwaysHeader.append(el('span', 'fluency-eyebrow', copy({ zh: '06 · 它会一直更新', en: '06 · ALWAYS LEARNING WITH YOU' })), el('h2', undefined, copy({ zh: '每隔一段时间，Loop 会回来告诉你：', en: 'Every so often, the Loop comes back to tell you:' })))
+  always.appendChild(alwaysHeader)
+  const returnList = el('div', 'fluency-return-list')
+  ;[
+    { zh: '最近你学会了什么', en: 'What you have learned recently' },
+    { zh: '还有哪些认知欠条值得补', en: 'Which cognitive debts are worth repaying' },
+    { zh: '你的 AI 使用方式发生了什么变化', en: 'How your way of using AI has changed' },
+    { zh: '外面有哪些新东西真的与你有关', en: 'What new things outside are truly relevant to you' },
+    { zh: '下一步最值得花时间做什么', en: 'What is most worth your time next' }
+  ].forEach((item, index) => {
+    const row = el('div', 'fluency-return-item')
+    row.append(el('span', undefined, `0${index + 1}`), el('strong', undefined, copy(item)))
+    returnList.appendChild(row)
   })
-  awareness.appendChild(shiftGrid)
-  preview.appendChild(awareness)
-
-  const research = el('section', 'fluency-section fluency-research')
-  const researchHeader = el('div', 'fluency-section-header fluency-section-header-stacked')
-  researchHeader.append(
-    el('span', 'fluency-eyebrow', copy({ zh: '评估依据', en: 'EVALUATION EVIDENCE' })),
-    el('h2', undefined, copy({ zh: '为什么观察这些协作行为？', en: 'Why observe these collaboration behaviors?' })),
-    el('p', undefined, copy({ zh: '这些研究支持评估方向，但不会替我们给出你的个人分数。MindIOU 仍然必须用你的长期行为与实际结果来判断。', en: 'These studies support the evaluation directions, but they do not produce your personal score. MindIOU still needs your longitudinal behavior and real outcomes.' }))
-  )
-  const researchGrid = el('div', 'fluency-research-grid')
-  RESEARCH_EVIDENCE.forEach(item => {
-    const card = el('article', 'fluency-research-card')
-    card.append(
-      el('span', 'fluency-research-source', item.source),
-      el('h3', undefined, copy(item.title)),
-      el('p', undefined, copy(item.finding)),
-      el('p', 'fluency-research-use', copy(item.use))
-    )
-    const link = el('a', 'text-link', copy({ zh: '查看原始研究', en: 'Read the original study' })) as HTMLAnchorElement
-    link.href = item.url
-    link.target = '_blank'
-    link.rel = 'noreferrer'
-    card.appendChild(link)
-    researchGrid.appendChild(card)
-  })
-  research.append(researchHeader, researchGrid)
-  preview.appendChild(research)
-
-  const diet = el('section', 'fluency-section fluency-diet-layout')
-  const dietCopy = el('article', 'fluency-diet-copy')
-  dietCopy.append(el('span', 'fluency-eyebrow', copy({ zh: '信息饮食', en: 'INFORMATION DIET' })), el('h2', undefined, copy({ zh: '信息更多 ≠ AI 协作更流畅。', en: 'More information ≠ more fluency.' })), el('p', undefined, copy({ zh: '过去 7 天，循环已经开始过滤与你当前阶段无关的内容。', en: 'Over the last 7 days, the loop has started filtering content unrelated to your current stage.' })), el('strong', 'fluency-diet-highlight', '72%'), el('p', undefined, copy({ zh: '与你已经知道的信息高度重复。', en: 'was highly repetitive with what you already know.' })), el('p', 'fluency-diet-muted', copy({ zh: '本周循环已自动过滤：43 条重复观点 · 13 个低信息密度视频 · 7 条只有发布信息、没有能力变化的信息', en: 'Filtered this week: 43 repeated viewpoints · 13 low-density videos · 7 release-only updates with no capability change' })), el('strong', 'fluency-time-saved', copy({ zh: '预计减少无效信息消费：4.3 小时', en: 'Estimated time saved from low-value consumption: 4.3 hours' })))
-  const dietChart = el('article', 'fluency-diet-chart')
-  FLUENCY_LOOP_PREVIEW.diet.forEach(item => {
-    const row = el('div', 'fluency-diet-row')
-    const label = el('div', 'fluency-diet-row-label')
-    label.append(el('span', undefined, copy({ zh: item.label, en: item.labelEn })), el('strong', undefined, `${item.value}%`))
-    const bar = el('div', 'fluency-diet-bar')
-    const fill = el('span', 'fluency-diet-fill')
-    fill.style.width = `${item.value}%`
-    bar.appendChild(fill)
-    row.append(label, bar)
-    dietChart.appendChild(row)
-  })
-  const ignored = el('div', 'fluency-ignored-card')
-  ignored.append(el('strong', undefined, copy({ zh: '23 条热门 AI 更新已被忽略。', en: '23 popular AI updates were ignored.' })), el('span', undefined, copy({ zh: '它们很热门，但暂时不会改变你的工作方式。', en: 'They are popular, but they will not change how you work right now.' })))
-  dietChart.appendChild(ignored)
-  diet.append(dietCopy, dietChart)
-  preview.appendChild(diet)
-
-  const always = el('section', 'fluency-section fluency-always')
-  const alwaysCopy = el('div', 'fluency-always-copy')
-  alwaysCopy.append(el('span', 'fluency-eyebrow', copy({ zh: '持续学习', en: 'ALWAYS LEARNING' })), el('h2', undefined, copy({ zh: 'MindIOU 不会给你一个永久不变的 AI 协作能力分数。', en: 'MindIOU will not give you a permanent AI fluency score.' })), el('p', undefined, copy({ zh: 'AI 在变化。你的工作在变化。你使用 AI 的方式也在变化。所以系统永远不会“评估完成”。', en: 'AI changes. Your work changes. The way you use AI changes. The system is never “done evaluating.”' })), el('p', undefined, copy({ zh: '每一次 AI 协作都会成为新的证据。每一次实验都会改变系统对你的判断。每一次 AI 能力边界移动，都可能产生新的协作缺口。', en: 'Every AI collaboration becomes new evidence. Every experiment changes the system’s judgment. Every shift in AI capability can create a new collaboration gap.' })))
-  always.appendChild(alwaysCopy)
-  const loop = el('div', 'fluency-loop-steps')
-  FLUENCY_LOOP_PREVIEW.loopSteps.forEach((step, index) => {
-    const stepCard = el('div', 'fluency-loop-step')
-    stepCard.append(el('span', undefined, String(index + 1).padStart(2, '0')), el('strong', undefined, copy(step)))
-    loop.appendChild(stepCard)
-    if (index < FLUENCY_LOOP_PREVIEW.loopSteps.length - 1) loop.appendChild(el('span', 'fluency-loop-arrow', '↓'))
-  })
-  always.appendChild(loop)
+  always.appendChild(returnList)
+  always.appendChild(el('p', 'fluency-always-line', 'Always learning with you.'))
+  always.appendChild(el('p', 'fluency-release-note', copy({ zh: 'MindIOU Loop · 预计 8 月下旬上线第一版', en: 'MindIOU Loop · First version expected in late August' })))
   preview.appendChild(always)
-
-  const footer = el('section', 'fluency-preview-footer')
-  footer.append(el('span', 'fluency-eyebrow', copy({ zh: 'MINDIOU AI 协作循环', en: 'MINDIOU FLUENCY LOOP' })), el('h2', undefined, copy({ zh: '一层持续学习的 AI 协作底座。', en: 'An always-learning harness for how you work with AI.' })), el('p', undefined, copy({ zh: 'AI 在持续进化。你的 AI 使用方式，也应该持续进化。', en: 'AI keeps evolving. The way you work with it should too.' })))
-  preview.appendChild(footer)
   return preview
 }
 
@@ -473,6 +589,96 @@ function renderProfileCard(profile: CognitiveLoopProfile): HTMLElement {
   return card
 }
 
+const DOMAIN_DIMENSION_LABELS: Record<string, LocalizedText> = {
+  conceptualUnderstanding: { zh: '概念理解', en: 'Conceptual understanding' },
+  causalExplanation: { zh: '因果解释', en: 'Causal explanation' },
+  practicalReproduction: { zh: '实践复现', en: 'Practical reproduction' },
+  boundariesAndRisks: { zh: '边界与风险', en: 'Boundaries and risks' },
+  transferAbility: { zh: '迁移应用', en: 'Transfer ability' }
+}
+
+function renderDomainCapabilityCard(profile: DomainCapabilityProfile, preview = false): HTMLElement {
+  const card = el('article', `fluency-capability-summary fluency-capability-domain${preview ? ' is-preview' : ''}`)
+  const domainScores = Object.values(profile.dimensions || {}).map(dimension => Number(dimension.score || 0)).filter(Number.isFinite)
+  const overall = Number(profile.overallMastery ?? (domainScores.length ? Math.round(domainScores.reduce((sum, score) => sum + score, 0) / domainScores.length) : 0))
+  card.append(
+    el('span', 'fluency-capability-kicker', copy({ zh: '领域能力', en: 'DOMAIN CAPABILITY' })),
+    el('h3', undefined, profile.domain || copy({ zh: '尚未指定领域', en: 'No domain specified yet' }))
+  )
+  const scoreRow = el('div', 'fluency-domain-score-row')
+  scoreRow.append(el('strong', 'fluency-capability-score', String(overall)), el('span', 'fluency-capability-score-label', copy({ zh: '当前领域掌握度', en: 'current domain mastery' })))
+  card.append(scoreRow, el('p', undefined, copy({ zh: '回答的是：你会不会做这件事？系统通过知识、训练、解释、迁移和真实工作验证来推进。', en: 'The question is: can you do this work? Progress comes through knowledge, training, explanation, transfer, and real-work verification.' })))
+  const dimensionList = el('div', 'fluency-domain-dimension-list')
+  Object.entries(profile.dimensions || {}).forEach(([key, dimension]) => {
+    const row = el('div', 'fluency-domain-dimension-row')
+    const label = DOMAIN_DIMENSION_LABELS[key] || { zh: key, en: key }
+    const rowHead = el('div', 'fluency-domain-dimension-head')
+    rowHead.append(el('span', undefined, copy(label)), el('strong', undefined, String(dimension.score)))
+    const meter = el('div', 'fluency-dimension-meter')
+    const fill = el('span', 'fluency-dimension-meter-fill')
+    fill.style.width = `${Math.max(0, Math.min(100, Number(dimension.score || 0)))}%`
+    meter.appendChild(fill)
+    row.append(rowHead, meter)
+    dimensionList.appendChild(row)
+  })
+  card.appendChild(dimensionList)
+  card.appendChild(el('span', 'fluency-capability-note', copy({ zh: '干预方式：知识、训练、解释、迁移、真实工作验证', en: 'Interventions: knowledge, training, explanation, transfer, and real-work verification' })))
+  return card
+}
+
+function renderCapabilitySplit(result: CognitiveLoopResult): HTMLElement {
+  const sectionNode = section(copy({ zh: '两条并行能力线', en: 'Two parallel capability lines' }), 'cognitive-loop-panel cognitive-loop-capability-split')
+  const profile = result.cognitiveProfile
+  const domains = result.domainCapabilityProfiles || profile?.domainCapabilityProfiles || []
+  if (domains.length) {
+    domains.forEach(domain => sectionNode.appendChild(renderDomainCapabilityCard(domain)))
+  } else {
+    const empty = el('article', 'cognitive-loop-capability-empty')
+    empty.append(
+      el('h3', undefined, copy({ zh: '领域能力', en: 'Domain capability' })),
+      el('p', undefined, copy({ zh: '本轮没有指定具体领域，因此系统不会把“证据不足”误写成领域缺口。填写领域后，才会启动专业能力观察。', en: 'No specific domain was supplied for this loop, so insufficient evidence is not turned into a domain gap. Add a domain to start professional-capability observation.' }))
+    )
+    sectionNode.appendChild(empty)
+  }
+  const ai = el('article', 'cognitive-loop-capability-summary')
+  ai.append(
+    el('span', 'fluency-capability-kicker', copy({ zh: 'AI 协作能力', en: 'AI COLLABORATION CAPABILITY' })),
+    el('h3', undefined, copy({ zh: '七个行为维度', en: 'Seven behavioral dimensions' })),
+    el('p', undefined, copy({ zh: '问题建模、任务拆解、上下文、判断与验证、多轮协作、工作流、AI 能力边界认知。', en: 'Problem modeling, task decomposition, context, verification, iteration, workflow, and AI boundary awareness.' })),
+    el('span', 'fluency-capability-note', copy({ zh: '干预方式：行为实验、委派、验证、上下文、工作流升级', en: 'Interventions: behavior experiments, delegation, verification, context, and workflow upgrades' }))
+  )
+  sectionNode.appendChild(ai)
+  return sectionNode
+}
+
+function renderPriorityInterventions(result: CognitiveLoopResult): HTMLElement {
+  const interventions: PriorityIntervention[] = result.priorityInterventions || result.cognitiveProfile?.priorityInterventions || []
+  const card = section(copy({ zh: '本轮统一干预 · 最多三项', en: 'Unified interventions · Up to three this loop' }), 'cognitive-loop-panel cognitive-loop-priority-interventions')
+  if (!interventions.length) {
+    card.appendChild(el('p', undefined, copy({ zh: '本轮还没有足够证据形成干预队列。', en: 'There is not enough evidence to form an intervention queue yet.' })))
+    return card
+  }
+  const grid = el('div', 'cognitive-loop-intervention-grid')
+  interventions.forEach(item => {
+    const typeLabel = item.category === 'domain_capability'
+      ? copy({ zh: '领域能力', en: 'Domain capability' })
+      : item.category === 'ai_collaboration'
+        ? copy({ zh: 'AI 协作能力', en: 'AI collaboration' })
+        : copy({ zh: '前沿信息', en: 'Frontier information' })
+    const intervention = el('article', `cognitive-loop-intervention-card is-${item.category}`)
+    intervention.append(
+      el('span', 'cognitive-loop-intervention-category', typeLabel),
+      el('h3', undefined, item.title),
+      el('p', 'cognitive-loop-intervention-action', item.action),
+      el('p', 'cognitive-loop-intervention-path', copy({ zh: '方式：', en: 'Mode: ' }) + item.interventionPath.join(' · ')),
+      el('small', undefined, item.reason)
+    )
+    grid.appendChild(intervention)
+  })
+  card.appendChild(grid)
+  return card
+}
+
 function sendFeedback(
   runId: string,
   kind: 'recommendation' | 'correction' | 'experiment',
@@ -492,7 +698,7 @@ function sendFeedback(
 }
 
 function renderDebt(result: CognitiveLoopResult, runId: string, status: HTMLElement): HTMLElement {
-  const debt = result.aiUsageDebts[0]
+  const debt = (result.aiUsageDebts || [])[0]
   const card = section(copy({ zh: 'AI 使用欠条 · 本轮最值得改变的行为', en: 'AI usage debt · The behavior most worth changing this loop' }), 'cognitive-loop-panel cognitive-loop-debt')
   if (!debt) {
     card.appendChild(el('p', undefined, copy({ zh: '本轮没有形成新的 AI 使用欠条。', en: 'No new AI usage debt was formed in this loop.' })))
@@ -604,7 +810,9 @@ function renderLoopResult(root: HTMLElement, run: CognitiveLoopRun, feedbackCoun
   if (feedbackCount) status.textContent = copy({ zh: '已记录 ', en: 'Recorded ' }) + feedbackCount + copy({ zh: ' 条反馈；它会进入下一轮排序。', en: ' feedback item(s); it will affect the next loop.' })
   summary.appendChild(status)
   resultBox.appendChild(summary)
-  const profileSection = section(copy({ zh: 'AI 协作画像 · 4 个可观察维度', en: 'AI Collaboration Profile · 4 observable dimensions' }), 'cognitive-loop-panel')
+  resultBox.appendChild(renderCapabilitySplit(result))
+  resultBox.appendChild(renderPriorityInterventions(result))
+  const profileSection = section(copy({ zh: 'AI 协作画像 · 7 个可观察维度', en: 'AI Collaboration Profile · 7 observable dimensions' }), 'cognitive-loop-panel')
   const grid = el('div', 'cognitive-loop-profile-grid')
   result.aiCollaborationProfile.forEach(profile => grid.appendChild(renderProfileCard(profile)))
   profileSection.appendChild(grid)
@@ -665,6 +873,9 @@ export async function renderCognitiveLoopPage(root: HTMLElement): Promise<void> 
   const projectStatus = el('p', 'cognitive-loop-status')
   projectRow.append(projectSelect, projectName, create)
   form.appendChild(projectRow)
+  const domain = el('input', 'cognitive-loop-input') as HTMLInputElement
+  domain.placeholder = copy({ zh: '当前专业领域（如：软件产品、金融、设计；用于并行观察领域能力）', en: 'Current domain (e.g. software product, finance, design; used for parallel domain observation)' })
+  form.appendChild(domain)
   const context = el('textarea', 'cognitive-loop-textarea') as HTMLTextAreaElement
   context.placeholder = copy({ zh: '项目背景：当前目标、阶段、约束、关键决策（建议脱敏）', en: 'Project context: current goal, stage, constraints, and key decisions (redact sensitive data)' })
   context.rows = 4
@@ -683,6 +894,7 @@ export async function renderCognitiveLoopPage(root: HTMLElement): Promise<void> 
   demo.type = 'button'
   demo.onclick = () => {
     activity.value = DEMO_ACTIVITY
+    if (!domain.value) domain.value = copy({ zh: '软件产品与 AI 协作', en: 'Software product and AI collaboration' })
     if (!context.value) context.value = copy({ zh: 'MindIOU Web 产品；目标是验证 AI 协作行为是否真的改变；约束是复用现有账户、项目记忆和认知欠条。', en: 'MindIOU Web product; goal: verify whether AI collaboration behavior changes; constraints: reuse the existing account, project memory, and cognitive-debt system.' })
   }
   const submit = el('button', 'btn btn-primary', copy({ zh: '运行本周循环', en: 'Run this week’s loop' })) as HTMLButtonElement
@@ -693,7 +905,7 @@ export async function renderCognitiveLoopPage(root: HTMLElement): Promise<void> 
   form.appendChild(status)
   inputPanel.appendChild(form)
   const resultHost = el('div', 'cognitive-loop-result-host')
-  resultHost.appendChild(el('section', 'cognitive-loop-empty-state', copy({ zh: '选择项目并导入活动后，这里会显示本周的 4 维画像、AI 使用欠条、有限信息简报和行为实验。', en: 'Select a project and import activity to see this week’s four-dimensional profile, AI usage debt, limited briefing, and behavior experiment.' })))
+  resultHost.appendChild(el('section', 'cognitive-loop-empty-state', copy({ zh: '选择项目并导入活动后，这里会显示领域能力、七维 AI 协作画像、统一干预、有限信息简报和行为实验。', en: 'Select a project and import activity to see domain capability, a seven-dimensional AI collaboration profile, unified interventions, a limited briefing, and a behavior experiment.' })))
   const preview = renderFluencyPreview(() => inputPanel.scrollIntoView({ behavior: 'smooth', block: 'start' }))
   main.append(preview, inputPanel, resultHost)
   page.appendChild(main)
@@ -775,6 +987,7 @@ export async function renderCognitiveLoopPage(root: HTMLElement): Promise<void> 
     void runCognitiveLoop({
       projectId: projectSelect.value,
       projectContext: context.value.trim(),
+      domain: domain.value.trim(),
       activities: [{ title: copy({ zh: '手动导入 AI 对话', en: 'Manually imported AI conversation' }), content, source: 'manual_paste' }],
       contentCandidates: parseCandidates(candidateInput.value),
       windowDays: 7,
@@ -796,7 +1009,7 @@ export function renderFluencyLoopPreviewPage(root: HTMLElement): void {
   const topbar = el('div', 'fluency-preview-topbar')
   topbar.append(
     el('span', 'fluency-preview-topbar-brand', 'MindIOU'),
-    el('span', 'fluency-preview-topbar-label', copy({ zh: 'AI 协作循环 · 功能预告', en: 'Fluency Loop · Feature Preview' }))
+    el('span', 'fluency-preview-topbar-label', copy({ zh: 'MindIOU Loop · 功能预告', en: 'MindIOU Loop · Feature Preview' }))
   )
   const home = el('a', 'text-link fluency-preview-home-link', copy({ zh: '返回 MindIOU', en: 'Back to MindIOU' })) as HTMLAnchorElement
   home.href = '#/'

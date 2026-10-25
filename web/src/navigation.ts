@@ -1,8 +1,15 @@
 import { getAccessToken } from './api'
 import { t } from './i18n'
 import { el, navigate, type Route } from './router'
+import { ENABLE_COGNITIVE_LOOP } from './featureFlags'
 
-const publicHeaderRoutes = new Set<Route['name']>(['landing', 'how-it-works', 'challenge', 'fluency-loop-preview'])
+const publicHeaderRoutes = new Set<Route['name']>([
+  'landing',
+  'how-it-works',
+  'challenge',
+  'fluency-loop-preview',
+  ...(!ENABLE_COGNITIVE_LOOP ? ['cognitive-loop' as const] : [])
+])
 
 export function renderPersistentNavigation(route: Route): void {
   document.querySelector('.persistent-site-navigation')?.remove()
@@ -19,9 +26,12 @@ export function renderPersistentNavigation(route: Route): void {
     ['#/how-it-works', t('原理', 'How it works'), 'how-it-works', 'how-it-works'],
     ['#/genesis', t('创始档案', 'Genesis archive'), 'genesis', 'genesis'],
     ['#/projects', t('项目记忆', 'Project memory'), 'projects', 'projects'],
-    ['#/profile', t('用户画像', 'User profile'), 'profile', 'profile'],
-    ['#/cognitive-loop', t('Fluency Loop', 'Fluency Loop'), 'cognitive-loop', 'cognitive-loop']
+    ['#/profile', t('用户画像', 'User profile'), 'profile', 'profile']
   ]
+  links.push(ENABLE_COGNITIVE_LOOP
+    ? ['#/cognitive-loop', t('Fluency Loop', 'Fluency Loop'), 'cognitive-loop', 'cognitive-loop']
+    : ['#/fluency-loop-preview', t('Fluency Loop 预告', 'Fluency Loop preview'), 'fluency-loop-preview', 'fluency-loop-preview'])
+  links.push(['#/digest', t('B 站消化', 'Bilibili digest'), 'digest', 'digest'])
   links.forEach(([href, label, _key, routeName]) => {
     const link = el('a', `site-nav-link ${route.name === routeName ? 'is-active' : ''}`, label) as HTMLAnchorElement
     link.href = href

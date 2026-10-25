@@ -125,6 +125,7 @@ export function createMvp0Store(dbPath, options = {}) {
     const record = {
       id,
       userId: clean(report.userId || "").slice(0, 100),
+      projectId: clean(report.projectId || "").slice(0, 120) || undefined,
       locale: report.locale === "en" ? "en" : "zh-CN",
       createdAt: report.createdAt || now,
       draftId: clean(report.draftId || "").slice(0, 100),

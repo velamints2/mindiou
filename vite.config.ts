@@ -20,7 +20,8 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": "http://localhost:8793",
-      "/health": "http://localhost:8793"
+      "/health": "http://localhost:8793",
+      "/v1": "http://localhost:8793"
     }
   },
   preview: {

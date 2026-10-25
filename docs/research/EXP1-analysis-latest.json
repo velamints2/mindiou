@@ -1,0 +1,264 @@
+{
+ "generated_at": "2026-10-13T00:54:40.755Z",
+ "reviewer_labels": 0,
+ "A_layer": {
+  "aggregated_gaps": 5,
+  "duplicate_row_ratio": 0.55,
+  "metrics": {
+   "stratum": "A: agent-session candidates (aggregated)",
+   "labeled": 0,
+   "total": 5,
+   "real_debt": 0,
+   "not_debt": 0,
+   "unsure": 0,
+   "coverage": 0
+  },
+  "rows": [
+   {
+    "gap": "Even Hub SDK 0.0.11 的 Streamable HTTP MCP 会话生命周期管理（session i",
+    "label": null,
+    "dup_rows": 1,
+    "source": "agent_session"
+   },
+   {
+    "gap": "能否解释《今年诺奖颁给了“大脑的开关”：光遗传学到底是什么》涉及的「摄影」？",
+    "label": null,
+    "dup_rows": 3,
+    "source": "agent_session"
+   },
+   {
+    "gap": "能否解释《今年诺奖颁给了“大脑的开关”：光遗传学到底是什么》涉及的「生活记录」？",
+    "label": null,
+    "dup_rows": 3,
+    "source": "agent_session"
+   },
+   {
+    "gap": "能否解释《今年诺奖颁给了“大脑的开关”：光遗传学到底是什么》里的「脑科学」？",
+    "label": null,
+    "dup_rows": 2,
+    "source": "agent_session"
+   },
+   {
+    "gap": "能否解释《今年诺奖颁给了“大脑的开关”：光遗传学到底是什么》里的「光遗传学」？",
+    "label": null,
+    "dup_rows": 2,
+    "source": "agent_session"
+   }
+  ]
+ },
+ "B_layer": {
+  "metrics_all": {
+   "stratum": "B: legacy all",
+   "labeled": 0,
+   "total": 25,
+   "real_debt": 0,
+   "not_debt": 0,
+   "unsure": 0,
+   "coverage": 0
+  },
+  "metrics_content_specific": {
+   "stratum": "B1: content-specific",
+   "labeled": 0,
+   "total": 10,
+   "real_debt": 0,
+   "not_debt": 0,
+   "unsure": 0,
+   "coverage": 0
+  },
+  "metrics_template_anchored": {
+   "stratum": "B2a: template w/ material anchor",
+   "labeled": 0,
+   "total": 4,
+   "real_debt": 0,
+   "not_debt": 0,
+   "unsure": 0,
+   "coverage": 0
+  },
+  "metrics_template_unanchored": {
+   "stratum": "B2b: template w/o anchor",
+   "labeled": 0,
+   "total": 11,
+   "real_debt": 0,
+   "not_debt": 0,
+   "unsure": 0,
+   "coverage": 0
+  },
+  "rows": [
+   {
+    "gap": "I agreed because I don't know TypeScript well.",
+    "label": null,
+    "template": false,
+    "audit": null,
+    "source": "legacy"
+   },
+   {
+    "gap": "The AI suggested using TypeScript for type safety.",
+    "label": null,
+    "template": false,
+    "audit": null,
+    "source": "legacy"
+   },
+   {
+    "gap": "I'm building a React app with Vite.",
+    "label": null,
+    "template": false,
+    "audit": null,
+    "source": "legacy"
+   },
+   {
+    "gap": "AI：根据你描述的症状（高 load、D 状态进程、高 iowait），这通常是磁盘 I/O 瓶颈。",
+    "label": null,
+    "template": false,
+    "audit": null,
+    "source": "legacy"
+   },
+   {
+    "gap": "iostat 显示 %iowait 超过 60%。我让 AI 帮我排查。",
+    "label": null,
+    "template": false,
+    "audit": null,
+    "source": "legacy"
+   },
+   {
+    "gap": "用户：线上服务器突然响应变慢，top 看到 load average 飙到 40+，很多进程卡在 D 状态。",
+    "label": null,
+    "template": false,
+    "audit": null,
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料证明用户能执行短期处置，但尚未证明用户能独立比较应用层、配置层、基础设施层方案的适用条件、代价与依赖。",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料证明用户有验证意识，但尚未证明用户能把“服务恢复”“机制解释”“复发风险评估”连接成完整验证闭环。",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料证明用户能收集关键运行信号并执行检查，但尚未证明用户能独立把“症状→候选根因→排查顺序→排除证据→结论”组织成稳",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "材料证明用户能接受“缓解症状不等于修复根因”的框架，也能做短期处置，但尚未证明其能独立比较日志缓冲、升级磁盘、远程日志服",
+    "label": null,
+    "template": false,
+    "audit": null,
+    "source": "legacy"
+   },
+   {
+    "gap": "材料证明用户能执行检查并反馈结果，但尚未证明其能独立设计“先查什么、为什么先查、查完如何分叉”的排查树。",
+    "label": null,
+    "template": false,
+    "audit": null,
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料证明用户能收集高价值症状并执行检查，但尚未证明其能独立把“nginx 大量写日志”“高 iowait”“D 状态",
+    "label": null,
+    "template": true,
+    "audit": "exposure_anchored",
+    "source": "legacy"
+   },
+   {
+    "gap": "材料证明用户会执行重启 nginx、提高日志级别等处置，并能观察到效果；但尚未证明其能解释这些动作分别改变了什么系统变量",
+    "label": null,
+    "template": false,
+    "audit": null,
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料证明用户能收集高价值运行信号、执行检查并做止血操作，但尚未证明其能独立把“高 load、D 状态、高 iowai",
+    "label": null,
+    "template": true,
+    "audit": "weakly_anchored",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料证明用户已经具备不错的质量判断意识，知道“恢复正常”不等于“问题解决”。但尚未证明其能把长期方案放进同一决策框架",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料证明用户能很好执行检查并反馈结果，但尚未证明其能独立设计一套从广到窄的排查漏斗：先排硬故障，再找热点，再验证争用",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料证明用户能收集症状，也开始区分“缓解”与“根治”，但尚未证明其能把 load、D 状态、iowait、日志写入这",
+    "label": null,
+    "template": true,
+    "audit": "weakly_anchored",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料尚未证明用户能系统比较不同方案分别在改变哪一层约束：日志级别调整是在改写入量，日志缓冲是在改写入模式，远程日志服",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料证明用户有验收意识，但尚未证明其能把“怀疑根因未修复”转成一个明确的验证计划：要验证什么假设、看哪些指标、观察多",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料尚未证明用户能把监控信号组织成一条可解释、可预测的因果链：请求流量/应用行为→日志写入模式→磁盘队列与等待→进程",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "材料部分证明用户理解单个技术动作的直接后果，例如调高日志级别会减少写入量；但尚未证明其能系统比较日志缓冲、升级磁盘、远程",
+    "label": null,
+    "template": false,
+    "audit": null,
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料已证明用户有较强的验收警觉性，知道重启和调日志级别未必等于真正修复；但尚未证明其能把现场动作系统化分成三层：临时",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料部分证明用户能读懂单个系统信号，也能警惕“症状缓解≠根因修复”；但尚未证明其能把请求流量、nginx 日志写入、",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料尚未证明用户能把“AI 给出的写法”转化为“我能解释为什么这样设计、替代方案是什么、风险差异在哪里”的验收能力。",
+    "label": null,
+    "template": true,
+    "audit": "no_anchor_terms",
+    "source": "legacy"
+   },
+   {
+    "gap": "当前材料尚未证明用户能把 React 组件中的 state、render、useEffect、依赖数组、cleanup ",
+    "label": null,
+    "template": true,
+    "audit": "exposure_anchored",
+    "source": "legacy"
+   }
+  ]
+ }
+}

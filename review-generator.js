@@ -40,6 +40,8 @@ export function getReviewGenerationPrompt() {
     "5. Match the learner's language.",
     "6. If the learner had high hint dependency, reduce scaffold further.",
     "7. If the learner failed a specific point, target that point from a new angle.",
+    "8. Stay inside the original cognitive debt, its evidence, and the original card. Never introduce a new person, product, metric, symptom, or application scenario that is not present in that scope.",
+    "9. If a previous missing point is outside the debt scope, ignore it instead of copying it into the new task.",
     "",
     "Return JSON only:",
     JSON.stringify({
@@ -59,7 +61,9 @@ export function buildReviewRequest({ debt, card, firstAttempt, hintEvents, previ
   return {
     cognitiveDebt: {
       gapText: debt?.gapText || card?.target || "",
-      evidence: debt?.gapEvidence || ""
+      evidence: debt?.gapEvidence || "",
+      sourceGapId: debt?.sourceGapId || "",
+      reportId: debt?.reportId || ""
     },
     originalPrompt: card?.prompt || "",
     firstAnswer: firstAttempt?.finalAnswer || firstAttempt?.initialAnswer || "",
@@ -83,9 +87,31 @@ export function buildReviewRequest({ debt, card, firstAttempt, hintEvents, previ
       currentStage: mastery.currentStage
     } : null,
     trainingStage: trainingStage || "delayed_recall",
-    lastMissingPoints: firstAttempt?.evaluation?.missingPoints || [],
+    lastMissingPoints: relevantMissingPoints(firstAttempt?.evaluation?.missingPoints, debt, card),
     lastMisconceptions: firstAttempt?.evaluation?.misconceptions || []
   };
+}
+
+function relevantMissingPoints(points, debt, card) {
+  const scope = `${debt?.gapText || ""} ${debt?.gapEvidence || ""} ${card?.prompt || ""}`.toLowerCase();
+  const english = scope.match(/[a-z][a-z0-9_-]{2,}/g) || [];
+  const chinese = scope.match(/[一-鿿]{2,}/g) || [];
+  const scopeTerms = new Set([
+    ...english,
+    ...chinese.flatMap(word => Array.from({ length: Math.max(0, word.length - 1) }, (_, index) => word.slice(index, index + 2)))
+  ]);
+  const stopTerms = new Set(["没有", "解释", "说明", "需要", "当前", "用户", "如何", "以及", "这个", "理解", "没有解释", "没有说明"]);
+  return (Array.isArray(points) ? points : [])
+    .map(point => String(point || "").replace(/\s+/g, " ").trim())
+    .filter(point => {
+      if (!point) return false;
+      const terms = [
+        ...(point.toLowerCase().match(/[a-z][a-z0-9_-]{2,}/g) || []),
+        ...(point.toLowerCase().match(/[一-鿿]{2,}/g) || []).flatMap(word => Array.from({ length: Math.max(0, word.length - 1) }, (_, index) => word.slice(index, index + 2)))
+      ].filter(term => !stopTerms.has(term));
+      return terms.some(term => scopeTerms.has(term));
+    })
+    .slice(0, 2);
 }
 
 // ─── 规范化复训任务 ───
@@ -136,7 +162,7 @@ export function normalizeReviewTask(raw, { userId, cognitiveDebtId, cardId, trai
  */
 export function generateRuleBasedReviewTask({ debt, card, firstAttempt, mastery, trainingStage, dueAt, userId }) {
   const gapText = debt?.gapText || card?.target || "核心概念";
-  const missingPoints = firstAttempt?.evaluation?.missingPoints || [];
+  const missingPoints = relevantMissingPoints(firstAttempt?.evaluation?.missingPoints, debt, card);
   const prompt = card?.prompt || "";
 
   let taskPrompt;
@@ -203,9 +229,19 @@ export function createAttemptFromClearanceSession(session, { userId, cognitiveDe
     cognitiveDebtId: cognitiveDebtId || "",
     trainingStage: "initial_compensation",
     taskType: "feynman_explanation",
-    originalPrompt: session?.clearanceQuestion || session?.originalCard?.prompt || "",
+    originalPrompt: session?.originalCard?.prompt || "",
     initialAnswer: firstAttempt?.answer || "",
     finalAnswer: lastAttempt?.answer || "",
+    answerHistory: attempts.map(attempt => ({
+      attemptId: attempt.id,
+      answer: attempt.answer,
+      question: attempt.question || session?.originalCard?.prompt || "",
+      feedback: attempt.analysis?.feedback || "",
+      teaching: attempt.analysis?.teaching || "",
+      nextQuestion: attempt.analysis?.nextQuestion || "",
+      createdAt: attempt.createdAt
+    })),
+    debtContext: session?.debtContext || null,
     hintEvents: hintEvents || [],
     evaluation: evaluation || {},
     startedAt: session?.createdAt || new Date().toISOString(),

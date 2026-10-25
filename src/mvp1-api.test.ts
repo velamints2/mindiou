@@ -221,7 +221,8 @@ describe("MVP-1 HTTP vertical slice", () => {
     expect(response.status).toBe(200);
     const data = await response.json();
     sessionId = data.session.id;
-    expect(data.session.clearanceQuestion).toContain("reachability");
+    expect(data.session.clearanceQuestion).toBe(seededReport.sections.feynmanCards[0].prompt);
+    expect(data.session.researchQuestion).toContain("reachability");
     expect(data.session.sources[0].type).toBe("official_doc");
     expect(data.session.scaffold).toBeUndefined();
     expect(data.session.userId).toBe(alice.user.id);

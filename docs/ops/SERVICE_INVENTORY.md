@@ -104,7 +104,7 @@
 | 语音转写（STT） | `{STT_BASE_URL}/audio/transcriptions` | **无（本任务修复前）** | 无 | 无 |
 | AI 探活（`/health?live=1`） | `{AI_BASE_URL}/models` | 8s | 无 | — |
 
-生产实际供应商：文本 `deepseek`（`AI_BASE_URL=https://api.deepseek.com`，deploy/README 已验证）；RESEARCH/STT 在生产**未配置**（deploy/README:48-49），公网演示启用 `MVP1_DEMO_FALLBACK=1`。
+生产实际供应商：文本 `302ai`（`AI_BASE_URL=https://api.302.ai/v1`、`AI_MODEL=gpt-5.6-sol`，deploy/README 已验证）；RESEARCH 使用公开网页适配器，STT 使用百度，公网演示启用 `MVP1_DEMO_FALLBACK=1`。
 
 ## 8. 健康检查（本任务实施前，已验证）
 

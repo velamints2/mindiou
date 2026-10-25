@@ -10,6 +10,7 @@ import type {
   CognitiveLoopContentCandidateInput,
   CognitiveLoopFeedback,
   CognitiveLoopRun,
+  UserCognitiveProfile,
   Confusion,
   CreateSessionResponse,
   DebtDetailResponse,
@@ -34,9 +35,10 @@ import { getLocale, t } from './i18n'
 
 // ── API 基址 ──
 //   公网部署（路径以 /mindiou/ 开头）→ /mindiou-api 由 Nginx 反代
-//   本地开发 → 可用 ?api=http://host:8793 覆盖，默认同源
+//   本地开发 → 可用 ?api=http://host:8793 覆盖，默认同源走 vite proxy
 const runtimeParams = new URLSearchParams(location.search)
-const isPublicDeployment = location.pathname.startsWith('/mindiou/')
+const isLocalDev = ['localhost', '127.0.0.1'].includes(location.hostname)
+const isPublicDeployment = !isLocalDev && location.pathname.startsWith('/mindiou/')
 export const API_BASE = runtimeParams.get('api') || (isPublicDeployment ? '/mindiou-api' : '')
 
 // ── 登录标记 ──
@@ -106,7 +108,7 @@ function defaultErrorMessage(status: number): string {
   return t(`请求失败（${status}）`, `Request failed (${status})`)
 }
 
-async function apiFetch<T>(
+export async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
@@ -183,6 +185,7 @@ export type AuthUser = {
   id: string
   email: string
   name?: string
+  emailVerified: boolean
   genesisIdentity?: GenesisIdentity
 }
 
@@ -237,12 +240,26 @@ export type ProjectHookTokenInfo = {
 
 /** 注册新账户 */
 export async function register(email: string, password: string, name?: string): Promise<AuthUser> {
-  const res = await apiFetch<{ ok: boolean; user: AuthUser }>('/api/auth/register', {
+  const res = await apiFetch<{ ok: boolean; user: AuthUser; requiresEmailVerification?: boolean }>('/api/auth/register', {
     method: 'POST',
     body: JSON.stringify({ email, password, name })
   })
-  setAccessToken('auth-session')
+  // Registration intentionally does not create an authenticated session.
+  // Keep only the non-sensitive address so the verification page can resend.
+  if (res.requiresEmailVerification) sessionStorage.setItem('mindiou_pending_verification_email', email)
   return res.user
+}
+
+export async function verifyEmail(token: string): Promise<{ ok: boolean; message?: string }> {
+  return apiFetch('/api/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) })
+}
+
+export async function resendVerificationEmail(email?: string): Promise<{ ok: boolean; message?: string }> {
+  const pendingEmail = email || sessionStorage.getItem('mindiou_pending_verification_email') || undefined
+  return apiFetch('/api/auth/resend-verification', {
+    method: 'POST',
+    body: JSON.stringify({ email: pendingEmail })
+  })
 }
 
 /** 登录 */
@@ -821,6 +838,11 @@ export type CognitiveLoopRunResponse = {
   run: CognitiveLoopRun | null
   feedback: CognitiveLoopFeedback[]
   idempotent?: boolean
+  cognitiveProfile?: UserCognitiveProfile | null
+}
+
+export async function fetchUserCognitiveProfile(): Promise<{ ok: boolean; profile: UserCognitiveProfile | null }> {
+  return projectMemoryRequest<{ ok: boolean; profile: UserCognitiveProfile | null }>('/api/cognitive-profile')
 }
 
 export async function fetchLatestCognitiveLoop(projectId: string): Promise<CognitiveLoopRunResponse> {
@@ -832,6 +854,7 @@ export async function fetchLatestCognitiveLoop(projectId: string): Promise<Cogni
 export async function runCognitiveLoop(input: {
   projectId: string
   projectContext: string
+  domain?: string
   activities: CognitiveLoopActivityInput[]
   contentCandidates?: CognitiveLoopContentCandidateInput[]
   windowDays?: number

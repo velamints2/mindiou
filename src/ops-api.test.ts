@@ -142,6 +142,110 @@ describe("STT timeout", () => {
   }, 10000);
 });
 
+describe("English speaking loop", () => {
+  it("returns a structured, goal-linked fallback when the model is disabled", async () => {
+    const res = await fetch(`${BASE}/api/learn/english-loop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        transcript: "I am preparing a product meeting.",
+        goal: { statement: "Explain the product and handle questions in English" },
+        nextMove: { reason: "Connect the topic to the meeting goal." },
+        profile: { nextPractice: { type: "conversation", title: "Natural conversation" } }
+      })
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.fallback).toBe(true);
+    expect(body.reply).toContain("product meeting");
+    expect(body.nextPrompt).toBeTruthy();
+    expect(body.g2Text.length).toBeLessThanOrEqual(42);
+  });
+
+  it("persists sanitized state per internal client and rejects an unscoped state request", async () => {
+    const clientA = "g2-client-alice-0001";
+    const clientB = "g2-client-bob-0002";
+    const profile = {
+      version: 1,
+      sessions: 1,
+      turns: 1,
+      minutes: 0.2,
+      goal: { statement: "Speak more clearly in product meetings", importance: "high" },
+      expressionDebts: [{
+        id: "debt-1",
+        phrase: "strategic value",
+        meaning: "战略价值",
+        context: "raw transcript should never be stored",
+        occurrences: 2,
+        status: "active",
+        firstSeenAt: "2026-08-13T00:00:00.000Z",
+        lastSeenAt: "2026-08-13T00:00:00.000Z"
+      }],
+      evidenceEvents: [{
+        id: "evidence-1",
+        sessionId: "session-1",
+        at: "2026-08-13T00:00:00.000Z",
+        wordCount: 20,
+        signals: { hasChinese: false, givesOpinion: true, explainsCause: true, givesExample: false, discussesTradeoff: false, rebuts: false },
+        confidence: 0.82
+      }]
+    };
+    const save = await fetch(`${BASE}/api/learn/english-loop/state`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-english-loop-client-id": clientA },
+      body: JSON.stringify({
+        event: "turn",
+        profile,
+        session: {
+          id: "session-1",
+          topic: "AI products",
+          goal: profile.goal,
+          summary: {
+            turnCount: 1,
+            evidenceCount: 1,
+            minutes: 0.5,
+            decisionType: "nothing",
+            decisionTitle: "继续观察",
+            nextPracticeType: "conversation",
+            nextPracticeTitle: "Natural conversation",
+            nextPracticeTask: "Talk about your work.",
+            completedAt: "2026-08-13T00:01:00.000Z"
+          }
+        },
+        turn: {
+          id: "evidence-1",
+          observedAt: "2026-08-13T00:00:00.000Z",
+          wordCount: 20,
+          signals: profile.evidenceEvents[0].signals,
+          decisionType: "nothing"
+        }
+      })
+    });
+    expect(save.status).toBe(200);
+    const savedBody = await save.json();
+    expect(savedBody.privacy.rawTranscriptStored).toBe(false);
+    expect(JSON.stringify(savedBody)).not.toContain("raw transcript");
+
+    const restored = await fetch(`${BASE}/api/learn/english-loop/state`, {
+      headers: { "x-english-loop-client-id": clientA }
+    });
+    expect(restored.status).toBe(200);
+    const restoredBody = await restored.json();
+    expect(restoredBody.state.profile.turns).toBe(1);
+    expect(restoredBody.state.sessions[0].turnCount).toBe(1);
+    expect(restoredBody.state.sessions[0].summary.nextPracticeTitle).toBe("Natural conversation");
+
+    const other = await fetch(`${BASE}/api/learn/english-loop/state`, {
+      headers: { "x-english-loop-client-id": clientB }
+    });
+    expect((await other.json()).state.profile).toBeNull();
+
+    const unscoped = await fetch(`${BASE}/api/learn/english-loop/state`);
+    expect(unscoped.status).toBe(400);
+  });
+});
+
 describe("admin endpoints", () => {
   it("returns aggregated stats from /api/admin/stats", async () => {
     const res = await fetch(`${BASE}/api/admin/stats`);

@@ -4,7 +4,7 @@ import { analyzeCognitiveLoop, defaultContentCandidates } from "../cognitive-loo
 const NOW = "2026-08-12T12:00:00.000Z";
 
 describe("cognitive-loop analyzer", () => {
-  it("turns recent AI activity into four collaboration dimensions and an auditable usage debt", () => {
+  it("turns recent AI activity into seven collaboration dimensions and auditable usage debts", () => {
     const result = analyzeCognitiveLoop({
       now: NOW,
       projectContext: "MindIOU web product; goal is a stable user flow; constraints include existing auth and SQLite.",
@@ -24,17 +24,20 @@ describe("cognitive-loop analyzer", () => {
       ]
     });
 
-    expect(result.schemaVersion).toBe("cognitive-loop-mvp-1");
-    expect(result.aiCollaborationProfile).toHaveLength(4);
+    expect(result.schemaVersion).toBe("cognitive-loop-mvp-2");
+    expect(result.aiCollaborationProfile).toHaveLength(7);
     expect(result.aiCollaborationProfile.map(item => item.dimension)).toEqual([
       "problem_modeling",
+      "task_decomposition",
       "context",
       "verification",
-      "workflow"
+      "iteration",
+      "workflow",
+      "ai_world_model"
     ]);
-    expect(result.aiUsageDebts).toHaveLength(1);
-    expect(result.aiUsageDebts[0].dimension).toBe("workflow");
-    expect(result.aiUsageDebts[0].evidence.length).toBe(0);
+    expect(result.aiUsageDebts).toHaveLength(7);
+    expect(result.aiUsageDebts[0].dimension).toBe("task_decomposition");
+    expect((result.aiUsageDebts[0] as typeof result.aiUsageDebts[0] & { interventionType?: string }).interventionType).toBe("delegation");
     expect(result.experiment.type).toBe("workflow_experiment");
     expect(result.verification.status).toBe("pending");
   });

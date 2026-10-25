@@ -142,6 +142,7 @@ function makeGap(rank, text) {
   const excerpt = truncate(text, 300);
   return {
     rank,
+    sourceGapId: `gap-${rank}`,
     title: "需要人工复核的理解缺口",
     gap: excerpt || `Understanding gap ${rank}: manual review required`,
     underlyingCapability: "unknown",
@@ -159,6 +160,9 @@ function makeCard(id, target, prompt) {
   return {
     id,
     target: truncate(target, 150),
+    sourceGapId: "",
+    gapRank: null,
+    cognitiveDebtId: "",
     cardType: "system_map",
     prompt: truncate(prompt, 300),
     targetLevel: "L1",
@@ -283,8 +287,10 @@ export function normalizeReport(raw) {
         }
         return {
           rank: Number(gap.rank) || (idx + 1),
+          sourceGapId: truncate(gap.sourceGapId || gap.id || `gap-${Number(gap.rank) || (idx + 1)}`, 100),
           title: truncate(gap.title, 120) || truncate(gapText, 60) || `理解缺口 ${idx + 1}`,
           gap: gapText,
+          evidence: truncate(gap.evidence || surfaceSignals.join("；"), 1000),
           underlyingCapability: truncate(gap.underlyingCapability, 200),
           surfaceSignals,
           whyDangerous: truncate(gap.whyDangerous || "Manual review required.", 300),
@@ -338,20 +344,38 @@ export function normalizeReport(raw) {
     const validLevels = ["L0", "L1", "L2", "L3", "L4", "L5"];
     const validDifficulties = ["foundation", "intermediate", "advanced"];
     const normalizedGaps = normalizeGapArray(sections.dangerousGaps);
-    function normalizeCardTarget(target) {
+    function resolveCardGap(card) {
+      const target = clean(card?.target);
+      const explicitId = clean(card?.sourceGapId || card?.gapId);
+      if (explicitId) {
+        const byId = normalizedGaps.find(gap => gap.sourceGapId === explicitId);
+        if (byId) return byId;
+      }
+      const explicitRank = Number(card?.gapRank);
+      if (Number.isInteger(explicitRank) && explicitRank > 0) {
+        const byRank = normalizedGaps.find(gap => gap.rank === explicitRank);
+        if (byRank) return byRank;
+      }
+      const match = target.match(/^dangerousGap-(\d+)$/i);
+      if (match) return normalizedGaps[Number(match[1]) - 1] || null;
+      return normalizedGaps.find(gap => [gap.title, gap.gap].some(value => clean(value).toLowerCase() === target.toLowerCase())) || null;
+    }
+    function normalizeCardTarget(target, matchedGap) {
       const value = clean(target);
-      const match = value.match(/^dangerousGap-(\d+)$/i);
-      if (!match) return truncate(value, 150);
-      const gap = normalizedGaps[Number(match[1]) - 1];
-      return truncate(gap?.gap || value, 150);
+      if (/^dangerousGap-\d+$/i.test(value)) return truncate(matchedGap?.gap || value, 150);
+      return truncate(value || matchedGap?.title || matchedGap?.gap, 150);
     }
     const cards = arr.map(card => {
       if (typeof card !== "object" || card === null) {
         return makeCard(uuid(), "unknown", String(card));
       }
+      const matchedGap = resolveCardGap(card);
       return {
         id: clean(card.id || uuid()).slice(0, 100),
-        target: normalizeCardTarget(card.target),
+        target: normalizeCardTarget(card.target, matchedGap),
+        sourceGapId: matchedGap?.sourceGapId || truncate(card.sourceGapId || card.gapId, 100),
+        gapRank: matchedGap?.rank || (Number(card.gapRank) || null),
+        cognitiveDebtId: truncate(card.cognitiveDebtId, 100),
         cardType: VALID_CARD_TYPES.includes(card.cardType) ? card.cardType : "system_map",
         prompt: normalizeTextOnlyQuestion(card.prompt),
         targetLevel: validLevels.includes(card.targetLevel) ? card.targetLevel : "L1",
@@ -617,19 +641,27 @@ export function generateFallbackReport(artifactText, artifactType) {
   for (let i = 0; i < cardCount; i++) {
     const source = cardSources[i] || `Topic ${i + 1}`;
     const firstSentence = extractFirstSentence(source);
-    feynmanCards.push(makeCard(
+    const card = makeCard(
       uuid(),
       truncate(firstSentence, 150),
       `Explain in your own words: ${truncate(firstSentence, 200)}`
-    ));
+    );
+    const gapRank = Math.min(i + 1, dangerousGaps.length);
+    card.sourceGapId = dangerousGaps[gapRank - 1]?.sourceGapId || `gap-${gapRank}`;
+    card.gapRank = gapRank;
+    feynmanCards.push(card);
   }
   // Pad to minimum 3 if we have too few sources
   while (feynmanCards.length < MIN_CARDS) {
-    feynmanCards.push(makeCard(
+    const card = makeCard(
       uuid(),
       `Topic ${feynmanCards.length + 1}`,
       `Explain in your own words: what did you understand from this section?`
-    ));
+    );
+    const gapRank = Math.min(feynmanCards.length + 1, dangerousGaps.length);
+    card.sourceGapId = dangerousGaps[gapRank - 1]?.sourceGapId || `gap-${gapRank}`;
+    card.gapRank = gapRank;
+    feynmanCards.push(card);
   }
 
   // Next actions: all routed to task

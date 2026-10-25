@@ -4,170 +4,392 @@
       "id": 0,
       "level": "debug",
       "message": "[vite] connecting...",
-      "ts": 1783077350610
+      "ts": 1791847587333
     },
     {
       "id": 1,
-      "level": "log",
-      "message": "[EvenAppBridge] Bridge initialized",
-      "ts": 1783077350635
+      "level": "debug",
+      "message": "[vite] connected.",
+      "ts": 1791847587346
     },
     {
       "id": 2,
       "level": "log",
-      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077350635
+      "message": "[EvenAppBridge] Bridge initialized",
+      "ts": 1791847587360
     },
     {
       "id": 3,
-      "level": "debug",
-      "message": "[ShadowTimers] setInterval id=3 delay=30000ms queued (queue=3)",
-      "ts": 1783077350635
+      "level": "log",
+      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
+      "ts": 1791847587383
     },
     {
       "id": 4,
-      "level": "debug",
-      "message": "[vite] connected.",
-      "ts": 1783077350636
+      "level": "log",
+      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
+      "ts": 1791847587402
     },
     {
       "id": 5,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077350643
+      "ts": 1791847588244
     },
     {
       "id": 6,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077352376
+      "ts": 1791847588257
     },
     {
       "id": 7,
       "level": "log",
-      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077352385
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"eventSource\":1},\"sysEvent\":{\"eventSource\":1}}",
+      "ts": 1791847607659
     },
     {
       "id": 8,
       "level": "log",
-      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"eventSource\":1},\"sysEvent\":{\"eventSource\":1}}",
-      "ts": 1783077358327
+      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
+      "ts": 1791847609398
     },
     {
       "id": 9,
       "level": "log",
-      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077360069
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1}}",
+      "ts": 1791847609399
     },
     {
       "id": 10,
       "level": "log",
-      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1}}",
-      "ts": 1783077360069
+      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
+      "ts": 1791847609401
     },
     {
       "id": 11,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077360071
+      "ts": 1791847609829
     },
     {
       "id": 12,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077361405
+      "ts": 1791847609838
     },
     {
       "id": 13,
       "level": "log",
-      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077361427
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791847611133
     },
     {
       "id": 14,
       "level": "log",
-      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
-      "ts": 1783077361806
+      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
+      "ts": 1791847611144
     },
     {
       "id": 15,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077361807
+      "ts": 1791847611145
     },
     {
       "id": 16,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077361808
+      "ts": 1791847611572
     },
     {
       "id": 17,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077363144
+      "ts": 1791847611579
     },
     {
       "id": 18,
       "level": "log",
-      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077363162
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791847612863
     },
     {
       "id": 19,
       "level": "log",
-      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
-      "ts": 1783077363537
+      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
+      "ts": 1791847612874
     },
     {
       "id": 20,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077363538
+      "ts": 1791847612875
     },
     {
       "id": 21,
       "level": "log",
-      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077363540
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791847613165
     },
     {
       "id": 22,
       "level": "log",
-      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
-      "ts": 1783077363838
+      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
+      "ts": 1791847613175
     },
     {
       "id": 23,
       "level": "log",
-      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077363839
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791847613467
     },
     {
       "id": 24,
       "level": "log",
-      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
-      "ts": 1783077364141
+      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
+      "ts": 1791847613478
     },
     {
       "id": 25,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077364141
+      "ts": 1791847613905
     },
     {
       "id": 26,
       "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077365472
+      "ts": 1791847613910
     },
     {
       "id": 27,
       "level": "log",
+      "message": "[vite] server connection lost. Polling for restart...",
+      "ts": 1791851618653
+    },
+    {
+      "id": 28,
+      "level": "warn",
+      "message": "[TAURI] Couldn't find callback id 2315396342. This might happen when the app is reloaded while Rust is running an asynchronous operation.",
+      "ts": 1791851618711
+    },
+    {
+      "id": 29,
+      "level": "debug",
+      "message": "[vite] connecting...",
+      "ts": 1791851618735
+    },
+    {
+      "id": 30,
+      "level": "debug",
+      "message": "[vite] connected.",
+      "ts": 1791851618747
+    },
+    {
+      "id": 31,
+      "level": "log",
+      "message": "[EvenAppBridge] Bridge initialized",
+      "ts": 1791851618758
+    },
+    {
+      "id": 32,
+      "level": "log",
       "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
-      "ts": 1783077365485
+      "ts": 1791851618766
+    },
+    {
+      "id": 33,
+      "level": "error",
+      "message": "[fetch] 500 Internal Server Error http://127.0.0.1:5175/api/learn/events",
+      "ts": 1791851618766
+    },
+    {
+      "id": 34,
+      "level": "error",
+      "message": "[fetch] 500 Internal Server Error http://127.0.0.1:5175/api/spiral/today",
+      "ts": 1791851618766
+    },
+    {
+      "id": 35,
+      "level": "error",
+      "message": "[fetch] 500 Internal Server Error http://127.0.0.1:5175/api/learn/english-loop/state",
+      "ts": 1791851618769
+    },
+    {
+      "id": 36,
+      "level": "log",
+      "message": "[Simulator] Flutter Bridge intercepted: evenAppMessage",
+      "ts": 1791851618771
+    },
+    {
+      "id": 37,
+      "level": "error",
+      "message": "[fetch] 500 Internal Server Error http://127.0.0.1:5175/api/learn/events",
+      "ts": 1791851618772
+    },
+    {
+      "id": 38,
+      "level": "error",
+      "message": "[fetch] 500 Internal Server Error http://127.0.0.1:5175/api/learn/events",
+      "ts": 1791851618772
+    },
+    {
+      "id": 39,
+      "level": "error",
+      "message": "[fetch] 500 Internal Server Error http://127.0.0.1:5175/api/learn/events",
+      "ts": 1791851618773
+    },
+    {
+      "id": 40,
+      "level": "error",
+      "message": "[fetch] 500 Internal Server Error http://127.0.0.1:5175/api/learn/events",
+      "ts": 1791851618774
+    },
+    {
+      "id": 41,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"eventSource\":1},\"sysEvent\":{\"eventSource\":1}}",
+      "ts": 1791852153504
+    },
+    {
+      "id": 42,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1}}",
+      "ts": 1791852155234
+    },
+    {
+      "id": 43,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852156962
+    },
+    {
+      "id": 44,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852158689
+    },
+    {
+      "id": 45,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852158991
+    },
+    {
+      "id": 46,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852159294
+    },
+    {
+      "id": 47,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"eventSource\":1},\"sysEvent\":{\"eventSource\":1}}",
+      "ts": 1791852202317
+    },
+    {
+      "id": 48,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1}}",
+      "ts": 1791852204101
+    },
+    {
+      "id": 49,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852205833
+    },
+    {
+      "id": 50,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852207560
+    },
+    {
+      "id": 51,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852207861
+    },
+    {
+      "id": 52,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852208163
+    },
+    {
+      "id": 53,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"eventSource\":1},\"sysEvent\":{\"eventSource\":1}}",
+      "ts": 1791852269862
+    },
+    {
+      "id": 54,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1}}",
+      "ts": 1791852271619
+    },
+    {
+      "id": 55,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852273348
+    },
+    {
+      "id": 56,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852275095
+    },
+    {
+      "id": 57,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852275396
+    },
+    {
+      "id": 58,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852275709
+    },
+    {
+      "id": 59,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"eventSource\":1},\"sysEvent\":{\"eventSource\":1}}",
+      "ts": 1791852368666
+    },
+    {
+      "id": 60,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":1}}",
+      "ts": 1791852370411
+    },
+    {
+      "id": 61,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852372141
+    },
+    {
+      "id": 62,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852373888
+    },
+    {
+      "id": 63,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852374192
+    },
+    {
+      "id": 64,
+      "level": "log",
+      "message": "[EvenAppBridge] EvenHub event: {\"jsonData\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2},\"textEvent\":{\"containerID\":1,\"containerName\":\"learn-display\",\"eventType\":2}}",
+      "ts": 1791852374491
     }
   ],
-  "total": 28
+  "total": 65
 }

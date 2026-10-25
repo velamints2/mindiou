@@ -5,6 +5,7 @@ import { createMvp0Store } from "./mvp0-store.js";
 import { createMvp1Store } from "./mvp1-store.js";
 import { deriveReportDisplay, sessionLastActivityAt } from "./report-display.js";
 import { createAuthStore } from "./auth-store.js";
+import nodemailer from "nodemailer";
 import { generateFallbackReport } from "./mvp0-fallback.js";
 import { generateClearanceReport } from "./mvp0-report.js";
 import { generateCollaborationTimeline } from "./mvp0-timeline.js";
@@ -27,6 +28,7 @@ import {
   ensureLearnerFacingLanguage
 } from "./mvp1-demo-fallback.js";
 import { createTrainingStore } from "./training-store.js";
+import { digestBilibiliVideo } from "./bilibili-digest.js";
 import {
   createCognitiveDebt,
   updateMasteryProfile,
@@ -55,7 +57,7 @@ import {
   createAttemptFromClearanceSession
 } from "./review-generator.js";
 import { createCognitiveRepaymentStore } from "./cognitive-repayment-store.js";
-import { createUsageLedger } from "./sqlite-state-store.js";
+import { createUsageLedger, createSqliteStateNamespace, openApplicationDatabase } from "./sqlite-state-store.js";
 import {
   EVALUATOR_VERSION,
   PROMPT_SCHEMA_VERSION,
@@ -82,7 +84,10 @@ import {
 } from "./project-memory-analysis.js";
 import { createProjectMemoryStore } from "./project-memory-store.js";
 import { createCognitiveLoopStore } from "./cognitive-loop-store.js";
-import { analyzeCognitiveLoop } from "./cognitive-loop.js";
+import { analyzeCognitiveLoop, normalizeActivityEvents } from "./cognitive-loop.js";
+import { createUserCognitiveProfileStore } from "./cognitive-profile-store.js";
+import { createEnglishLoopStore, hashEnglishLoopClientId } from "./english-loop-store.js";
+import { buildUserCognitiveProfile } from "./cognitive-profile.js";
 import { createOwnershipStore } from "./project-ownership-store.js";
 import {
   calculateDecisionOwnershipStatus,
@@ -158,6 +163,7 @@ const sttPrompt = process.env.OPENAI_STT_PROMPT || [
   "Preserve English vocabulary terms exactly when possible."
 ].join(" ");
 const dataDbPath = process.env.DATA_DB_PATH || process.env.AUTH_STORE_PATH || "tmp/mindiou.sqlite";
+const appStateDb = openApplicationDatabase(dataDbPath);
 // 业务状态与 Web 账号/会话可以部署到不同 SQLite 文件；生产环境必须从
 // AUTH_STORE_PATH 读取会话，否则登录成功后业务 API 会把有效 session 判成未认证。
 const authDbPath = process.env.AUTH_STORE_PATH || dataDbPath;
@@ -186,7 +192,28 @@ await repaymentStore.load();
 const authStore = createAuthStore(authDbPath);
 const usageLedger = createUsageLedger(dataDbPath);
 const projectMemoryStore = createProjectMemoryStore(dataDbPath);
+// Cross-machine project progress aggregation (fed by agents/progress-collector).
+const progressStore = createSqliteStateNamespace(dataDbPath, "progress-reports", { version: 1 });
+// EXP-2 (preregistered in docs/research/EXP-2-PREREG.md): channel assignments
+// live in their own namespace so the training pipeline stays untouched.
+const exp2Store = createSqliteStateNamespace(dataDbPath, "experiment-exp2", { version: 1 });
+// EXP-1 review labels live in their own namespace; the annotation sheet in
+// docs/research stays a point-in-time snapshot, the DB holds live labels.
+const exp1Store = createSqliteStateNamespace(dataDbPath, "experiment-exp1-labels", { version: 1 });
+const exp1State = await exp1Store.load({ labels: {} });
+// DMP P3: audit trail for research-data exports (who/when/what/how many rows).
+const auditStore = createSqliteStateNamespace(dataDbPath, "research-audit-log", { version: 1 });
+const auditState = await auditStore.load({ entries: [] });
+function recordAuditEntry(entry) {
+  auditState.entries.unshift({ at: new Date().toISOString(), ...entry });
+  auditState.entries = auditState.entries.slice(0, 500);
+}
+const exp2State = await exp2Store.load({ sealedHash: null, startedAt: null, assignments: {}, readLogs: [], quizLogs: [], blindTests: [] });
+const progressState = await progressStore.load({ machines: {}, focus: null });
 const cognitiveLoopStore = createCognitiveLoopStore(dataDbPath);
+const cognitiveProfileStore = createUserCognitiveProfileStore(dataDbPath);
+const englishLoopStore = createEnglishLoopStore(dataDbPath);
+await cognitiveProfileStore.load();
 const projectMemoryHookToken = process.env.PROJECT_MEMORY_HOOK_TOKEN || "";
 const projectMemoryAdapters = createAgentSessionAdapters();
 const GENESIS_ADOPTED_SUGGESTIONS = [
@@ -216,6 +243,12 @@ async function syncRepaymentGapsFromReports(userId) {
           userId,
           now: new Date().toISOString()
         });
+        const trainingDebt = trainingStore.listCognitiveDebts(userId).find(debt =>
+          (debt.reportId === report.id && debt.sourceGapId === gap.sourceGapId)
+          || (debt.reportId === report.id && debt.cardId && debt.cardId === gap.cardId)
+          || (debt.reportId === report.id && debt.gapText === gap.title)
+        );
+        if (trainingDebt) gap.cognitiveDebtId = trainingDebt.id;
         await repaymentStore.saveGap(gap);
         existingKeys.add(key);
         imported += 1;
@@ -229,14 +262,26 @@ async function syncRepaymentGapsFromReports(userId) {
 }
 
 function reportCardForRepaymentGap(report, gap) {
+  return reportCardsForRepaymentGap(report, gap)[0] || null;
+}
+
+function reportCardsForRepaymentGap(report, gap) {
   const cards = Array.isArray(report?.sections?.feynmanCards) ? report.sections.feynmanCards : [];
-  if (gap?.cardId) return cards.find(card => card.id === gap.cardId) || null;
+  if (gap?.cardId) return cards.filter(card => card.id === gap.cardId);
+  if (gap?.sourceGapId) {
+    const bySourceGap = cards.filter(card => card.sourceGapId === gap.sourceGapId);
+    if (bySourceGap.length) return bySourceGap;
+  }
+  if (Number.isInteger(Number(gap?.gapRank))) {
+    const byRank = cards.filter(card => Number(card.gapRank) === Number(gap.gapRank));
+    if (byRank.length) return byRank;
+  }
   const title = String(gap?.title || "").trim();
-  const matched = cards.find(card => [card.target, card.prompt]
+  const matched = cards.filter(card => [card.target, card.prompt]
     .some(value => String(value || "").trim() === title));
-  if (matched) return matched;
+  if (matched.length) return matched;
   const rank = Number(gap?.gapRank);
-  return Number.isInteger(rank) && rank > 0 ? cards[rank - 1] || null : null;
+  return Number.isInteger(rank) && rank > 0 ? [cards[rank - 1]].filter(Boolean) : [];
 }
 
 // Dashboard consumers should not need to know whether a report was written
@@ -264,8 +309,15 @@ function listOutstandingDebts(userId, reports) {
       })
       .filter(Boolean)
     : [];
-  const legacyDebts = reports.flatMap(report =>
-    (report.sections?.feynmanCards || [])
+  const legacyDebts = reports
+    // A report with explicit generation metadata belongs to the current
+    // pipeline. Fallback cards are synthetic slices created after an AI
+    // failure; they must not be resurrected as debts when no authoritative
+    // repaymentStore record exists for them. Legacy card compatibility is
+    // reserved for reports that predate the generation metadata.
+    .filter(report => !report.generation || report.generation.fallback !== true)
+    .flatMap(report =>
+      (report.sections?.feynmanCards || [])
       .filter(card => !["provisionally_cleared", "repaid"].includes(card.clearance?.status))
       .filter(card => !coveredCards.has(`${report.id}:${card.id}`))
       .map(card => ({
@@ -275,7 +327,7 @@ function listOutstandingDebts(userId, reports) {
         status: card.clearance?.status || "not_started",
         locale: report.locale || "zh-CN"
       }))
-  );
+    );
   return [...repaymentDebts, ...legacyDebts];
 }
 const rawWebResearch = researchProvider === "public_web"
@@ -395,7 +447,7 @@ function jsonResponse(res, statusCode, payload, extraHeaders = {}) {
     "cache-control": "no-store",
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
-    "access-control-allow-headers": "content-type,authorization,cookie",
+    "access-control-allow-headers": "content-type,authorization,cookie,x-english-loop-client-id",
     "access-control-allow-credentials": "true",
     ...extraHeaders
   });
@@ -406,7 +458,7 @@ function optionsResponse(res) {
   res.writeHead(204, {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
-    "access-control-allow-headers": "content-type,authorization,cookie",
+    "access-control-allow-headers": "content-type,authorization,cookie,x-english-loop-client-id",
     "access-control-allow-credentials": "true",
     "access-control-max-age": "86400"
   });
@@ -520,11 +572,42 @@ function authorizeRequest(req) {
   // such as /api/mvp0/timelines.
   const sessionId = parseCookies(req)[sessionCookieName] || "";
   const webUser = sessionId ? authStore.getUserBySession(sessionId) : null;
-  if (webUser) {
+  if (webUser && webUser.emailVerified) {
     return { label: `web-user:${webUser.id}`, method: "web-session", userId: webUser.id };
   }
   const session = readSession(req);
   return session ? { label: session.label, method: "session" } : null;
+}
+
+let mailTransporter = null;
+function getMailTransporter() {
+  if (mailTransporter) return mailTransporter;
+  const host = process.env.SMTP_HOST || "";
+  const port = Number(process.env.SMTP_PORT || 465);
+  const user = process.env.SMTP_USER || "";
+  const pass = process.env.SMTP_PASS || "";
+  if (!host || !user || !pass) return null;
+  mailTransporter = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } });
+  return mailTransporter;
+}
+function getPublicBaseUrl(req) {
+  return process.env.PUBLIC_BASE_URL || `${req.headers["x-forwarded-proto"] || "https"}://${req.headers.host || "demo.mindiou.top"}`;
+}
+async function sendVerificationEmail(email, token, req) {
+  const link = `${getPublicBaseUrl(req)}/mindiou-api/api/auth/verify-email?token=${encodeURIComponent(token)}`;
+  const transporter = getMailTransporter();
+  if (!transporter) {
+    console.warn(`[email-verification] SMTP not configured for ${email}; link omitted`);
+    return { sent: false };
+  }
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: email,
+    subject: "验证你的 MindIOU 邮箱",
+    text: `感谢注册 MindIOU。请在 24 小时内打开以下链接完成验证：\n${link}`,
+    html: `<p>感谢注册 MindIOU。</p><p><a href="${link}">点击验证邮箱</a></p><p>此链接 24 小时内有效。</p>`
+  });
+  return { sent: true };
 }
 
 function readBody(req) {
@@ -696,6 +779,15 @@ function deriveReportCapabilityDomain(report) {
 const sessionCookieName = "session";
 const sessionCookieMaxAge = 604800; // 7 days, matches auth-store session TTL
 
+// Email verification is a production boundary, but local integration tests
+// and offline development do not have a mail transport. In that environment
+// the server completes the verification internally and still exercises the
+// same auth-store APIs. Production can force the boundary explicitly with
+// MINDIOU_REQUIRE_EMAIL_VERIFICATION=1.
+const emailVerificationRequired = process.env.MINDIOU_REQUIRE_EMAIL_VERIFICATION === "1"
+  || (process.env.MINDIOU_REQUIRE_EMAIL_VERIFICATION !== "0"
+    && (process.env.NODE_ENV === "production" || Boolean(process.env.SMTP_HOST)));
+
 function authSessionCookie(sessionId) {
   const parts = [
     `${sessionCookieName}=${sessionId}`,
@@ -723,7 +815,11 @@ function clearSessionCookie() {
 function requireAuth(req, res) {
   const sessionId = parseCookies(req)[sessionCookieName] || "";
   const user = sessionId ? authStore.getUserBySession(sessionId) : null;
-  if (user) return user;
+  if (user && user.emailVerified) return user;
+  if (user && !user.emailVerified) {
+    jsonResponse(res, 403, { ok: false, error: "EMAIL_NOT_VERIFIED", message: "Please verify your email before using MindIOU." });
+    return null;
+  }
   // Fallback: accept legacy early-access session (invite-code cookie)
   const earlySession = readSession(req);
   if (earlySession) {
@@ -739,13 +835,52 @@ function getOptionalUser(req) {
   const sessionId = parseCookies(req)[sessionCookieName] || "";
   if (sessionId) {
     const user = authStore.getUserBySession(sessionId);
-    if (user) return user;
+    if (user && user.emailVerified) return user;
   }
   const earlySession = readSession(req);
   if (earlySession) {
     return { id: `early-access:${earlySession.label}`, email: null };
   }
   return null;
+}
+
+// English Loop persistence has two safe identity paths:
+// 1) an authenticated Web user or per-user G2 device token;
+// 2) an explicitly generated client id for the local/internal package.
+// The raw client id is never used as a database key; it is hashed first.
+function resolveEnglishLoopIdentity(req, res, payload = {}) {
+  const user = getOptionalUser(req);
+  if (user) return { ownerKey: `user:${user.id}`, userId: user.id, channel: "user" };
+
+  const deviceIdentity = authStore.validateDeviceToken(readBearer(req));
+  if (deviceIdentity) {
+    return {
+      ownerKey: `user:${deviceIdentity.userId}`,
+      userId: deviceIdentity.userId,
+      channel: "device"
+    };
+  }
+
+  const adminAuthorized = isAdminToken(req) && (!earlyAccessCodes.length || Boolean(apiToken));
+  if (!adminAuthorized) {
+    jsonResponse(res, 401, { ok: false, error: "English Loop authentication required" });
+    return null;
+  }
+  const headerClientId = clean(req.headers["x-english-loop-client-id"] || "");
+  const bodyClientId = payload && typeof payload === "object" ? clean(payload.clientId || "") : "";
+  const clientId = headerClientId || bodyClientId;
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{15,127}$/.test(clientId)) {
+    jsonResponse(res, 400, {
+      ok: false,
+      error: "English Loop client id is required and must be 16-128 safe characters"
+    });
+    return null;
+  }
+  return {
+    ownerKey: `client:${hashEnglishLoopClientId(clientId)}`,
+    userId: null,
+    channel: "client"
+  };
 }
 
 function loadOwnedMvp1Session(id, userId) {
@@ -1179,7 +1314,21 @@ async function projectMemoryAcceptDebtCandidate(sessionId, index, userId) {
   });
   if (!existing) await trainingStore.saveCognitiveDebt(debt);
   const workItem = detail.workItems[0];
-  const artifacts = detail.artifacts;
+  let artifacts = detail.artifacts;
+  // Concept-only sessions (video digests, pure knowledge gaps) produce no
+  // file artifacts; without an ownership anchor the accepted debt never shows
+  // up in project/glasses context. Mint a placeholder artifact as fallback.
+  if (!artifacts.length) {
+    const placeholder = projectMemoryStore.upsertArtifact({
+      projectId: detail.session.projectId,
+      type: "other",
+      name: `概念来源：${(detail.session.title || "未命名会话").slice(0, 60)}`,
+      diffSummary: candidate.reason || "",
+      sensitivity: "metadata_only"
+    }, userId);
+    projectMemoryStore.linkSessionArtifact(sessionId, placeholder.id, { relation: "referenced" }, userId);
+    artifacts = [placeholder];
+  }
   const decisions = detail.decisions;
   for (const artifact of artifacts) {
     projectMemoryStore.linkDebtArtifact({
@@ -1440,6 +1589,26 @@ function legacyProjectMemoryView(projectId, userId) {
     counts: { sessions: sessions.length, workItems: workItems.length, artifacts: artifacts.length, decisions: decisions.length, debts: 0, owned: 0 },
     timeline, byWorkItem, raw: data
   };
+}
+
+// Cognitive Loop accepts both current Project Memory projects and the older
+// ownership-store projects that /api/projects still exposes for compatibility.
+// On first use, materialize a Project Memory row with the same stable ID so
+// loop runs, activity sessions, and later reloads all refer to one project.
+function ensureCognitiveLoopProject(projectId, userId) {
+  try {
+    return projectMemoryStore.getProject(projectId, userId);
+  } catch (error) {
+    const legacy = legacyProjectMemoryView(projectId, userId);
+    if (!legacy?.project) throw error;
+    return projectMemoryStore.ensureProject({
+      id: projectId,
+      name: legacy.project.name,
+      description: legacy.project.description,
+      repositoryUrl: legacy.project.repositoryUrl,
+      projectType: legacy.project.projectType || "software"
+    }, userId);
+  }
 }
 
 // Project Memory 项目也要能打开旧版“项目所有权”入口。两套存储并存期间，
@@ -2346,6 +2515,134 @@ async function tutor(payload) {
   }
 }
 
+const ENGLISH_LOOP_STATES = new Set(["in_progress", "completed", "stuck", "off_topic", "unclear_audio"]);
+const ENGLISH_LOOP_ACTIONS = new Set(["continue", "clarify", "minimal_hint", "recast", "post_turn_feedback", "end_task"]);
+
+function normalizeEnglishLoopControl(value = {}) {
+  const control = value && typeof value === "object" ? value : {};
+  const state = ENGLISH_LOOP_STATES.has(control.state) ? control.state : "in_progress";
+  const action = ENGLISH_LOOP_ACTIONS.has(control.action) ? control.action : "continue";
+  return {
+    state,
+    action,
+    reasonEvidence: Array.isArray(control.reasonEvidence)
+      ? control.reasonEvidence.map(item => clean(item)).filter(Boolean).slice(0, 4)
+      : [],
+    nextUserAction: clean(control.nextUserAction || "Continue with the current speaking task.").slice(0, 220),
+    shouldUpdateLongTermProfile: Boolean(control.shouldUpdateLongTermProfile)
+  };
+}
+
+function englishLoopFallback(payload) {
+  const transcript = clean(payload?.transcript || "");
+  const practice = payload?.profile?.nextPractice || {};
+  const goal = clean(payload?.goal?.statement || "your current goal");
+  const move = payload?.nextMove || {};
+  const control = normalizeEnglishLoopControl(payload?.control);
+  const type = clean(practice.type || "conversation");
+  const title = clean(practice.title || "Natural conversation");
+  const nextPrompt = control.action === "clarify"
+    ? control.nextUserAction
+    : control.action === "minimal_hint"
+      ? control.nextUserAction
+      : type === "opinion_structure"
+    ? "Give a 30-second answer: point, reason, example, conclusion."
+    : type === "tradeoff"
+      ? "Compare two options. What is the upside, downside, and your choice?"
+      : type === "expression_reuse"
+        ? clean(practice.task || "Use one useful expression in your next answer.")
+        : "What is the most important thing about that, and why?";
+  return {
+    ok: true,
+    reply: control.state === "unclear_audio"
+      ? "I want to make sure I heard your idea correctly."
+      : transcript
+        ? `You mentioned “${transcript.slice(0, 120)}”. ${clean(move.reason || "Let's make one part of that concrete.")} This matters for ${goal}.`
+      : `Tell me about something you worked on today, and why it matters for ${goal}.`,
+    feedback: control.state === "unclear_audio"
+      ? "I am not treating unclear audio as a language mistake."
+      : control.action === "minimal_hint"
+        ? "Start with the simplest version of your idea."
+        : type === "opinion_structure"
+      ? "Your next upgrade is organizing a complete opinion, not adding more vocabulary."
+      : "I am learning which parts of real conversation need the most practice.",
+    nextPrompt,
+    moveType: clean(move.moveType || "free").slice(0, 40),
+    g2Text: title.slice(0, 42),
+    shouldContinue: true,
+    state: control.state,
+    action: control.action,
+    mode: "rule_fallback"
+  };
+}
+
+async function englishLoop(payload) {
+  const transcript = clean(payload?.transcript || "").slice(0, 4000);
+  if (!transcript) return { ok: false, error: "Missing transcript" };
+  const control = normalizeEnglishLoopControl(payload?.control);
+  const fallback = () => englishLoopFallback({ ...payload, transcript, control });
+  try {
+    const result = await chatJson([
+      {
+        role: "system",
+        content: [
+          "You are MindIOU's English speaking companion.",
+          "The learner is having a real conversation about work, products, AI, business, or everyday life.",
+          "Do not turn the session into a vocabulary lesson or an exam score.",
+          "The client has already selected the session plan and the pedagogical action. Treat them as non-negotiable. Do not invent a new lesson or override the action.",
+          "If action is continue, keep the learner speaking and ask one task-aligned question.",
+          "If action is clarify, ask for a short repeat or reconnect to the current topic; do not diagnose the learner.",
+          "If action is minimal_hint, give only a small starting cue and do not provide the complete answer.",
+          "If action is post_turn_feedback, give one concrete observation and one reusable improvement, then continue naturally.",
+          "If state is unclear_audio, say that the audio was unclear and do not treat the transcript as a confirmed language error.",
+          "Use the learner goal, session plan, control state, evidence, and concrete transcript. Do not praise without substance, do not ask 'tell me more', and do not correct every grammar error.",
+          "The next prompt must preserve the selected action and refer to at least one concrete topic or claim from the transcript.",
+          "Return JSON only:",
+          "{\"reply\":\"natural conversational response\",\"feedback\":\"one short observation\",\"nextPrompt\":\"one next speaking prompt\",\"g2Text\":\"short label under 42 characters\",\"shouldContinue\":true,\"action\":\"must equal the requested action\"}",
+          "reply must be under 500 characters. feedback under 240 characters. nextPrompt under 220 characters.",
+          "feedback must contain at most one main improvement. nextPrompt must contain at most one question or one speaking action.",
+          "g2Text is for smart glasses and must be short, with no markdown."
+        ].join(" ")
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          transcript,
+          topic: clean(payload?.topic || "").slice(0, 80),
+          goal: payload?.goal || {},
+          sessionPlan: payload?.sessionPlan || {},
+          control,
+          turnEvidence: payload?.turnEvidence || {},
+          nextMove: payload?.nextMove || {},
+          profile: payload?.profile || {},
+          recentTurns: Array.isArray(payload?.recentTurns)
+            ? payload.recentTurns.slice(-4).map(turn => ({
+              speaker: clean(turn?.speaker || "").slice(0, 20),
+              text: clean(turn?.text || "").slice(0, 400)
+            }))
+            : []
+        })
+      }
+    ], fallback, 1200);
+
+    return {
+      ok: true,
+      reply: clean(result.reply || fallback().reply).slice(0, 500),
+      feedback: clean(result.feedback || fallback().feedback).slice(0, 240),
+      nextPrompt: clean(result.nextPrompt || fallback().nextPrompt).slice(0, 220),
+      moveType: clean(result.moveType || payload?.nextMove?.moveType || "free").slice(0, 40),
+      g2Text: clean(result.g2Text || fallback().g2Text).slice(0, 42),
+      shouldContinue: result.shouldContinue !== false,
+      state: control.state,
+      action: control.action,
+      mode: result.__fallback ? "rule_fallback" : "model_structured",
+      ...(result.__fallback ? { fallback: true, error: result.__fallbackError || "AI unavailable" } : {})
+    };
+  } catch (error) {
+    return { ...fallback(), fallback: true, error: error.message };
+  }
+}
+
 function rokidCard(card) {
   if (!card) return null;
   return {
@@ -2543,6 +2840,7 @@ async function transcribe(payload) {
   const form = new FormData();
   form.append("model", sttModel);
   form.append("prompt", clean(sttPrompt).slice(0, 500));
+  if (payload.language) form.append("language", clean(payload.language).slice(0, 12));
   form.append("file", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "g2-audio.wav");
 
   const controller = new AbortController();
@@ -2745,16 +3043,493 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ── Progress aggregation (G2 glasses view of cross-machine project status) ──
+    if (url.pathname === "/api/progress/report" && req.method === "POST") {
+      const identity = projectMemoryStore.validateHookToken(readBearer(req));
+      if (!identity) { jsonResponse(res, 401, { ok: false, error: "Invalid Project Memory hook token" }); return; }
+      requireJsonRequest(req);
+      const body = parseJson(await readBody(req));
+      const machineId = String(body?.machineId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
+      const projects = Array.isArray(body?.projects) ? body.projects.slice(0, 60).map(p => ({
+        projectPath: String(p?.projectPath || "").slice(0, 300),
+        projectName: String(p?.projectName || "").slice(0, 120),
+        tools: Array.isArray(p?.tools) ? p.tools.slice(0, 5).map(t => String(t).slice(0, 20)) : [],
+        sessions: Math.max(0, Math.min(9999, Number(p?.sessions) || 0)),
+        lastActiveAt: String(p?.lastActiveAt || "").slice(0, 40),
+        lastTask: String(p?.lastTask || "").slice(0, 200)
+      })).filter(p => p.projectPath) : [];
+      if (!machineId || !projects.length) { jsonResponse(res, 400, { ok: false, error: "machineId and projects[] required" }); return; }
+      progressState.machines[machineId] = {
+        machineId,
+        hostname: String(body?.hostname || "").slice(0, 80),
+        reportedAt: new Date().toISOString(),
+        projects
+      };
+      progressStore.save(progressState);
+      jsonResponse(res, 200, { ok: true, machineId, projects: projects.length });
+      return;
+    }
+    if (url.pathname === "/api/progress" && req.method === "GET") {
+      const identity = projectMemoryStore.validateHookToken(readBearer(req));
+      if (!identity) { jsonResponse(res, 401, { ok: false, error: "Invalid Project Memory hook token" }); return; }
+      const byPath = new Map();
+      for (const machine of Object.values(progressState.machines)) {
+        for (const p of machine.projects || []) {
+          const rec = byPath.get(p.projectPath) || { ...p, tools: new Set(), machines: new Set(), sessions: 0 };
+          rec.tools = new Set([...rec.tools, ...p.tools]);
+          rec.machines.add(machine.hostname || machine.machineId);
+          rec.sessions += p.sessions || 0;
+          if (!rec.lastActiveAt || (p.lastActiveAt && p.lastActiveAt > rec.lastActiveAt)) {
+            rec.lastActiveAt = p.lastActiveAt;
+            rec.lastTask = p.lastTask || rec.lastTask;
+          }
+          byPath.set(p.projectPath, rec);
+        }
+      }
+      const now = Date.now();
+      const projects = [...byPath.values()]
+        .sort((a, b) => String(b.lastActiveAt || "").localeCompare(String(a.lastActiveAt || "")))
+        .slice(0, 40)
+        .map(p => {
+          const ageMs = p.lastActiveAt ? now - Date.parse(p.lastActiveAt) : Infinity;
+          return {
+            projectName: p.projectName,
+            projectPath: p.projectPath,
+            tools: [...p.tools],
+            machines: [...p.machines],
+            sessions: p.sessions,
+            lastActiveAt: p.lastActiveAt,
+            staleDays: Number.isFinite(ageMs) ? Math.floor(ageMs / 86400_000) : null,
+            lastTask: p.lastTask
+          };
+        });
+      jsonResponse(res, 200, {
+        ok: true,
+        machines: Object.values(progressState.machines).map(m => ({ machineId: m.machineId, hostname: m.hostname, reportedAt: m.reportedAt, projectCount: (m.projects || []).length })),
+        focus: progressState.focus,
+        projects
+      });
+      return;
+    }
+    if (url.pathname === "/api/progress/focus" && req.method === "POST") {
+      const identity = projectMemoryStore.validateHookToken(readBearer(req));
+      if (!identity) { jsonResponse(res, 401, { ok: false, error: "Invalid Project Memory hook token" }); return; }
+      requireJsonRequest(req);
+      const body = parseJson(await readBody(req));
+      const note = String(body?.note || "").trim().slice(0, 500);
+      if (!note) { jsonResponse(res, 400, { ok: false, error: "note required" }); return; }
+      progressState.focus = {
+        note,
+        projectPath: String(body?.projectPath || "").slice(0, 300) || null,
+        setAt: new Date().toISOString(),
+        source: String(body?.source || "glasses").slice(0, 20)
+      };
+      progressStore.save(progressState);
+      jsonResponse(res, 200, { ok: true, focus: progressState.focus });
+      return;
+    }
+
+    // ── Bilibili digest: video → knowledge points → cards/debts ──
+
+    // ── EXP-2 experiment apparatus (see docs/research/EXP-2-PREREG.md) ──
+
+    // ── EXP-1 candidate review (labels stored live; sheet is a snapshot) ──
+
+    // ── Research assets index (drives the /research page) ──
+
+    // ── Subject action board: live status of every pending subject action ──
+
+    const nextActionsMatch = url.pathname === "/api/research/next-actions" && req.method === "GET";
+    if (nextActionsMatch) {
+      const naCookieId = parseCookies(req)[sessionCookieName] || "";
+      const naUser = naCookieId ? authStore.getUserBySession(naCookieId) : null;
+      if (!naUser || !naUser.emailVerified) { jsonResponse(res, 401, { ok: false, error: "Authentication required" }); return; }
+      const ACTIVE_SET = new Set(["new", "open", "in_progress"]);
+      const liveDebts = [];
+      for (const stRow of appStateDb.prepare("SELECT payload FROM application_state").all()) {
+        if (!stRow?.payload || !stRow.payload.includes("cognitiveDebts")) continue;
+        try {
+          for (const debt of JSON.parse(stRow.payload).cognitiveDebts || []) {
+            if (debt.userId === naUser.id && ACTIVE_SET.has(String(debt.status || "new").toLowerCase())) liveDebts.push(debt.id);
+          }
+        } catch { /* skip malformed */ }
+      }
+      const labelCount = Object.keys(exp1State.labels).length;
+      const sheetRows = 33;  // 11 candidate + 22 unique legacy (annotation sheet)
+      const pendingAccept = [];
+      for (const project of projectMemoryStore.listProjects(naUser.id)) {
+        for (const sess of projectMemoryStore.listAgentSessions(project.id, naUser.id)) {
+          const candidates = sess.analysis?.cognitiveDebtCandidates || [];
+          for (let i = 0; i < candidates.length; i++) {
+            if (!candidates[i].status || candidates[i].status === "pending") pendingAccept.push(`${sess.id}#${i}`);
+          }
+        }
+      }
+      const biliNs = `bilibili-digests-${naUser.id}`;
+      const biliRow = appStateDb.prepare("SELECT payload FROM application_state WHERE namespace = ?").get(biliNs);
+      const sessdataConfigured = Boolean(biliRow && (() => { try { return Boolean(JSON.parse(biliRow.payload).sessdata); } catch { return false; } })());
+      jsonResponse(res, 200, {
+        ok: true,
+        actions: [
+          { id: "review", title: "EXP-1 复核标注", detail: `${labelCount}/${sheetRows} 行已标`, url: "/#/exp1", done: labelCount >= 27 },
+          { id: "pool", title: "欠条池推到 40", detail: `${liveDebts.length}/40（被试本人活跃欠条）`, url: "/#/exp1", done: liveDebts.length >= 40 },
+          { id: "accept", title: "accept 待定候选", detail: `${pendingAccept.length} 条待处理`, url: "/#/digest", done: pendingAccept.length === 0 },
+          { id: "sessdata", title: "配置 B 站 SESSDATA", detail: sessdataConfigured ? "已配置" : "未配置（当前降级消化模式）", url: "/#/digest", done: sessdataConfigured },
+          { id: "glasses", title: "眼镜安装 learn-coach-0.9.0", detail: "release/learn-coach-0.9.0.ehpk（SDK 0.0.16，模拟器门测通过）", url: "/#/research", done: false, manual: true },
+          { id: "vps", title: "VPS 控制台检查（demo 域名复活）", detail: "服务器全 TCP 端口关闭，仅控制台可查（欠费/停机）", url: "/#/research", done: false, manual: true }
+        ],
+        goNoGo: liveDebts.length >= 40 && labelCount >= 27 ? "GO" : "NO-GO"
+      });
+      return;
+    }
+
+    const researchAssetsMatch = url.pathname === "/api/research/assets" && req.method === "GET";
+    if (researchAssetsMatch) {
+      const raCookieId = parseCookies(req)[sessionCookieName] || "";
+      const raUser = raCookieId ? authStore.getUserBySession(raCookieId) : null;
+      if (!raUser || !raUser.emailVerified) { jsonResponse(res, 401, { ok: false, error: "Authentication required" }); return; }
+      const fs = await import("node:fs/promises");
+      const entries = await fs.readdir("docs/research", { withFileTypes: true });
+      const assets = [];
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        const stat = await fs.stat(`docs/research/${entry.name}`).catch(() => null);
+        if (!stat) continue;
+        assets.push({ file: entry.name, bytes: stat.size, modifiedAt: stat.mtime.toISOString() });
+      }
+      recordAuditEntry({ actor: raUser.email, action: "read", endpoint: "/api/research/assets", assetCount: assets.length });
+      await auditStore.save(auditState);
+      jsonResponse(res, 200, { ok: true, count: assets.length, assets });
+      return;
+    }
+
+    const exp1SheetMatch = url.pathname === "/api/experiments/exp1/sheet" && req.method === "GET";
+    const exp1LabelMatch = url.pathname === "/api/experiments/exp1/label" && req.method === "POST";
+    const exp1ExportMatch = url.pathname === "/api/experiments/exp1/export" && req.method === "GET";
+    const expAuditMatch = url.pathname === "/api/experiments/audit" && req.method === "GET";
+    if (exp1SheetMatch || exp1LabelMatch || exp1ExportMatch || expAuditMatch) {
+      const exp1CookieId = parseCookies(req)[sessionCookieName] || "";
+      const exp1User = exp1CookieId ? authStore.getUserBySession(exp1CookieId) : null;
+      if (!exp1User || !exp1User.emailVerified) { jsonResponse(res, 401, { ok: false, error: "Authentication required" }); return; }
+      if (exp1SheetMatch) {
+        recordAuditEntry({ actor: exp1User.email, action: "read", endpoint: "/api/experiments/exp1/sheet", labelCount: Object.keys(exp1State.labels).length });
+        await auditStore.save(auditState);
+        jsonResponse(res, 200, { ok: true, labels: exp1State.labels });
+        return;
+      }
+      if (exp1LabelMatch) {
+        const payload = parseJson(await readBody(req));
+        const rowId = String(payload.rowId || "").slice(0, 80);
+        const label = ["real_debt", "not_debt", "unsure"].includes(payload.label) ? payload.label : null;
+        if (!rowId || !label) { jsonResponse(res, 400, { ok: false, error: "rowId and valid label required" }); return; }
+        exp1State.labels[rowId] = {
+          label, note: String(payload.note || "").slice(0, 500),
+          reviewer: exp1User.email, at: new Date().toISOString()
+        };
+        await exp1Store.save(exp1State);
+        recordAuditEntry({ actor: exp1User.email, action: "label", endpoint: "/api/experiments/exp1/label", rowId, label });
+        await auditStore.save(auditState);
+        jsonResponse(res, 200, { ok: true, labeled: Object.keys(exp1State.labels).length });
+        return;
+      }
+      if (exp1ExportMatch) {
+        const sheet = JSON.parse(await import("node:fs/promises").then(fs => fs.readFile("docs/research/EXP1-candidates-annotation-sheet.json", "utf8")));
+        let labeledRows = 0;
+        for (const row of sheet.rows) {
+          const l = exp1State.labels[`candidate:${row.session_id}:${row.candidate_index}`];
+          if (l) { row.annotation = l.label; row.notes = l.note; row.reviewedAt = l.at; labeledRows++; }
+        }
+        for (const row of sheet.legacy_debts) {
+          const l = exp1State.labels[`legacy:${row.debt_id}`];
+          if (l) { row.annotation = l.label; row.notes = l.note; row.reviewedAt = l.at; labeledRows++; }
+        }
+        recordAuditEntry({ actor: exp1User.email, action: "export", endpoint: "/api/experiments/exp1/export", candidateRows: sheet.rows.length, legacyRows: sheet.legacy_debts.length, labeledRows });
+        await auditStore.save(auditState);
+        jsonResponse(res, 200, { ok: true, sheet });
+        return;
+      }
+      if (url.pathname === "/api/experiments/audit" && req.method === "GET") {
+        recordAuditEntry({ actor: exp1User.email, action: "read", endpoint: "/api/experiments/audit" });
+        await auditStore.save(auditState);
+        jsonResponse(res, 200, { ok: true, entries: auditState.entries });
+        return;
+      }
+    }
+
+    const exp2AssignMatch = url.pathname === "/api/experiments/exp2/assign" && req.method === "POST";
+    const exp2DebtsMatch = url.pathname === "/api/experiments/exp2/debts" && req.method === "GET";
+    const exp2ReadLogMatch = url.pathname === "/api/experiments/exp2/read-log" && req.method === "POST";
+    const exp2BlindMatch = url.pathname === "/api/experiments/exp2/blind-test" && req.method === "GET";
+    const exp2BlindSubmitMatch = url.pathname === "/api/experiments/exp2/blind-test" && req.method === "POST";
+    const exp2StatusMatch = url.pathname === "/api/experiments/exp2/status" && req.method === "GET";
+    if (exp2AssignMatch || exp2DebtsMatch || exp2ReadLogMatch || exp2BlindMatch || exp2BlindSubmitMatch || exp2StatusMatch) {
+      const expCookieId = parseCookies(req)[sessionCookieName] || "";
+      const expUser = expCookieId ? authStore.getUserBySession(expCookieId) : null;
+      if (!expUser || !expUser.emailVerified) { jsonResponse(res, 401, { ok: false, error: "Authentication required" }); return; }
+
+      if (exp2AssignMatch) {
+        if (exp2State.sealedHash) { jsonResponse(res, 409, { ok: false, error: "already sealed", sealedHash: exp2State.sealedHash }); return; }
+        const payload = parseJson(await readBody(req));
+        const pool = trainingStore.listCognitiveDebts(expUser.id)
+          .filter(debt => ["new", "open"].includes(debt.status || "new"))
+          .filter(debt => !exp2State.assignments[debt.id]);
+        const assignments = {};
+        for (const debt of pool) {
+          const sha = crypto.createHash("sha1").update(debt.gapText || "").digest("hex");
+          assignments[debt.id] = {
+            channel: parseInt(sha[0], 16) % 2 === 0 ? "glasses" : "web",
+            sha,
+            gapText: (debt.gapText || "").slice(0, 120),
+            assignedAt: new Date().toISOString(),
+            readSeconds: 0, exposed: false, completed: false
+          };
+        }
+        Object.assign(exp2State.assignments, assignments);
+        exp2State.startedAt = exp2State.startedAt || new Date().toISOString();
+        exp2State.sealedHash = crypto.createHash("sha256").update(JSON.stringify(assignments)).digest("hex");
+        await exp2Store.save(exp2State);
+        const dist = { glasses: 0, web: 0 };
+        for (const a of Object.values(assignments)) dist[a.channel]++;
+        jsonResponse(res, 200, { ok: true, assigned: Object.keys(assignments).length, distribution: dist, sealedHash: exp2State.sealedHash, startedAt: exp2State.startedAt });
+        return;
+      }
+      if (exp2DebtsMatch) {
+        const channel = url.searchParams.get("channel") === "glasses" ? "glasses" : url.searchParams.get("channel") === "web" ? "web" : null;
+        const entries = Object.entries(exp2State.assignments)
+          .filter(([, a]) => !channel || a.channel === channel)
+          .map(([debtId, a]) => ({ debtId, channel: a.channel, gapText: a.gapText, readSeconds: a.readSeconds, exposed: a.exposed, completed: a.completed }));
+        jsonResponse(res, 200, { ok: true, count: entries.length, debts: entries });
+        return;
+      }
+      if (exp2ReadLogMatch) {
+        const payload = parseJson(await readBody(req));
+        const a = exp2State.assignments[payload.debtId];
+        if (!a) { jsonResponse(res, 404, { ok: false, error: "debt not in experiment" }); return; }
+        if (a.channel !== "web") { jsonResponse(res, 409, { ok: false, error: "read-log is for the web channel" }); return; }
+        const seconds = Math.max(0, Math.min(1800, Number(payload.seconds) || 0));
+        a.readSeconds += seconds;
+        a.exposed = true;
+        exp2State.readLogs.push({ debtId: payload.debtId, seconds, at: new Date().toISOString() });
+        await exp2Store.save(exp2State);
+        jsonResponse(res, 200, { ok: true, totalReadSeconds: a.readSeconds, exposed: a.exposed });
+        return;
+      }
+      if (exp2BlindMatch) {
+        // Sample untested assignments; the response never reveals channel.
+        const untested = Object.entries(exp2State.assignments)
+          .filter(([debtId]) => !exp2State.blindTests.some(t => t.debtId === debtId));
+        if (!untested.length) { jsonResponse(res, 200, { ok: true, done: true }); return; }
+        const [debtId, a] = untested[Math.floor(Math.random() * untested.length)];
+        jsonResponse(res, 200, {
+          ok: true, debtId, gapText: a.gapText,
+          prompt: {
+            q1: "用自己的话复述这条欠条对应的关键概念（不看任何材料）",
+            q2: "举一个它在你当前项目里的具体例子或反例"
+          }
+        });
+        return;
+      }
+      if (exp2BlindSubmitMatch) {
+        const payload = parseJson(await readBody(req));
+        const a = exp2State.assignments[payload.debtId];
+        if (!a) { jsonResponse(res, 404, { ok: false, error: "debt not in experiment" }); return; }
+        const record = {
+          debtId: payload.debtId, channel: a.channel,
+          answer1: String(payload.answer1 || "").slice(0, 2000),
+          answer2: String(payload.answer2 || "").slice(0, 2000),
+          selfReportedPriorKnowledge: Number(payload.priorKnowledge) || null,
+          e2Passed: null,  // scored blind by rubric, later
+          at: new Date().toISOString()
+        };
+        exp2State.blindTests.push(record);
+        await exp2Store.save(exp2State);
+        jsonResponse(res, 200, { ok: true, submitted: 1, remaining: Object.keys(exp2State.assignments).length - exp2State.blindTests.length });
+        return;
+      }
+      if (exp2StatusMatch) {
+        const values = Object.values(exp2State.assignments);
+        const dist = { glasses: 0, web: 0 };
+        for (const a of values) dist[a.channel]++;
+        jsonResponse(res, 200, {
+          ok: true, sealed: Boolean(exp2State.sealedHash), sealedHash: exp2State.sealedHash,
+          startedAt: exp2State.startedAt, assigned: values.length, distribution: dist,
+          exposed: values.filter(a => a.exposed).length,
+          readLogs: exp2State.readLogs.length, blindTests: exp2State.blindTests.length
+        });
+        return;
+      }
+    }
+
+    const biliSettingsMatch = url.pathname === "/api/bilibili/settings";
+    const biliDigestMatch = url.pathname === "/api/bilibili/digests" && req.method === "GET";
+    const biliDigestPostMatch = url.pathname === "/api/bilibili/digest" && req.method === "POST";
+    const biliImportMatch = url.pathname.match(/^\/api\/bilibili\/digests\/([^/]+)\/import$/);
+    if (biliSettingsMatch || biliDigestMatch || biliDigestPostMatch || biliImportMatch) {
+      const sessionCookieId = parseCookies(req)[sessionCookieName] || "";
+      const webUser = sessionCookieId ? authStore.getUserBySession(sessionCookieId) : null;
+      if (!webUser || !webUser.emailVerified) {
+        jsonResponse(res, 401, { ok: false, error: "Authentication required" });
+        return;
+      }
+      const digestStore = createSqliteStateNamespace(dataDbPath, `bilibili-digests-${webUser.id}`, { version: 1 });
+      const digestState = await digestStore.load({ sessdata: "", items: [] });
+
+      // SESSDATA at rest: AES-256-GCM when MINDIOU_SECRET_KEY is set; legacy
+      // plaintext values are transparently migrated on first use (DMP item P1).
+      const secretKey = process.env.MINDIOU_SECRET_KEY || "";
+      const encryptSessdata = plain => {
+        if (!plain || !secretKey) return { sessdata: plain, encrypted: false };
+        const iv = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv("aes-256-gcm", crypto.createHash("sha256").update(secretKey).digest(), iv);
+        const data = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+        return { sessdata: JSON.stringify({ v: 1, iv: iv.toString("base64"), tag: cipher.getAuthTag().toString("base64"), data: data.toString("base64") }), encrypted: true };
+      };
+      const decryptSessdata = stored => {
+        if (!stored) return "";
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed.v !== 1 || !secretKey) return stored;  // legacy plaintext passthrough
+          const decipher = crypto.createDecipheriv("aes-256-gcm", crypto.createHash("sha256").update(secretKey).digest(), Buffer.from(parsed.iv, "base64"));
+          decipher.setAuthTag(Buffer.from(parsed.tag, "base64"));
+          return Buffer.concat([decipher.update(Buffer.from(parsed.data, "base64")), decipher.final()]).toString("utf8");
+        } catch { return stored; }
+      };
+
+      if (url.pathname === "/api/bilibili/settings" && req.method === "PUT") {
+        const payload = parseJson(await readBody(req));
+        const plain = String(payload.sessdata || "").trim();
+        const { sessdata: stored } = encryptSessdata(plain);
+        digestState.sessdata = stored;
+        await digestStore.save(digestState);
+        jsonResponse(res, 200, { ok: true, sessdataConfigured: Boolean(plain), encryptedAtRest: Boolean(secretKey) });
+        return;
+      }
+      if (url.pathname === "/api/bilibili/settings" && req.method === "GET") {
+        jsonResponse(res, 200, { ok: true, sessdataConfigured: Boolean(decryptSessdata(digestState.sessdata)), encryptedAtRest: Boolean(secretKey && digestState.sessdata) });
+        return;
+      }
+      if (biliDigestPostMatch) {
+        const payload = parseJson(await readBody(req));
+        const sessdata = decryptSessdata(digestState.sessdata) || process.env.BILI_SESSDATA || "";
+        const result = await digestBilibiliVideo({ url: String(payload.url || ""), sessdata });
+        const id = `bilibili-${result.video.bvid}-${Date.now().toString(36)}`;
+        const item = { id, ...result, imported: null };
+        digestState.items.unshift(item);
+        digestState.items = digestState.items.slice(0, 30);
+        await digestStore.save(digestState);
+        jsonResponse(res, 200, item);
+        return;
+      }
+      if (biliDigestMatch) {
+        jsonResponse(res, 200, { ok: true, items: digestState.items, sessdataConfigured: Boolean(digestState.sessdata) });
+        return;
+      }
+      if (biliImportMatch && req.method === "POST") {
+        const id = decodeURIComponent(biliImportMatch[1]);
+        const item = digestState.items.find(entry => entry.id === id);
+        if (!item) { jsonResponse(res, 404, { ok: false, error: "digest not found" }); return; }
+        const payload = parseJson(await readBody(req));
+        // Debt candidates flow through the existing agent-session pipeline so
+        // they land in the same accept/clearance loop as MCP-captured ones.
+        const events = item.digest.debtCandidates.map((candidate, index) => ({
+          id: `${item.id}-candidate-${index}`,
+          type: "debt_candidate",
+          occurredAt: new Date().toISOString(),
+          payload: candidate
+        }));
+        const sessionId = `bilibili-${item.video.bvid}-${Date.now().toString(36)}`;
+        // Land bilibili debts where the user's hook tokens point so glasses
+        // and MCP agent context see them; fall back to their latest project.
+        const userProjects = projectMemoryStore.listProjects(webUser.id);
+        const hookProjectId = userProjects
+          .flatMap(project => projectMemoryStore.listHookTokens(project.id, webUser.id))
+          .filter(token => !token.revokedAt && token.projectId)
+          .map(token => token.projectId)
+          .pop();
+        const boundProjectId = payload.projectId
+          || hookProjectId
+          || (userProjects[0] || {}).id
+          || null;
+        const importResult = await projectMemoryImportSession({
+          projectId: boundProjectId,
+          projectName: boundProjectId ? undefined : "B 站视频消化",
+          externalSessionId: sessionId,
+          // Stable fingerprint per video: re-importing the same BV returns the
+          // existing session (idempotent) instead of stacking duplicate
+          // candidates — EXP-1 found 10/11 candidate rows were such repeats.
+          sourceFingerprint: `bilibili-digest:${item.video.bvid}`,
+          title: `B 站视频消化：${item.video.title.slice(0, 80)}`,
+          events: [
+            { id: `${sessionId}-start`, type: "session_started", occurredAt: new Date().toISOString(), payload: { title: `B 站视频消化：${item.video.title.slice(0, 80)}` } },
+            ...events,
+            { id: `${sessionId}-finish`, type: "session_finished", occurredAt: new Date().toISOString(), payload: { outcome: "completed" } }
+          ]
+        }, webUser.id, "web");
+        // The import pipeline mints its own session id; expose that one so the
+        // UI can deep-link straight into the candidate-accept page.
+        const realSessionId = importResult?.session?.session?.id || importResult?.session?.id || sessionId;
+        // Attach a video artifact so accepting a candidate links the created
+        // debt to project ownership via linkDebtArtifact, making it visible in
+        // agent context (glasses / MCP) instead of dangling unowned.
+        if (boundProjectId && realSessionId) {
+          try {
+            const videoArtifact = projectMemoryStore.upsertArtifact({
+              projectId: boundProjectId,
+              type: "other",
+              name: `B 站视频：${item.video.title.slice(0, 60)}`,
+              pullRequestUrl: `https://www.bilibili.com/video/${item.video.bvid}/`,
+              diffSummary: item.digest.note,
+              sensitivity: "metadata_only"
+            }, webUser.id);
+            projectMemoryStore.linkSessionArtifact(realSessionId, videoArtifact.id, { relation: "referenced" }, webUser.id);
+          } catch (artifactError) {
+            console.log("[bili-import] artifact attach failed:", artifactError?.message);
+          }
+        }
+        item.imported = "debts";
+        item.importedSessionId = realSessionId;
+        await digestStore.save(digestState);
+        jsonResponse(res, 200, {
+          ok: true,
+          sessionId: realSessionId,
+          candidates: (importResult.analysis?.cognitiveDebtCandidates || events.map(() => ({}))).length || events.length,
+          cardsForPlugin: item.digest.cards
+        });
+        return;
+      }
+    }
+
     // ── Auth: web user accounts (no LEARNING_API_TOKEN required) ──
 
     if (url.pathname === "/api/auth/register" && req.method === "POST") {
       const payload = parseJson(await readBody(req));
       try {
-        const { user, sessionId } = authStore.register(payload.email, payload.password, payload.name);
-        jsonResponse(res, 201, { ok: true, user }, { "set-cookie": authSessionCookie(sessionId) });
+        const { user } = authStore.register(payload.email, payload.password, payload.name);
+        if (!emailVerificationRequired) {
+          // No mail transport is available in local/test mode. Mark this
+          // freshly-created account as verified through the same token path,
+          // then issue the normal HttpOnly session cookie.
+          const localToken = authStore.createEmailVerificationToken(user.id);
+          authStore.verifyEmailToken(localToken);
+          const activated = authStore.login(user.email, payload.password);
+          jsonResponse(res, 201, { ok: true, user: activated.user }, { "set-cookie": authSessionCookie(activated.sessionId) });
+          return;
+        }
+        const token = authStore.createEmailVerificationToken(user.id);
+        const delivery = await sendVerificationEmail(user.email, token, req);
+        if (!delivery.sent) {
+          jsonResponse(res, 503, { ok: false, error: "EMAIL_DELIVERY_UNAVAILABLE", message: "Email verification is temporarily unavailable. Please try again later." });
+          return;
+        }
+        jsonResponse(res, 201, { ok: true, user, requiresEmailVerification: true });
       } catch (error) {
-        const status = /already registered/i.test(String(error.message)) ? 409 : 400;
-        jsonResponse(res, status, { ok: false, error: error.message });
+        const message = String(error?.message || error);
+        const status = /already registered/i.test(message)
+          ? 409
+          : /required/i.test(message)
+            ? 400
+            : 503;
+        jsonResponse(res, status, { ok: false, error: message });
       }
       return;
     }
@@ -2763,8 +3538,12 @@ const server = createServer(async (req, res) => {
       try {
         const { user, sessionId } = authStore.login(payload.email, payload.password);
         jsonResponse(res, 200, { ok: true, user }, { "set-cookie": authSessionCookie(sessionId) });
-      } catch {
-        jsonResponse(res, 401, { ok: false, error: "Invalid email or password" });
+      } catch (error) {
+        if (error?.code === "EMAIL_NOT_VERIFIED") {
+          jsonResponse(res, 403, { ok: false, error: "EMAIL_NOT_VERIFIED", message: "Please verify your email before signing in." });
+        } else {
+          jsonResponse(res, 401, { ok: false, error: "Invalid email or password" });
+        }
       }
       return;
     }
@@ -2775,9 +3554,35 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (url.pathname === "/api/auth/me" && req.method === "GET") {
-      const user = requireAuth(req, res);
-      if (!user) return;
+      const sessionId = parseCookies(req)[sessionCookieName] || "";
+      const user = sessionId ? authStore.getUserBySession(sessionId) : null;
+      if (!user) { jsonResponse(res, 401, { ok: false, error: "Authentication required" }); return; }
       jsonResponse(res, 200, { ok: true, user });
+      return;
+    }
+    if (url.pathname === "/api/auth/verify-email" && req.method === "GET") {
+      const result = authStore.verifyEmailToken(url.searchParams.get("token") || "");
+      const location = `${getPublicBaseUrl(req)}/mindiou/#/verify-email?status=${result.ok ? "success" : "failed"}`;
+      res.writeHead(302, { Location: location }); res.end(); return;
+    }
+    if (url.pathname === "/api/auth/verify-email" && req.method === "POST") {
+      const result = authStore.verifyEmailToken(parseJson(await readBody(req)).token);
+      jsonResponse(res, result.ok ? 200 : 400, result.ok ? { ok: true } : { ok: false, error: result.error });
+      return;
+    }
+    if (url.pathname === "/api/auth/resend-verification" && req.method === "POST") {
+      const payload = parseJson(await readBody(req));
+      const sessionId = parseCookies(req)[sessionCookieName] || "";
+      const sessionUser = sessionId ? authStore.getUserBySession(sessionId) : null;
+      const candidate = sessionUser || authStore.findUserForVerification(payload.email);
+      // Always return the same success-shaped response. This avoids turning
+      // the resend endpoint into an email-account enumeration oracle.
+      if (!candidate) { jsonResponse(res, 200, { ok: true, requiresEmailVerification: true }); return; }
+      if (candidate.emailVerified) { jsonResponse(res, 200, { ok: true, alreadyVerified: true }); return; }
+      const token = authStore.createEmailVerificationToken(candidate.id);
+      const delivery = await sendVerificationEmail(candidate.email, token, req);
+      if (!delivery.sent) { jsonResponse(res, 503, { ok: false, error: "EMAIL_DELIVERY_UNAVAILABLE" }); return; }
+      jsonResponse(res, 200, { ok: true, requiresEmailVerification: true });
       return;
     }
     if (url.pathname === "/api/genesis" && req.method === "GET") {
@@ -3077,7 +3882,17 @@ const server = createServer(async (req, res) => {
           const debts = trainingStore.listCognitiveDebts(user.id);
           const memoryView = projectMemoryStore.memory(projectId, user.id, debts);
           const projectDebtIds = new Set(memoryView.ownership.debts.map(item => item.debtId));
-          const projectDebts = debts.filter(debt => projectDebtIds.has(debt.id));
+          let projectDebts = debts.filter(debt => projectDebtIds.has(debt.id));
+          // EXP-2 channel filter: when ?channel=glasses|web is present and the
+          // debt is assigned, only its assigned channel sees it. Unassigned
+          // debts pass through so normal usage is unaffected.
+          const expChannel = url.searchParams.get("channel");
+          if (expChannel === "glasses" || expChannel === "web") {
+            projectDebts = projectDebts.filter(debt => {
+              const a = exp2State.assignments[debt.id];
+              return !a || a.channel === expChannel;
+            });
+          }
           const profiles = trainingStore.listMasteryProfiles(user.id);
           const profileMap = {};
           for (const p of profiles) profileMap[p.cognitiveDebtId] = p;
@@ -3435,6 +4250,7 @@ const server = createServer(async (req, res) => {
     const cognitiveLoopRunMatch = url.pathname.match(/^\/api\/cognitive-loop\/runs\/([^/]+)$/);
     const cognitiveLoopFeedbackMatch = url.pathname.match(/^\/api\/cognitive-loop\/runs\/([^/]+)\/feedback$/);
     const isCognitiveLoopRoute =
+      (req.method === "GET" && url.pathname === "/api/cognitive-profile") ||
       (req.method === "GET" && (url.pathname === "/api/cognitive-loop/latest" || cognitiveLoopRunMatch)) ||
       (req.method === "POST" && (url.pathname === "/api/cognitive-loop/runs" || cognitiveLoopFeedbackMatch));
     if (isCognitiveLoopRoute) {
@@ -3446,18 +4262,27 @@ const server = createServer(async (req, res) => {
         body = parseJson(await readBody(req));
       }
       try {
+        if (req.method === "GET" && url.pathname === "/api/cognitive-profile") {
+          jsonResponse(res, 200, { ok: true, profile: cognitiveProfileStore.getProfile(user.id) });
+          return;
+        }
         if (req.method === "GET" && url.pathname === "/api/cognitive-loop/latest") {
           const projectId = clean(url.searchParams.get("projectId"));
           if (!projectId) {
             jsonResponse(res, 400, { ok: false, error: "projectId is required" });
             return;
           }
-          projectMemoryStore.getProject(projectId, user.id);
+          ensureCognitiveLoopProject(projectId, user.id);
           const run = cognitiveLoopStore.getLatestRun(projectId, user.id);
+          const profile = cognitiveProfileStore.getProfile(user.id);
+          const hydratedRun = run && !run.result?.cognitiveProfile && profile
+            ? { ...run, result: { ...run.result, cognitiveProfile: profile, domainCapabilityProfiles: profile.domainCapabilityProfiles, knowledgeDebts: profile.knowledgeDebts, aiUsageDebts: profile.aiUsageDebts, priorityInterventions: profile.priorityInterventions } }
+            : run;
           jsonResponse(res, 200, {
             ok: true,
-            run,
-            feedback: run ? cognitiveLoopStore.listFeedback(run.id, user.id) : []
+            run: hydratedRun,
+            feedback: run ? cognitiveLoopStore.listFeedback(run.id, user.id) : [],
+            cognitiveProfile: profile
           });
           return;
         }
@@ -3467,9 +4292,14 @@ const server = createServer(async (req, res) => {
             jsonResponse(res, 404, { ok: false, error: "Cognitive Loop run not found" });
             return;
           }
+          const profile = cognitiveProfileStore.getProfile(user.id);
+          const hydratedRun = !run.result?.cognitiveProfile && profile
+            ? { ...run, result: { ...run.result, cognitiveProfile: profile, domainCapabilityProfiles: profile.domainCapabilityProfiles, knowledgeDebts: profile.knowledgeDebts, aiUsageDebts: profile.aiUsageDebts, priorityInterventions: profile.priorityInterventions } }
+            : run;
           jsonResponse(res, 200, {
             ok: true,
-            run,
+            run: hydratedRun,
+            cognitiveProfile: profile,
             feedback: cognitiveLoopStore.listFeedback(run.id, user.id)
           });
           return;
@@ -3477,7 +4307,7 @@ const server = createServer(async (req, res) => {
         if (req.method === "POST" && url.pathname === "/api/cognitive-loop/runs") {
           const projectId = clean(body.projectId);
           if (!projectId) throw new Error("projectId is required");
-          projectMemoryStore.getProject(projectId, user.id);
+          const project = ensureCognitiveLoopProject(projectId, user.id);
           if (!Array.isArray(body.activities) || body.activities.length === 0) {
             throw new Error("At least one AI conversation activity is required");
           }
@@ -3488,18 +4318,39 @@ const server = createServer(async (req, res) => {
               ok: true,
               run: existing,
               feedback: cognitiveLoopStore.listFeedback(existing.id, user.id),
+              cognitiveProfile: cognitiveProfileStore.getProfile(user.id),
               idempotent: true
             });
             return;
           }
           const runId = clean(body.runId) || "loop-" + crypto.randomUUID();
           const now = new Date().toISOString();
+          const activityEvents = normalizeActivityEvents(body.activities, now);
+          if (!activityEvents.length) throw new Error("At least one non-empty AI activity is required");
           const result = analyzeCognitiveLoop({
             ...body,
             runId,
             now,
+            activityEvents,
             previousFeedback: cognitiveLoopStore.listRecentFeedback(projectId, user.id)
           });
+          const cognitiveProfile = buildUserCognitiveProfile({
+            userId: user.id,
+            projectId,
+            domain: body.domain || body.domainName,
+            projectContext: body.projectContext || body.context,
+            activityEvents,
+            loopResult: result,
+            existingProfile: cognitiveProfileStore.getProfile(user.id),
+            existingCapabilityProfiles: repaymentStore.listCapabilityProfiles(user.id),
+            now
+          });
+          const savedProfile = await cognitiveProfileStore.saveProfile(cognitiveProfile.profile);
+          result.cognitiveProfile = savedProfile;
+          result.domainCapabilityProfiles = savedProfile.domainCapabilityProfiles;
+          result.knowledgeDebts = savedProfile.knowledgeDebts;
+          result.aiUsageDebts = savedProfile.aiUsageDebts;
+          result.priorityInterventions = savedProfile.priorityInterventions;
           const activityText = body.activities
             .slice(0, 100)
             .map(item => clean(item?.content || item?.transcript || item?.text))
@@ -3516,13 +4367,13 @@ const server = createServer(async (req, res) => {
               clientRunId,
               activityHashes: result.activities.map(item => item.contentHash)
             }),
-            title: "Cognitive Loop · " + projectMemoryStore.getProject(projectId, user.id).name,
+            title: "Cognitive Loop · " + project.name,
             rawTitle: "Cognitive Loop activity import",
             startedAt: result.window.start,
             endedAt: result.window.end,
             userIntentSummary: clean(body.projectContext || body.context),
             implementationSummary: "Structured AI collaboration activity analysis",
-            outcomeSummary: result.aiUsageDebts[0]?.title || "No new AI Usage Debt selected",
+            outcomeSummary: result.priorityInterventions[0]?.title || result.aiUsageDebts[0]?.title || "No new intervention selected",
             keyTopics: result.aiCollaborationProfile.filter(item => item.evidence.length).map(item => item.label),
             technologies: [],
             importMethod: "cognitive_loop",
@@ -3533,6 +4384,11 @@ const server = createServer(async (req, res) => {
               schemaVersion: result.schemaVersion,
               source: result.source,
               profile: result.aiCollaborationProfile,
+              domainCapabilityProfiles: result.domainCapabilityProfiles,
+              knowledgeDebts: result.knowledgeDebts,
+              aiUsageDebts: result.aiUsageDebts,
+              priorityInterventions: result.priorityInterventions,
+              cognitiveProfile: savedProfile,
               selectedDebt: result.aiUsageDebts[0]
             }
           }, user.id);
@@ -3551,6 +4407,7 @@ const server = createServer(async (req, res) => {
             ok: true,
             run,
             feedback: [],
+            cognitiveProfile: savedProfile,
             activitySessionId: activitySession.id
           });
           return;
@@ -3685,7 +4542,30 @@ const server = createServer(async (req, res) => {
             return;
           }
           const report = mvp0Store.getReport(reportId, user.id);
-          const session = await startClearanceSession({ report, cardId, researchFn: researchClearanceContext });
+          const card = report.sections?.feynmanCards?.find(item => item.id === cardId) || null;
+          const gap = report.sections?.dangerousGaps?.find(item => item.sourceGapId && item.sourceGapId === card?.sourceGapId)
+            || report.sections?.dangerousGaps?.find(item => Number(item.rank) === Number(card?.gapRank))
+            || report.sections?.dangerousGaps?.[0]
+            || null;
+          const cognitiveDebt = trainingStore.listCognitiveDebts(user.id).find(debt =>
+            (debt.reportId === reportId && debt.cardId === cardId)
+            || (debt.reportId === reportId && debt.sourceGapId && debt.sourceGapId === gap?.sourceGapId)
+            || (Array.isArray(debt.sourceReports) && debt.sourceReports.includes(reportId) && debt.gapText === gap?.gap)
+          ) || null;
+          const session = await startClearanceSession({
+            report,
+            cardId,
+            cognitiveDebtId: cognitiveDebt?.id || card?.cognitiveDebtId || "",
+            debtContext: {
+              cognitiveDebtId: cognitiveDebt?.id || card?.cognitiveDebtId || "",
+              title: gap?.title || card?.target || "",
+              gap: gap?.gap || card?.target || "",
+              evidence: gap?.evidence || gap?.surfaceSignals?.join("；") || "",
+              masteryCriteria: gap?.masteryCriteria || [],
+              domain: report.analysis?.userCapability?.currentDomain || ""
+            },
+            researchFn: researchClearanceContext
+          });
           session.userId = user.id;
           session.locale = report.locale || (payload.locale === "en" ? "en" : "zh-CN");
           await mvp1Store.saveSession(session);
@@ -3826,6 +4706,7 @@ const server = createServer(async (req, res) => {
       if (url.pathname === "/api/mvp0/report") {
         let draft = null;
         const draftId = clean(payload.draftId || "");
+        const projectId = clean(payload.projectId || "");
         if (draftId) {
           try {
             draft = mvp0Store.getDraft(draftId, user.id);
@@ -3854,8 +4735,15 @@ const server = createServer(async (req, res) => {
         }));
         if (draft) report.draftId = draft.id;
         report.userId = user.id;
+        if (projectId) {
+          // Validate ownership before persisting the report. The project link
+          // is created after the debt IDs exist, but the report itself keeps
+          // the stable projectId so all stores can reconcile it later.
+          projectMemoryStore.getProject(projectId, user.id);
+          report.projectId = projectId;
+        }
         report.locale = draft?.locale || (payload.locale === "en" ? "en" : "zh-CN");
-        const saved = await traceSpan("sqlite.report_save", { userId: user.id, reportId: report.id || "new" }, () => mvp0Store.saveReport(report));
+        let saved = await traceSpan("sqlite.report_save", { userId: user.id, reportId: report.id || "new" }, () => mvp0Store.saveReport(report));
         traceEvent("report.generated", { reportId: saved.id, userId: user.id });
         // 报告生成即建立“领域占位画像”：只记录主题存在，不伪造用户掌握证据。
         try {
@@ -3880,16 +4768,26 @@ const server = createServer(async (req, res) => {
         // ── 重复缺口检测与复发识别 ──
         try {
           const gaps = saved.sections?.dangerousGaps || [];
+          let reportBindingsChanged = false;
           for (const gap of gaps) {
             const gapText = String(gap.gap || "").trim();
             if (!gapText) continue;
-            const existingDebt = trainingStore.findCognitiveDebtByGap(user.id, gapText);
+            const cards = reportCardsForRepaymentGap(saved, gap);
+            const card = cards[0] || null;
+            const existingDebt = trainingStore.listCognitiveDebts(user.id).find(debt =>
+              (debt.reportId === saved.id && debt.sourceGapId && debt.sourceGapId === gap.sourceGapId)
+              || (debt.reportId === saved.id && debt.cardId && debt.cardId === card?.id)
+              || (debt.reportId === saved.id && debt.gapText === gapText)
+            ) || trainingStore.findCognitiveDebtByGap(user.id, gapText);
             if (existingDebt) {
               // 同一缺口再次出现
               existingDebt.recurrenceCount = (existingDebt.recurrenceCount || 0) + 1;
+              if (!Array.isArray(existingDebt.sourceReports)) existingDebt.sourceReports = [];
               if (!existingDebt.sourceReports.includes(saved.id)) {
                 existingDebt.sourceReports.push(saved.id);
               }
+              existingDebt.cardId = card?.id || existingDebt.cardId || "";
+              existingDebt.sourceGapId = gap.sourceGapId || existingDebt.sourceGapId || `gap-${gap.rank}`;
               existingDebt.updatedAt = new Date().toISOString();
 
               // 如果之前已 mastered，标记为 relapsed
@@ -3902,29 +4800,52 @@ const server = createServer(async (req, res) => {
                 }
               }
               await trainingStore.saveCognitiveDebt(existingDebt);
+              gap.cognitiveDebtId = existingDebt.id;
+              for (const linkedCard of cards) {
+                if (linkedCard.cognitiveDebtId !== existingDebt.id) linkedCard.cognitiveDebtId = existingDebt.id;
+              }
+              reportBindingsChanged = true;
             } else {
               // 新缺口，创建认知欠条
               const newDebt = createCognitiveDebt({
                 userId: user.id,
                 reportId: saved.id,
-                cardId: saved.sections?.feynmanCards?.find(card =>
-                  String(card.target || "").trim() === gapText || String(card.prompt || "").trim() === gapText
-                )?.id,
+                cardId: card?.id || "",
                 gapText,
-                gapEvidence: String(gap.evidence || "").slice(0, 1000)
+                gapEvidence: String(gap.evidence || gap.surfaceSignals?.join("；") || "").slice(0, 1000)
               });
+              newDebt.sourceGapId = gap.sourceGapId || `gap-${gap.rank}`;
               await trainingStore.saveCognitiveDebt(newDebt);
+              gap.cognitiveDebtId = newDebt.id;
+              for (const linkedCard of cards) linkedCard.cognitiveDebtId = newDebt.id;
+              reportBindingsChanged = true;
             }
+          }
+          // Persist the binding after the debt id exists. This makes the report,
+          // card, training debt, and later clearance session address the same
+          // cognitive unit instead of relying on array order or text matching.
+          if (reportBindingsChanged) {
+            saved = await mvp0Store.saveReport(saved);
           }
         } catch (debtError) {
           console.warn(`Cognitive debt detection failed for report ${saved.id}: ${debtError.message}`);
         }
         // 报告一生成就进入清偿集合；重复请求由 reportId + gapRank 幂等去重。
         await syncRepaymentGapsFromReports(user.id);
+        let projectMemory = null;
+        if (projectId) {
+          try {
+            projectMemory = await projectMemoryLinkReport(saved.id, projectId, user.id);
+          } catch (projectError) {
+            console.warn(`Project memory link failed for report ${saved.id}: ${projectError.message}`);
+            projectMemory = { ok: false, error: projectError.message };
+          }
+        }
         const isFallback = Boolean(saved.generation?.fallback);
         jsonResponse(res, 200, {
           ok: true,
           report: saved,
+          ...(projectMemory ? { projectMemory: { ok: projectMemory.ok !== false, linkedDebtIds: projectMemory.linkedDebtIds || [], error: projectMemory.error || undefined } } : {}),
           fallback: isFallback,
           ...(isFallback && saved.generation?.error ? { error: saved.generation.error } : {}),
           detectedType: artifactType
@@ -4154,6 +5075,7 @@ const server = createServer(async (req, res) => {
             {
               role: "user",
               content: JSON.stringify({
+                cognitiveDebtId: gap.cognitiveDebtId || "",
                 gapTitle: gap.title,
                 evidence: gap.evidence,
                 verificationMethod: gap.verificationMethod,
@@ -4304,6 +5226,80 @@ const server = createServer(async (req, res) => {
       if (!channel) return;
       const session = spiralStore.buildSession(url.searchParams.get("duration"));
       jsonResponse(res, 200, { ok: true, session, ...(channel.adminChannel ? { _adminChannel: true } : {}) });
+      return;
+    }
+
+    // ── English Loop internal persistence ────────────────────────────────
+    // This route stores only a sanitized profile, session metadata and
+    // structured evidence. Raw speech transcripts and model replies never
+    // enter this store. It is intentionally before the legacy service-token
+    // gate so a signed-in Web user or a per-user device token can use it too.
+    const isEnglishLoopStateRoute =
+      (req.method === "GET" && url.pathname === "/api/learn/english-loop/state") ||
+      (req.method === "POST" && url.pathname === "/api/learn/english-loop/state") ||
+      (req.method === "POST" && url.pathname === "/api/learn/english-loop/feedback");
+    if (isEnglishLoopStateRoute) {
+      let body = {};
+      if (req.method !== "GET") {
+        requireJsonRequest(req);
+        body = parseJson(await readBody(req));
+      }
+      const identity = resolveEnglishLoopIdentity(req, res, body);
+      if (!identity) return;
+      try {
+        if (req.method === "GET") {
+          jsonResponse(res, 200, {
+            ok: true,
+            state: englishLoopStore.getState(identity.ownerKey),
+            channel: identity.channel,
+            privacy: { rawTranscriptStored: false }
+          });
+          return;
+        }
+        if (url.pathname.endsWith("/feedback")) {
+          if (body.profile) {
+            englishLoopStore.sync({
+              ownerKey: identity.ownerKey,
+              userId: identity.userId,
+              profile: body.profile,
+              sessionId: body.sessionId,
+              session: body.session,
+              now: body.now
+            });
+          }
+          const feedback = englishLoopStore.recordFeedback({
+            ownerKey: identity.ownerKey,
+            sessionId: body.sessionId,
+            interventionId: body.interventionId,
+            status: body.status,
+            note: body.note
+          });
+          jsonResponse(res, 200, {
+            ok: true,
+            feedback,
+            state: englishLoopStore.getState(identity.ownerKey),
+            privacy: { rawTranscriptStored: false }
+          });
+          return;
+        }
+        const state = englishLoopStore.sync({
+          ownerKey: identity.ownerKey,
+          userId: identity.userId,
+          profile: body.profile,
+          sessionId: body.sessionId,
+          session: body.session,
+          turn: body.turn,
+          now: body.now
+        });
+        jsonResponse(res, 200, {
+          ok: true,
+          state,
+          event: clean(body.event || "profile_sync"),
+          privacy: { rawTranscriptStored: false }
+        });
+      } catch (error) {
+        jsonResponse(res, 400, { ok: false, error: clean(error?.message || "English Loop state sync failed") });
+      }
       return;
     }
 
@@ -4880,6 +5876,10 @@ const server = createServer(async (req, res) => {
     }
     if (url.pathname === "/api/learn/tutor") {
       jsonResponse(res, 200, await tutor(payload));
+      return;
+    }
+    if (url.pathname === "/api/learn/english-loop") {
+      jsonResponse(res, 200, await englishLoop(payload));
       return;
     }
     if (url.pathname === "/api/rokid/tutor") {

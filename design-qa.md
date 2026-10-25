@@ -1,64 +1,59 @@
-# MindIOU Landing Fix — Design QA
+# Fluency Loop 预告页视觉 QA
 
-- Source visual truth:
-  - `qa/reference-desktop.png`
-  - `qa/reference-mobile.png`
-- Implementation screenshots:
-  - `/tmp/mindiou-landing-fixed-en-cta-viewport.png` (desktop hero)
-  - `/tmp/mindiou-landing-fixed-en-cta-viewport-v2.png` (desktop CTA)
-  - `/tmp/mindiou-landing-fixed-en-mobile.png` (mobile hero)
-  - `/tmp/mindiou-design-qa-comparison.png` (combined source/implementation comparison)
-- Desktop viewport: 1450 x 985 CSS px, device density normalized by using same browser viewport for both implementation captures.
-- Mobile viewport: 390 x 844 CSS px.
-- Source pixels: 1450 x 986 (hero), 1854 x 986 (CTA).
-- Implementation pixels: 1450 x 985 (desktop captures), 390 x 844 (mobile capture).
-- State: public Landing, English and Chinese language states.
+## Comparison target
 
-## Full-view comparison evidence
+Source visual truth:
 
-The combined comparison at `/tmp/mindiou-design-qa-comparison.png` places each supplied reference beside the revised implementation. The desktop hero now keeps the skipped-reasoning chip, bottom trajectory label, debt card, and language switch in separate visible regions. The CTA now uses dark foreground colors throughout the light glass gradient.
+- `/var/folders/h1/dbfhmwjs7q3_p7xxhh4xjq300000gn/T/codex-clipboard-1090171e-7463-41d2-9214-f02bac1da250.png` — English AI collaboration cards, source pixels `1728 × 1536`.
+- `/var/folders/h1/dbfhmwjs7q3_p7xxhh4xjq300000gn/T/codex-clipboard-762ac2ff-d153-439a-be24-9260f667105e.png` — Chinese research evidence cards, source pixels `1696 × 1186`.
 
-## Focused-region evidence
+Implementation evidence:
 
-- Hero: DOM bounds at 1450 px show the skipped-reasoning chip ending before the debt card begins; the public language switch is at the top-right and no longer intersects the card.
-- CTA: computed colors are heading `rgb(17, 24, 39)`, copy `rgb(51, 65, 85)`, and note `rgb(71, 85, 105)` in both English and Chinese.
-- Mobile: document `scrollWidth` equals viewport width (390 px); language control and debt card occupy separate vertical regions.
+- `/private/tmp/mindiou-fluency-english-dimensions-1600x1200.png` — English dimension-card viewport capture, `1600 × 1200` pixels.
+- `/private/tmp/mindiou-fluency-chinese-research-1600x1200.png` — Chinese research-section viewport capture, `1600 × 1200` pixels.
 
-## Required fidelity surfaces
+Capture state:
 
-- Fonts and typography: Existing product type families, weights, sizes, and wrapping are preserved. Only foreground colors and collision-safe layout constraints changed.
-- Spacing and layout rhythm: Public language control moved to a stable top-right safe area. Trajectory labels are bounded and the debt card retains its original scale/rotation without covering adjacent copy.
-- Colors and visual tokens: CTA foregrounds changed from white-on-light to high-contrast slate/ink values while preserving the existing pastel glass background and white CTA button.
-- Image quality and asset fidelity: Existing cognitive-trajectory raster asset is unchanged; no asset replacement, stretching, or approximation was introduced.
-- Copy and content: Chinese and English wording is unchanged. Both locales share the corrected layout and color rules.
-
-## Comparison history
-
-### Iteration 1 findings
-
-- P1: English skipped-reasoning metadata and bottom trajectory label were covered by the debt card; the fixed language control covered the card at the lower-right.
-- P1: CTA heading, body copy, and note were white on a predominantly white/light gradient.
-
-### Fixes made
-
-- Added a public-route language-control placement at the top-right.
-- Constrained and repositioned trajectory labels and debt-card bounds for desktop, tablet, and mobile breakpoints.
-- Applied shared dark CTA foreground colors to both locales.
-
-### Post-fix evidence
-
-- Desktop hero screenshot and bounds show no intersection among the reported elements.
-- Desktop CTA screenshot shows all three text levels visibly readable.
-- Chinese CTA computed colors match English.
-- Mobile screenshot has no horizontal overflow or language/card collision.
-- Language toggle interaction works and browser console reports no errors.
+- Route: `http://localhost:5180/mindiou/#/fluency-loop-preview`
+- CSS viewport: `1600 × 1200` for desktop comparison; `560 × 1000` for the responsive regression check.
+- Language: English for the dimension-card capture, Chinese for the research-section capture.
+- Density normalization: the source attachments do not expose a usable device-scale-factor declaration. The source captures and implementation captures were therefore kept at their raw pixel dimensions and compared at the same desktop breakpoint by focused component region rather than as pixel-identical full-page images.
 
 ## Findings
 
-No actionable P0, P1, or P2 issues remain for the two reported defects.
+- No actionable P0, P1, or P2 findings remain.
+- The source English view showed four narrow columns. Long labels such as `DISCERNMENT`, `TASK DECOMPOSITION`, and `ITERATIVE COLLABORATION` could squeeze the score toward the card edge. The implementation uses three desktop columns and a fixed right-side score track; all seven scores (`48`, `71`, `39`, `63`, `55`, `66`, `44`) remain inside their cards.
+- The source Chinese research view showed five tall, narrow cards. The implementation uses three desktop columns, producing wider evidence cards and two balanced rows instead of five compressed vertical bars.
+- At `560px`, the dimension grid becomes one column. The browser check reported no horizontal overflow and every score remained inside its card.
 
-## Follow-up polish
+## Comparison history
 
-No P3 changes are required for this scoped correction.
+### Iteration 1 — fixed
+
+- Finding: desktop AI collaboration cards were too narrow; the English score could be visually clipped by the long dimension name.
+- Fix: changed `.fluency-dimension-grid` to three columns; changed `.fluency-dimension-top` to `minmax(0, 1fr) auto`; kept the score non-wrapping with tabular numerals; reduced the desktop minimum card height from `365px` to `340px`.
+- Post-fix evidence: `/private/tmp/mindiou-fluency-english-dimensions-1600x1200.png`; DOM layout check confirmed each score rectangle was fully inside its card and the page had no horizontal overflow.
+
+### Iteration 2 — fixed
+
+- Finding: five research cards created a tall, narrow “vertical bar” rhythm and excessive line wrapping.
+- Fix: changed `.fluency-research-grid` to three columns; retained two columns at medium widths and one column on small screens.
+- Post-fix evidence: `/private/tmp/mindiou-fluency-chinese-research-1600x1200.png`; desktop DOM metrics reported three cards per row at `1600px`.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing MindIOU font stack, hierarchy, uppercase labels, score sizing, line-height, and letter-spacing were preserved; the score now has `white-space: nowrap` and `font-variant-numeric: tabular-nums`.
+- Spacing and layout rhythm: card width increased through the column reduction; score alignment is stable; the mobile breakpoint avoids narrow two-column English cards.
+- Colors and visual tokens: no color, border, radius, shadow, or accent-token changes were made.
+- Image quality and asset fidelity: no image or illustration assets were changed; the existing CSS-native decorative treatment remains untouched.
+- Copy and content: no copy or language content was changed in this pass.
+
+## Verification
+
+- `npm run check` — passed.
+- `npm test` — 11 test files, 83 tests passed.
+- `npm run build` — passed.
+- `git diff --check` — passed.
+- Browser checks — English scores complete at `1600px`; research cards three-up at `1600px`; dimension cards one-up at `560px`; no horizontal overflow.
 
 final result: passed

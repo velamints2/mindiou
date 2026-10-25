@@ -111,8 +111,9 @@ this repository, a public post, or a video frame.
 Unrelated debts still fail visibly instead of fabricating research.
 
 Text generation can use a provider independently from research and speech. The
-current mainland deployment uses `AI_PROVIDER=deepseek`,
-`AI_BASE_URL=https://api.deepseek.com`, and `AI_MODEL=deepseek-v4-flash`.
+current mainland deployment uses the 302.AI OpenAI-compatible gateway for
+GPT-5.6: `AI_PROVIDER=302ai`, `AI_BASE_URL=https://api.302.ai/v1`, and
+`AI_MODEL=gpt-5.6-sol`.
 `AI_API_KEY` must be set directly in `/etc/mindiou.env`; do not put it in this
 repository or a client package. `RESEARCH_*` and `STT_*` remain empty until
 separate compatible providers are configured.

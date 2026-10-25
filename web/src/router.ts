@@ -21,13 +21,19 @@ export type Route =
   | { name: 'project-ownership'; projectId: string }  // 产品区：项目所有权地图
   | { name: 'project-ownership-module'; projectId: string; moduleId: string }  // 产品区：模块详情
   | { name: 'admin' }               // 运营后台
+  | { name: 'verify-email'; token?: string; status?: string }
   | { name: 'training' }            // 产品区：今日复训
   | { name: 'training-debt'; debtId: string }  // 产品区：认知欠条详情
   | { name: 'repayment' }            // 产品区：认知清偿 V1 列表
   | { name: 'repayment-detail'; gapId: string }  // 产品区：认知清偿欠条详情
   | { name: 'profile' }              // 产品区：用户能力画像
   | { name: 'fluency-loop-preview' } // 公开：Fluency Loop 功能预告
+  | { name: 'verify-email'; token?: string; status?: string }
   | { name: 'cognitive-loop' }       // 产品区：每周 Cognitive Loop
+  | { name: 'digest' }              // 产品区：B 站视频消化
+  | { name: 'exp2' }                // 产品区：EXP-2 实验台（预注册对照）
+  | { name: 'exp1' }                // 产品区：EXP-1 候选复核台
+  | { name: 'research' }            // 产品区：研究资料包
   | { name: 'project'; projectId: string }
   | { name: 'work-item'; projectId: string; workItemId: string }
   | { name: 'agent-session'; sessionId: string }
@@ -35,7 +41,7 @@ export type Route =
 
 // 判断是否为公开路由（无需登录）
 export function isPublicRoute(route: Route): boolean {
-  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register' || route.name === 'genesis' || route.name === 'assessment' || route.name === 'challenge' || route.name === 'fluency-loop-preview'
+  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register' || route.name === 'genesis' || route.name === 'assessment' || route.name === 'challenge' || route.name === 'fluency-loop-preview' || route.name === 'verify-email'
 }
 
 export function parseRoute(): Route {
@@ -70,6 +76,10 @@ export function parseRoute(): Route {
       return { name: 'devices' }
     case 'admin':
       return { name: 'admin' }
+    case 'verify-email': {
+      const params = new URLSearchParams(location.hash.split('?')[1] || '')
+      return { name: 'verify-email', token: params.get('token') || undefined, status: params.get('status') || undefined }
+    }
     case 'report':
       return rest[0] ? { name: 'report', reportId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
     case 'session':
@@ -84,6 +94,14 @@ export function parseRoute(): Route {
       return { name: 'profile' }
     case 'cognitive-loop':
       return { name: 'cognitive-loop' }
+    case 'digest':
+      return { name: 'digest' }
+    case 'exp2':
+      return { name: 'exp2' }
+    case 'exp1':
+      return { name: 'exp1' }
+    case 'research':
+      return { name: 'research' }
     case 'projects':
       if (!rest[0]) return { name: 'projects' }
       if (rest[1] === 'work-items' && rest[2]) {
@@ -126,6 +144,7 @@ export function navigate(route: Route): void {
     case 'timeline': path = `/timeline/${encodeURIComponent(route.draftId)}`; break
     case 'devices': path = '/devices'; break
     case 'admin': path = '/admin'; break
+    case 'verify-email': path = '/verify-email'; break
     case 'report': path = `/report/${encodeURIComponent(route.reportId)}`; break
     case 'session': path = `/session/${encodeURIComponent(route.sessionId)}`; break
     case 'training': path = '/training'; break
@@ -133,6 +152,10 @@ export function navigate(route: Route): void {
     case 'repayment': path = '/repayment'; break
     case 'profile': path = '/profile'; break
     case 'cognitive-loop': path = '/cognitive-loop'; break
+    case 'digest': path = '/digest'; break
+    case 'exp2': path = '/exp2'; break
+    case 'exp1': path = '/exp1'; break
+    case 'research': path = '/research'; break
     case 'fluency-loop-preview': path = '/fluency-loop-preview'; break
     case 'projects': path = '/projects'; break
     case 'project': path = '/projects/' + encodeURIComponent(route.projectId); break

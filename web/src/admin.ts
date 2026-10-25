@@ -28,19 +28,35 @@ function el(tag: string, cls = '', text = ''): HTMLElement {
 }
 function clear(node: HTMLElement): void { node.replaceChildren() }
 
+class AdminApiError extends Error {
+  status: number
+  constructor(status: number, message = '') {
+    super(message || `Admin request failed (${status})`)
+    this.name = 'AdminApiError'
+    this.status = status
+  }
+}
+
 // 带鉴权的 fetch
-async function adminFetch<T>(path: string): Promise<T | null> {
+async function adminFetch<T>(path: string): Promise<T> {
   const token = getAdminToken()
   const headers: Record<string, string> = {}
   if (token) headers['Authorization'] = `Bearer ${token}`
   try {
     const res = await fetch(`${API_BASE}${path}`, { headers })
-    if (res.status === 401 || res.status === 403) return null
-    if (!res.ok) return null
+    if (!res.ok) throw new AdminApiError(res.status)
     return (await res.json()) as T
-  } catch {
-    return null
+  } catch (error) {
+    if (error instanceof AdminApiError) throw error
+    throw new AdminApiError(0, 'Admin service is unreachable')
   }
+}
+
+function adminFailureMessage(error: unknown): string {
+  if (error instanceof AdminApiError && (error.status === 401 || error.status === 403)) {
+    return '管理员 Token 已失效，请重新输入。'
+  }
+  return '运营后台暂时不可用，请稍后重试。'
 }
 
 // ── 后端补丁返回的聚合数据结构（admin-backend-patch.js computeAdminStats） ──
@@ -124,14 +140,14 @@ export function renderAdminLogin(root: HTMLElement): void {
     if (!t) return
     setAdminToken(t)
     // 用 admin/stats 验证 token（401 即无效）
-    const stats = await adminFetch<{ ok?: boolean; stats?: AdminStats }>('/api/admin/stats')
-    if (stats === null) {
+    try {
+      const stats = await adminFetch<{ ok?: boolean; stats?: AdminStats }>('/api/admin/stats')
+      if (!stats?.stats) throw new AdminApiError(502)
+      await renderAdminDashboard(root)
+    } catch (error) {
       clearAdminToken()
-      status.textContent = 'Token 无效或后端不可达'
-      return
+      status.textContent = adminFailureMessage(error)
     }
-    // 登录成功，直接渲染看板
-    await renderAdminDashboard(root)
   }
   const back = el('button', 'btn btn-ghost', '返回首页')
   back.onclick = () => navigate({ name: 'landing' })
@@ -165,18 +181,36 @@ export async function renderAdminDashboard(root: HTMLElement): Promise<void> {
   root.appendChild(page)
 
   // 并行拉取：聚合 stats + 事件流 + 健康 + 用户列表
-  const [statsRes, eventsRes, healthRes, usersRes] = await Promise.all([
+  const results = await Promise.allSettled([
     adminFetch<{ ok?: boolean; stats?: AdminStats }>('/api/admin/stats'),
     adminFetch<{ ok?: boolean; events?: EventItem[] }>('/api/admin/events'),
     adminFetch<{ ok?: boolean; ai?: string }>('/health'),
     adminFetch<{ ok?: boolean; users?: AdminUser[]; total?: number }>('/api/admin/users')
   ])
 
+  const authFailure = results.find(result => result.status === 'rejected'
+    && result.reason instanceof AdminApiError
+    && (result.reason.status === 401 || result.reason.status === 403))
+  if (authFailure) {
+    clearAdminToken()
+    renderAdminLogin(root)
+    return
+  }
+
+  const valueAt = <T,>(index: number): T | null => {
+    const result = results[index]
+    return result?.status === 'fulfilled' ? result.value as T : null
+  }
+  const statsRes = valueAt<{ ok?: boolean; stats?: AdminStats }>(0)
+  const eventsRes = valueAt<{ ok?: boolean; events?: EventItem[] }>(1)
+  const healthRes = valueAt<{ ok?: boolean; ai?: string }>(2)
+  const usersRes = valueAt<{ ok?: boolean; users?: AdminUser[]; total?: number }>(3)
+
   clear(page)
   page.appendChild(header)
 
   if (!statsRes?.stats) {
-    page.appendChild(el('div', 'admin-empty', '无法加载统计数据。请确认后端已挂载 admin-backend-patch.js，且 MINDIOU_ADMIN_TOKEN 已配置。'))
+    page.appendChild(el('div', 'admin-empty', '运营后台暂时不可用，请稍后点击“刷新”重试。'))
     root.appendChild(page)
     return
   }

@@ -28,12 +28,13 @@ describe("auth store", () => {
   });
 
   describe("register", () => {
-    it("registers a user and returns a session", () => {
+    it("registers an unverified candidate without an authenticated session", () => {
       const result = store.register("Alice@Example.com", "secret-1");
       expect(result.user.email).toBe("alice@example.com");
       expect(result.user.id).toBeTruthy();
-      expect(result.sessionId).toBeTruthy();
-      expect(store.getUserBySession(result.sessionId)).toEqual(result.user);
+      expect(result.sessionId).toBeNull();
+      expect(result.user.emailVerified).toBe(false);
+      expect(result.user.genesisIdentity).toBeUndefined();
     });
 
     it("normalizes email with lowercase and trim", () => {
@@ -60,10 +61,16 @@ describe("auth store", () => {
   describe("login", () => {
     it("logs in with correct credentials and returns a session", () => {
       const registered = store.register("alice@example.com", "secret-1");
+      store.verifyEmailToken(store.createEmailVerificationToken(registered.user.id));
       const result = store.login("alice@example.com", "secret-1");
-      expect(result.user).toEqual(registered.user);
+      expect(result.user.emailVerified).toBe(true);
       expect(result.sessionId).toBeTruthy();
-      expect(result.sessionId).not.toBe(registered.sessionId);
+      expect(result.sessionId).toBeTruthy();
+    });
+
+    it("rejects correct credentials until email is verified", () => {
+      store.register("alice@example.com", "secret-1");
+      expect(() => store.login("alice@example.com", "secret-1")).toThrow("EMAIL_NOT_VERIFIED");
     });
 
     it("rejects a wrong password with a generic error", () => {
@@ -78,7 +85,9 @@ describe("auth store", () => {
 
   describe("sessions", () => {
     it("returns the user for a valid session", () => {
-      const { user, sessionId } = store.register("alice@example.com", "secret-1");
+      const registered = store.register("alice@example.com", "secret-1");
+      store.verifyEmailToken(store.createEmailVerificationToken(registered.user.id));
+      const { user, sessionId } = store.login("alice@example.com", "secret-1");
       expect(store.getUserBySession(sessionId)).toEqual(user);
     });
 
@@ -88,13 +97,17 @@ describe("auth store", () => {
     });
 
     it("returns null after logout", () => {
-      const { sessionId } = store.register("alice@example.com", "secret-1");
+      const registered = store.register("alice@example.com", "secret-1");
+      store.verifyEmailToken(store.createEmailVerificationToken(registered.user.id));
+      const { sessionId } = store.login("alice@example.com", "secret-1");
       store.logout(sessionId);
       expect(store.getUserBySession(sessionId)).toBeNull();
     });
 
     it("returns null for an expired session and removes it", () => {
-      const { sessionId } = store.register("alice@example.com", "secret-1");
+      const registered = store.register("alice@example.com", "secret-1");
+      store.verifyEmailToken(store.createEmailVerificationToken(registered.user.id));
+      const { sessionId } = store.login("alice@example.com", "secret-1");
       const raw = new Database(dbPath);
       raw.prepare("UPDATE sessions SET expires_at = ? WHERE id = ?")
         .run(new Date(Date.now() - 1000).toISOString(), sessionId);
@@ -109,7 +122,8 @@ describe("auth store", () => {
       const { user } = store.register("alice@example.com", "secret-1");
       const reopened = createAuthStore(dbPath);
       expect(reopened.getUserById(user.id)).toEqual(user);
-      expect(reopened.login("alice@example.com", "secret-1").user).toEqual(user);
+      reopened.verifyEmailToken(reopened.createEmailVerificationToken(user.id));
+      expect(reopened.login("alice@example.com", "secret-1").user.emailVerified).toBe(true);
     });
   });
 
@@ -125,20 +139,16 @@ describe("auth store", () => {
     it("reserves sequential private identities at registration", () => {
       const alice = store.register("alice@example.com", "secret-1", "Alice").user;
       const bob = store.register("bob@example.com", "secret-2", "Bob").user;
-      expect(alice.genesisIdentity.number).toBe("MIOU-001-0001");
-      expect(bob.genesisIdentity.number).toBe("MIOU-001-0002");
-      expect(alice.genesisIdentity.activatedAt).toBeNull();
-      expect(alice.genesisIdentity.visibility).toBe("private");
-      expect(store.getGenesisArchive()).toMatchObject({ joined: 2, completed: 0 });
-      expect(store.getGenesisArchive().members).toEqual([
-        expect.objectContaining({ number: "MIOU-001-0001", visibility: "anonymous", activatedAt: null }),
-        expect.objectContaining({ number: "MIOU-001-0002", visibility: "anonymous", activatedAt: null })
-      ]);
+      expect(alice.genesisIdentity).toBeUndefined();
+      expect(bob.genesisIdentity).toBeUndefined();
+      expect(store.getGenesisArchive()).toMatchObject({ joined: 0, completed: 0 });
     });
 
     it("activates once and keeps public listing opt-in", () => {
       const { user } = store.register("alice@example.com", "secret-1", "Alice");
-      const first = store.activateGenesisIdentity(user.id, "2026-08-03T10:00:00.000Z");
+      store.verifyEmailToken(store.createEmailVerificationToken(user.id));
+      const verified = store.getUserById(user.id);
+      const first = store.activateGenesisIdentity(verified.id, "2026-08-03T10:00:00.000Z");
       const second = store.activateGenesisIdentity(user.id, "2026-08-04T10:00:00.000Z");
       expect(second.activatedAt).toBe(first.activatedAt);
       expect(store.getGenesisArchive()).toMatchObject({ joined: 1, completed: 1 });
@@ -166,12 +176,14 @@ describe("auth store", () => {
     it("rejects profile changes before activation and unsafe avatar URLs", () => {
       const { user } = store.register("alice@example.com", "secret-1");
       expect(() => store.updateGenesisIdentity(user.id, { visibility: "public" })).toThrow("not active");
+      store.verifyEmailToken(store.createEmailVerificationToken(user.id));
       store.activateGenesisIdentity(user.id);
       expect(() => store.updateGenesisIdentity(user.id, { visibility: "public", avatarUrl: "http://example.com/a.png" })).toThrow("HTTPS");
     });
 
     it("backfills identities for accounts created before the genesis migration", async () => {
       const legacyPath = path.join(tmpDir, "auth-store-legacy.sqlite");
+      await rm(legacyPath, { force: true });
       const legacy = new Database(legacyPath);
       legacy.exec(`CREATE TABLE users (
         id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
@@ -181,9 +193,7 @@ describe("auth store", () => {
         .run("legacy-1", "legacy@example.com", "unused", "2026-07-01T00:00:00.000Z");
       legacy.close();
       const migrated = createAuthStore(legacyPath);
-      expect(migrated.getUserById("legacy-1").genesisIdentity).toMatchObject({
-        number: "MIOU-001-0001", reservedAt: "2026-07-01T00:00:00.000Z", activatedAt: null, visibility: "private"
-      });
+      expect(migrated.getUserById("legacy-1").genesisIdentity).toBeUndefined();
       await rm(legacyPath, { force: true });
     });
   });
@@ -213,13 +223,15 @@ describe("auth store", () => {
     });
 
     it("counts active sessions per user and updates lastSessionAt after login", () => {
-      const { user, sessionId } = store.register("alice@example.com", "secret-1");
+      const registered = store.register("alice@example.com", "secret-1");
+      store.verifyEmailToken(store.createEmailVerificationToken(registered.user.id));
+      const { user, sessionId } = store.login("alice@example.com", "secret-1");
       store.login("alice@example.com", "secret-1"); // 再开一个会话
       const users = store.listUsersWithStats();
       const alice = users.find(u => u.id === user.id);
       expect(alice.activeSessionCount).toBe(2);
       expect(alice.lastSessionAt).toBeTruthy();
-      // 注册时创建的会话 createdAt 应不晚于后续登录的会话
+      // 首次登录会话 createdAt 应不晚于后续登录的会话
       expect(alice.lastSessionAt >= alice.createdAt).toBe(true);
       // 销毁一个会话后应剩 1
       store.logout(sessionId);
@@ -228,7 +240,9 @@ describe("auth store", () => {
     });
 
     it("does not count expired sessions as active", () => {
-      const { sessionId } = store.register("alice@example.com", "secret-1");
+      const registered = store.register("alice@example.com", "secret-1");
+      store.verifyEmailToken(store.createEmailVerificationToken(registered.user.id));
+      const { sessionId } = store.login("alice@example.com", "secret-1");
       const raw = new Database(dbPath);
       raw.prepare("UPDATE sessions SET expires_at = ? WHERE id = ?")
         .run(new Date(Date.now() - 1000).toISOString(), sessionId);

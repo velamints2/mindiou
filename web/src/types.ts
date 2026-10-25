@@ -11,6 +11,8 @@ export type EvidenceItem = {
 
 export type DangerousGap = {
   rank: number
+  sourceGapId?: string
+  cognitiveDebtId?: string
   title?: string
   gap: string
   whyDangerous: string
@@ -27,6 +29,9 @@ export type CognitiveStructure = {
 
 export type FeynmanCard = {
   id: string
+  sourceGapId?: string
+  gapRank?: number | null
+  cognitiveDebtId?: string
   target: string
   prompt: string
   targetLevel?: string
@@ -141,8 +146,8 @@ export type GenerateTimelineResponse = {
 }
 
 export type GenerateReportRequest =
-  | { draftId: string }
-  | { artifactText: string; artifactType?: string }
+  | { draftId: string; projectId?: string }
+  | { artifactText: string; artifactType?: string; projectId?: string }
 
 // ── 清偿会话相关 ──
 
@@ -175,6 +180,8 @@ export type AttemptAnalysis = {
 }
 
 export type Attempt = {
+  id?: string
+  question?: string
   answer: string
   analysis: AttemptAnalysis
   createdAt: string
@@ -197,6 +204,13 @@ export type ClearanceSession = {
   id: string
   reportId: string
   cardId: string
+  cognitiveDebtId?: string
+  debtContext?: {
+    title?: string
+    gap?: string
+    evidence?: string
+    domain?: string
+  }
   createdAt: string
   updatedAt?: string
   endedAt: string | null
@@ -209,6 +223,7 @@ export type ClearanceSession = {
     difficulty?: string
   }
   clearanceQuestion: string
+  researchQuestion?: string
   researchSummary?: string
   researchMode?: string
   sources?: SourceRecord[]
@@ -556,6 +571,7 @@ export type CognitiveLoopActivityInput = {
   title?: string
   occurredAt?: string
   source?: string
+  eventType?: string
   content: string
 }
 
@@ -584,6 +600,97 @@ export type CognitiveLoopProfile = {
   diagnosis: string
   diagnosisEn: string
   nextAction: string
+}
+
+export type DomainCapabilityDimension = {
+  score: number
+  level: string
+  stability: string
+  evidenceStatus?: 'observed' | 'missing_evidence' | string
+  evidence: Array<{ activityId?: string; attemptId?: string; occurredAt?: string; at?: string; excerpt?: string; source?: string; signal?: string }>
+  updatedAt?: string
+}
+
+export type DomainCapabilityProfile = {
+  userId?: string
+  domain: string
+  dimensions: Record<string, DomainCapabilityDimension>
+  overallMastery?: number
+  stage?: string
+  source?: string
+  sourceActivityIds?: string[]
+  createdAt?: string
+  updatedAt?: string
+  dataSchemaVersion?: string
+}
+
+export type KnowledgeDebt = {
+  id: string
+  kind: string
+  category?: 'domain_capability' | string
+  domain: string
+  title: string
+  status: string
+  priority: 'now' | 'next' | 'later' | string
+  score: number
+  confidence: string
+  why: string
+  evidence: Array<{ activityId?: string; occurredAt?: string; excerpt?: string; signal?: string }>
+  interventionType?: string
+  interventionPath?: string[]
+  nextAction: string
+  successCriteria: string[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type AIUsageDebt = {
+  id: string
+  kind: string
+  dimension: string
+  title: string
+  status: string
+  priority: 'now' | 'next' | 'later' | string
+  score: number
+  confidence: string
+  why: string
+  evidence: CognitiveLoopProfile['evidence']
+  nextAction: string
+  interventionType?: string
+  successCriteria: string[]
+  createdAt?: string
+  runId?: string
+}
+
+export type PriorityIntervention = {
+  id: string
+  sourceId: string
+  category: 'domain_capability' | 'ai_collaboration' | 'frontier_information' | string
+  interventionType: string
+  interventionPath: string[]
+  title: string
+  action: string
+  evidence: Array<Record<string, unknown>>
+  score: number
+  priority: string
+  reason: string
+  createdAt?: string
+}
+
+export type UserCognitiveProfile = {
+  schemaVersion: string
+  userId: string
+  goal: string
+  projectIds: string[]
+  domainCapabilityProfiles: DomainCapabilityProfile[]
+  aiCollaborationProfile: CognitiveLoopProfile[]
+  knowledgeDebts: KnowledgeDebt[]
+  aiUsageDebts: AIUsageDebt[]
+  priorityInterventions: PriorityIntervention[]
+  lastActivityEventIds: string[]
+  lastLoopRunId: string
+  createdAt: string
+  updatedAt: string
 }
 
 export type CognitiveLoopContentItem = CognitiveLoopContentCandidateInput & {
@@ -616,20 +723,11 @@ export type CognitiveLoopResult = {
   inputSummary: { activityCount: number; sourceTypes: string[]; contentCandidateCount: number; previousFeedbackCount: number }
   activities: Array<{ id: string; title: string; occurredAt: string; source: string; contentHash: string; excerpt: string }>
   aiCollaborationProfile: CognitiveLoopProfile[]
-  aiUsageDebts: Array<{
-    id: string
-    kind: string
-    dimension: string
-    title: string
-    status: string
-    priority: 'now' | 'next' | 'later'
-    score: number
-    confidence: string
-    why: string
-    evidence: CognitiveLoopProfile['evidence']
-    nextAction: string
-    successCriteria: string[]
-  }>
+  cognitiveProfile?: UserCognitiveProfile
+  domainCapabilityProfiles?: DomainCapabilityProfile[]
+  knowledgeDebts?: KnowledgeDebt[]
+  aiUsageDebts: AIUsageDebt[]
+  priorityInterventions?: PriorityIntervention[]
   briefing: {
     title: string
     attentionBudget: number

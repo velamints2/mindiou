@@ -2,10 +2,10 @@
   "passed": true,
   "failures": [],
   "checks": {
-    "bootLitPixels": 6814,
-    "bootLitRatio": 0.04107590663580247,
+    "bootLitPixels": 1046,
+    "bootLitRatio": 0.006305459104938272,
     "ignoredClickKeptFrame": true,
-    "upChangedFrame": true,
+    "upChangedFrame": false,
     "downReturnedFrame": true,
     "rapidDownAcceptedCount": 3,
     "rapidDownSettledOnLatestFrame": true,

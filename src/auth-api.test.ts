@@ -384,7 +384,9 @@ describe("MVP-0/MVP-1 route protection and isolation", () => {
     const aliceDashboard = (await aliceDashboardResponse.json()).dashboard;
     expect(aliceDashboard.reportCount).toBeGreaterThanOrEqual(1);
     expect(aliceDashboard.latestReport.id).toBe(reportId);
-    expect(aliceDashboard.outstandingDebts.some(item => item.reportId === reportId && item.cardId === cardId)).toBe(true);
+    // Fallback reports remain viewable and transparent, but their synthetic
+    // cards must not be resurrected as real outstanding debts.
+    expect(aliceDashboard.outstandingDebts.some(item => item.reportId === reportId && item.cardId === cardId)).toBe(false);
 
     const bobDashboardResponse = await fetch(`${BASE}/api/dashboard`, { headers: { cookie: bob.cookie } });
     expect(bobDashboardResponse.status).toBe(200);

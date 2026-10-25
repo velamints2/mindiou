@@ -20,6 +20,7 @@ export interface CognitiveLoopProfile {
 
 export interface CognitiveLoopResult {
   schemaVersion: string;
+  runId?: string;
   source: string;
   sourceLabel: string;
   generatedAt: string;
@@ -40,6 +41,7 @@ export interface CognitiveLoopResult {
     why: string;
     evidence: CognitiveLoopEvidence[];
     nextAction: string;
+    interventionType?: string;
     successCriteria: string[];
   }>;
   briefing: {
@@ -56,4 +58,5 @@ export interface CognitiveLoopResult {
 export declare const COGNITIVE_LOOP_SCHEMA_VERSION: string;
 export declare const AI_COLLABORATION_DIMENSIONS: string[];
 export declare function defaultContentCandidates(): Array<Record<string, any>>;
+export declare function normalizeActivityEvents(inputs?: unknown[], fallbackNow?: string): Array<Record<string, any>>;
 export declare function analyzeCognitiveLoop(input?: Record<string, any>): CognitiveLoopResult;

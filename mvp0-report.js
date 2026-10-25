@@ -136,6 +136,7 @@ const stepBSystemPrompt = [
   "dangerousGaps 规则：",
   "- 只产出 2-4 个【根能力缺口】。不得为了凑数把一个根问题拆成多个，也不得填充凑数缺口。",
   "- 每个缺口必须能解释至少 2 个表面信号（surfaceSignals）；解释不了 2 个就降低 confidence。",
+  "- diagnosticQuestion 只能使用该缺口的 observedSignals、材料原文和对应领域概念；禁止凭空加入老人、跌倒、支付、速度、加速度等新人物、场景、指标或应用。",
   "- 每个缺口必须：可迁移（transferScenarios 至少 1 个别的场景）、可验证（diagnosticQuestion）、有掌握标准（masteryCriteria）。",
   "- 缺口不是 Bug 列表，是用户尚未证明自己理解的根能力。已识别+已修复+已测试的问题转化为理解决策或验证债务。",
   "- 每个缺口给出 confidence（0-1）和 alternativeExplanations（缺口可能的其他解释）。",
@@ -172,6 +173,7 @@ const stepDSystemPrompt = [
   "",
   "feynmanCards 规则（3-5 张）：",
   "- 每张卡必须映射到一个根能力缺口（target 写缺口标题或 dangerousGap-N）。",
+  "- 返回 sourceGapId（对应 dangerousGaps 中的 sourceGapId）和 gapRank；不能只依赖卡片数组顺序。cognitiveDebtId 生成前留空即可。",
   "- 卡片测的是心智模型，不是术语记忆：让用户用文字描述系统关系/数据流、打类比、做场景预测、解释决策、比较方案、设计验证。不得要求画图、手绘、拍照、上传图片或附件。",
   "- 卡片必须匹配材料中有证据的用户背景和任务场景；不得预设写代码或不写代码，也不得要求与目标缺口无关的实现细节。",
   "- 用户标注过困惑的缺口优先配卡。",
@@ -185,7 +187,7 @@ const stepDSystemPrompt = [
   "- 研究摘要可用时，verify 类行动优先指向研究来源；研究不可用时不得编造来源。",
   "",
   "返回 JSON：",
-  '{"feynmanCards":[{"id":"card-1","target":"缺口标题或 dangerousGap-1","cardType":"system_map","prompt":"费曼式问题",',
+  '{"feynmanCards":[{"id":"card-1","sourceGapId":"gap-1","gapRank":1,"cognitiveDebtId":"","target":"缺口标题或 dangerousGap-1","cardType":"system_map","prompt":"费曼式问题",',
   '"targetLevel":"L2","difficulty":"foundation|intermediate|advanced","evaluationCriteria":["什么算答对"],',
   '"userAnswer":"","aiFollowUp":"","answeredAt":null}],',
   '"nextActions":[{"item":"","route":"verify|note|task|ask","reason":"","relatedCapability":""}]}',
@@ -438,7 +440,10 @@ export async function generateClearanceReport(artifactText, artifactType, chatFn
     currentStep = "cards";
     const stepD = validateStepD(await callStep(chatFn, stepDSystemPrompt, {
       outputLanguage,
-      dangerousGaps: stepB.dangerousGaps,
+      dangerousGaps: (Array.isArray(stepB.dangerousGaps) ? stepB.dangerousGaps : []).map((gap, index) => ({
+        ...gap,
+        sourceGapId: gap.sourceGapId || `gap-${Number(gap.rank) || index + 1}`
+      })),
       userCapability: stepA.userCapability || null,
       userConfusions: confusions,
       researchDigest: {

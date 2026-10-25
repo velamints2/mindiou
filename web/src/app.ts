@@ -17,6 +17,7 @@ import {
   renderTrainingDebtDetailPage,
   renderTrainingDebtListPage,
   renderTrainingPage
+  , renderEmailVerificationPage
 } from './pages'
 import { renderRepaymentDetailPage, renderRepaymentPage } from './repayment'
 import { renderProfilePage } from './profile'
@@ -29,6 +30,11 @@ import { renderAssessmentPage } from './assessment'
 import { renderChallengePage } from './challenge'
 import { renderAgentSessionPage, renderProjectListPage, renderProjectPage, renderWorkItemPage } from './projectMemory'
 import { renderCognitiveLoopPage, renderFluencyLoopPreviewPage } from './cognitiveLoop'
+import { renderDigestPage } from './digest'
+import { renderExp2Page } from './exp2'
+import { renderExp1Page } from './exp1'
+import { renderResearchPage } from './research'
+import { ENABLE_COGNITIVE_LOOP } from './featureFlags'
 
 const app = document.getElementById('app') as HTMLElement
 observeTranslations(app)
@@ -36,7 +42,7 @@ observeTranslations(app)
 function renderLanguageSwitch(route: Route): void {
   document.querySelector('.language-switch')?.remove()
   if (route.name === 'admin') return
-  const publicRoute = route.name === 'landing' || route.name === 'how-it-works' || route.name === 'genesis' || route.name === 'fluency-loop-preview'
+  const publicRoute = route.name === 'landing' || route.name === 'how-it-works' || route.name === 'genesis' || route.name === 'fluency-loop-preview' || (route.name === 'cognitive-loop' && !ENABLE_COGNITIVE_LOOP)
   const wrap = el('div', `language-switch${publicRoute ? ' language-switch-public' : ''}`)
   wrap.setAttribute('aria-label', 'Language')
   const zh = el('button', `language-switch-option ${getLocale() === 'zh-CN' ? 'is-active' : ''}`, '中文')
@@ -69,6 +75,11 @@ async function render(route: Route): Promise<void> {
     }
     return
   }
+  if (route.name === 'verify-email') {
+    renderEmailVerificationPage(app, route.token, route.status)
+    trackRoute('verify-email')
+    return
+  }
 
   // 公开路由：直接渲染，无需登录
   if (route.name === 'landing') {
@@ -96,7 +107,6 @@ async function render(route: Route): Promise<void> {
     trackRoute('challenge')
     return
   }
-
   // 注册页：公开路由，未登录可访问
   if (route.name === 'register') {
     renderRegisterPage(app)
@@ -104,6 +114,14 @@ async function render(route: Route): Promise<void> {
     return
   }
   if (route.name === 'fluency-loop-preview') {
+    renderFluencyLoopPreviewPage(app)
+    trackRoute('fluency-loop-preview')
+    return
+  }
+  // Keep the old functional URL safe for bookmarks while the feature is in
+  // internal testing. Production builds show the public preview instead of
+  // exposing a runner that writes Loop activity.
+  if (route.name === 'cognitive-loop' && !ENABLE_COGNITIVE_LOOP) {
     renderFluencyLoopPreviewPage(app)
     trackRoute('fluency-loop-preview')
     return
@@ -121,6 +139,10 @@ async function render(route: Route): Promise<void> {
     } else {
       navigate({ name: 'login' })
     }
+    return
+  }
+  if (!hasServerSession.emailVerified) {
+    navigate({ name: 'verify-email' })
     return
   }
   setAccessToken('server-session')
@@ -187,6 +209,22 @@ async function render(route: Route): Promise<void> {
     case 'cognitive-loop':
       await renderCognitiveLoopPage(app)
       trackRoute('cognitive-loop')
+      return
+    case 'digest':
+      await renderDigestPage(app)
+      trackRoute('digest')
+      return
+    case 'exp2':
+      await renderExp2Page(app)
+      trackRoute('exp2')
+      return
+    case 'exp1':
+      await renderExp1Page(app)
+      trackRoute('exp1')
+      return
+    case 'research':
+      await renderResearchPage(app)
+      trackRoute('research')
       return
     case 'projects':
       await renderProjectListPage(app)

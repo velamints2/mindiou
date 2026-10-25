@@ -24,10 +24,10 @@
 
 | 变量 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `AI_PROVIDER` | 否 | `openai` | 生产当前 `deepseek` |
+| `AI_PROVIDER` | 否 | `openai` | 生产当前 `302ai` |
 | `AI_API_KEY` | 生产必填[秘密] | 空 | 缺失→内置 fallback；MVP-1 会话创建被拒（除非演示降级）。验证：长度 <16 警告 |
 | `AI_BASE_URL` | 否 | `https://api.openai.com` | 验证：合法 http(s) URL |
-| `AI_MODEL` | 否 | `gpt-4o-mini` | 生产当前 `deepseek-v4-flash` |
+| `AI_MODEL` | 否 | `gpt-4o-mini` | 生产当前 `gpt-5.6-sol`（经 302.AI） |
 | `OPENAI_CHAT_TIMEOUT_MS` | 否 | `30000` | 验证：正数 |
 
 ### 联网检索模型（research）

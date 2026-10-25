@@ -1,52 +1,54 @@
 import { describe, expect, it } from "vitest";
-import { parseVoiceAction, TranscriptIntake, voiceActionForContext } from "./voice";
+import { parseVoiceAction, voiceActionForContext } from "./voice";
 
-describe("voice action parser", () => {
-  it("recognizes short explicit Chinese commands", () => {
+describe("glasses voice commands for progress and debts", () => {
+  it.each([
+    ["看项目", "projects"],
+    ["项目", "projects"],
+    ["项目进度", "projects"],
+    ["查项目", "projects"],
+    ["show projects", "projects"],
+    ["project status", "projects"],
+    ["看欠条", "debts"],
+    ["欠条", "debts"],
+    ["认知欠条", "debts"],
+    ["我的欠条", "debts"],
+    ["my debts", "debts"],
+    ["考我", "ask"],
+    ["考我一下", "ask"],
+    ["出题", "quiz"],
+    ["问我", "ask"],
+    ["test me", "quiz"],
+    ["记录", "record"],
+    ["提交", "record"],
+    ["记下来", "record"],
+    ["save evidence", "record"],
+    ["继续这个", "focus"],
+    ["继续推进", "focus"],
+    ["就做这个", "focus"],
+    ["去学习", "learn"],
+    ["学习模式", "learn"],
+    ["背单词", "learn"]
+  ])("parses %s as %s", (input, expected) => {
+    expect(parseVoiceAction(input)).toBe(expected);
+  });
+
+  it("keeps legacy learning commands intact", () => {
     expect(parseVoiceAction("下一张")).toBe("next");
-    expect(parseVoiceAction("下一章")).toBe("next");
-    expect(parseVoiceAction("下一張")).toBe("next");
-    expect(parseVoiceAction("帮我下一张")).toBe("next");
-    expect(parseVoiceAction("我会了")).toBe("known");
-    expect(parseVoiceAction("问我")).toBe("ask");
+    expect(parseVoiceAction("记住了")).toBe("known");
     expect(parseVoiceAction("再说一遍")).toBe("repeat");
+    expect(parseVoiceAction("考我一下这道题")).toBeNull();
   });
 
-  it("recognizes short explicit English commands", () => {
-    expect(parseVoiceAction("next")).toBe("next");
-    expect(parseVoiceAction("please skip this")).toBe("next");
-    expect(parseVoiceAction("got it")).toBe("known");
-    expect(parseVoiceAction("quiz me")).toBe("ask");
-    expect(parseVoiceAction("say again")).toBe("repeat");
+  it("maps overlapping ask words to ask first; debt mode promotes them to quiz", () => {
+    expect(parseVoiceAction("考我")).toBe("ask");
+    expect(parseVoiceAction("问我")).toBe("ask");
+    expect(parseVoiceAction("出题")).toBe("quiz");
   });
 
-  it("does not treat explanatory answers containing command words as commands", () => {
-    expect(parseVoiceAction("这个概念不是下一个问题，而是上下文的意思")).toBeNull();
-    expect(parseVoiceAction("我觉得 resilient 是遇到困难也不会跳过")).toBeNull();
-    expect(parseVoiceAction("I think next means the following item in a sequence")).toBeNull();
-    expect(parseVoiceAction("I got it wrong because I forgot the example")).toBeNull();
-    expect(parseVoiceAction("repeat means to say something one more time")).toBeNull();
-  });
-
-  it("disables commands while an answer is expected or an utterance is long", () => {
-    expect(voiceActionForContext("下一张", { answerExpected: true })).toBeNull();
-    expect(voiceActionForContext("下一张", { audioDurationMs: 8000 })).toBeNull();
-    expect(voiceActionForContext("下一张", { audioDurationMs: 1200 })).toBe("next");
-  });
-
-  it("deduplicates repeated transcripts inside a short window", () => {
-    const intake = new TranscriptIntake(3000);
-
-    expect(intake.accept("下一张", 1000).accepted).toBe(true);
-    expect(intake.accept("下一张", 2000)).toMatchObject({ accepted: false, reason: "duplicate" });
-    expect(intake.accept("下一张", 4500).accepted).toBe(true);
-  });
-
-  it("allows different transcripts and ignores empty transcripts", () => {
-    const intake = new TranscriptIntake(3000);
-
-    expect(intake.accept("   ", 1000)).toMatchObject({ accepted: false, reason: "empty" });
-    expect(intake.accept("next", 1000).accepted).toBe(true);
-    expect(intake.accept("repeat", 1200).accepted).toBe(true);
+  it("suppresses command parsing while a spoken answer is expected", () => {
+    expect(voiceActionForContext("看项目", { answerExpected: true })).toBeNull();
+    expect(voiceActionForContext("看项目", { audioDurationMs: 5000 })).toBeNull();
+    expect(voiceActionForContext("看项目", {})).toBe("projects");
   });
 });

@@ -28,7 +28,9 @@ import {
   login,
   logoutAuth,
   projectMemoryRequest,
+  resendVerificationEmail,
   register,
+  verifyEmail,
   createProjectHookToken,
   revokeProjectHookToken,
   revokeDeviceToken,
@@ -116,6 +118,87 @@ function spinnerOverlay(label: string): HTMLElement {
   box.appendChild(el('div', 'spinner'))
   box.appendChild(el('p', 'spinner-label', label))
   return box
+}
+
+type ReportGenerationProgress = {
+  node: HTMLElement
+  setStage: (index: number) => void
+  markFailed: (message: string) => void
+}
+
+const REPORT_GENERATION_STAGES = [
+  ['Step A：归因与能力校准', 'Step A: Attribution and capability calibration'],
+  ['Step B：根能力缺口分析', 'Step B: Root capability gap analysis'],
+  ['最多 3 次外部资料检索，当前是串行执行', 'Up to 3 external research queries, currently run sequentially'],
+  ['Step D：生成认知欠条、训练卡片和下一步行动', 'Step D: Generating cognitive debts, training cards, and next actions'],
+  ['保存报告、能力领域、欠条和清偿记录', 'Saving the report, capability domain, debts, and repayment records']
+] as const
+
+/**
+ * Report generation is currently one HTTP request. These are honest UX
+ * milestones around that request: the final stage is only shown after the
+ * server returns a report, while earlier stages make the long request
+ * inspectable instead of looking frozen.
+ */
+function reportGenerationProgress(): ReportGenerationProgress {
+  const overlay = el('div', 'spinner-overlay report-progress-overlay')
+  overlay.setAttribute('role', 'dialog')
+  overlay.setAttribute('aria-modal', 'true')
+  overlay.setAttribute('aria-live', 'polite')
+  overlay.setAttribute('aria-busy', 'true')
+
+  const card = el('section', 'report-progress-card')
+  const spinner = el('div', 'spinner')
+  spinner.setAttribute('aria-hidden', 'true')
+  card.appendChild(spinner)
+  card.appendChild(el('p', 'report-progress-kicker', t('报告生成中', 'Report generation')))
+  const title = el('h2', 'report-progress-title', REPORT_GENERATION_STAGES[0][isEnglish() ? 1 : 0])
+  card.appendChild(title)
+  card.appendChild(el('p', 'report-progress-note', t(
+    '系统会在报告真正返回后进入最后阶段，请保持页面打开。',
+    'The final stage appears only after the report is returned. Keep this page open.'
+  )))
+
+  const list = el('ol', 'report-progress-list')
+  const items = REPORT_GENERATION_STAGES.map((stage, index) => {
+    const item = el('li', `report-progress-step ${index === 0 ? 'is-active' : ''}`)
+    item.dataset.stage = String(index)
+    const marker = el('span', 'report-progress-marker', index === 0 ? '·' : String(index + 1))
+    marker.setAttribute('aria-hidden', 'true')
+    item.appendChild(marker)
+    item.appendChild(el('span', 'report-progress-label', stage[isEnglish() ? 1 : 0]))
+    list.appendChild(item)
+    return item
+  })
+  card.appendChild(list)
+
+  const status = el('p', 'report-progress-status')
+  status.textContent = t('正在处理，请稍候…', 'Processing, please wait…')
+  card.appendChild(status)
+  overlay.appendChild(card)
+
+  const setStage = (index: number) => {
+    const currentStage = Math.max(0, Math.min(REPORT_GENERATION_STAGES.length - 1, index))
+    items.forEach((item, itemIndex) => {
+      item.classList.toggle('is-done', itemIndex < currentStage)
+      item.classList.toggle('is-active', itemIndex === currentStage)
+      item.classList.toggle('is-pending', itemIndex > currentStage)
+      const marker = item.querySelector('.report-progress-marker')
+      if (marker) marker.textContent = itemIndex < currentStage ? '✓' : itemIndex === currentStage ? '·' : String(itemIndex + 1)
+    })
+    title.textContent = REPORT_GENERATION_STAGES[currentStage][isEnglish() ? 1 : 0]
+    status.textContent = currentStage === REPORT_GENERATION_STAGES.length - 1
+      ? t('分析已返回，正在打开报告…', 'Analysis returned. Opening your report…')
+      : t('正在处理，请稍候…', 'Processing, please wait…')
+  }
+
+  const markFailed = (message: string) => {
+    overlay.setAttribute('aria-busy', 'false')
+    overlay.classList.add('is-failed')
+    status.textContent = message || t('生成失败，请重试。', 'Generation failed. Please try again.')
+  }
+
+  return { node: overlay, setStage, markFailed }
 }
 
 type ProjectMemoryProject = { id: string; name: string; status?: string }
@@ -296,6 +379,10 @@ export function renderLoginPage(root: HTMLElement): void {
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         status.textContent = '邮箱或密码不正确'
+      } else if (err instanceof ApiError && err.status === 403) {
+        sessionStorage.setItem('mindiou_pending_verification_email', email)
+        status.textContent = '请先验证邮箱，我们已为你保留验证入口。'
+        navigate({ name: 'verify-email' })
       } else {
         status.textContent = err instanceof Error ? err.message : '登录失败，请稍后重试'
       }
@@ -312,6 +399,29 @@ export function renderLoginPage(root: HTMLElement): void {
   card.appendChild(footer)
 
   page.appendChild(card)
+  root.appendChild(page)
+}
+
+export function renderEmailVerificationPage(root: HTMLElement, token?: string, status?: string): void {
+  const page = el('div', 'page page-verify-email')
+  page.appendChild(el('h1', 'brand-title', status === 'success' ? '邮箱验证成功' : '请验证你的邮箱'))
+  page.appendChild(el('p', 'brand-subtitle', status === 'success' ? '现在可以登录并进入工作区。' : '我们已向你的注册邮箱发送验证链接。'))
+  const message = el('p', 'login-status')
+  page.appendChild(message)
+  if (status === 'success') {
+    const button = el('button', 'btn btn-primary', '返回登录') as HTMLButtonElement
+    button.onclick = () => navigate({ name: 'login' })
+    page.appendChild(button)
+  } else if (status === 'failed') {
+    message.textContent = '验证链接无效或已过期，请重新登录后重发。'
+  } else if (token) {
+    message.textContent = '正在验证…'
+    void verifyEmail(token).then(() => { location.hash = '/verify-email?status=success' }).catch(() => { location.hash = '/verify-email?status=failed' })
+  } else {
+    const resend = el('button', 'btn btn-secondary', '重新发送验证邮件') as HTMLButtonElement
+    resend.onclick = async () => { resend.disabled = true; try { await resendVerificationEmail(sessionStorage.getItem('mindiou_pending_verification_email') || undefined); message.textContent = '验证邮件已重新发送。' } catch { message.textContent = '发送失败，请稍后重试。' } finally { resend.disabled = false } }
+    page.appendChild(resend)
+  }
   root.appendChild(page)
 }
 
@@ -392,7 +502,7 @@ export function renderRegisterPage(root: HTMLElement): void {
     try {
       await register(email, password, name || undefined)
       status.textContent = ''
-      navigate({ name: 'app' })
+      navigate({ name: 'verify-email' })
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         status.textContent = '该邮箱已注册'
@@ -783,21 +893,35 @@ export async function renderTimelinePage(root: HTMLElement, draftId: string): Pr
   submit.onclick = async () => {
     submit.disabled = true
     status.textContent = ''
-    const overlay = spinnerOverlay('正在基于你的困惑生成报告，通常需要 30-60 秒…')
-    page.appendChild(overlay)
+    const progress = reportGenerationProgress()
+    page.appendChild(progress.node)
+    progress.setStage(0)
+    let waitingTimer: number | undefined
     try {
       const confusions: Confusion[] = Object.entries(confusionMap)
         .filter(([, text]) => text.trim().length > 0)
         .map(([stepId, text]) => ({ stepId, text: text.trim() }))
       await saveDraftConfusions(draftId, confusions)
-      const res = await generateReport({ draftId })
+      progress.setStage(1)
+      // The API currently returns one completed report rather than server-side
+      // progress events. Move through analysis stages while that request is
+      // pending, and reserve “报告即将完成” for the actual response.
+      progress.setStage(2)
+      waitingTimer = window.setTimeout(() => progress.setStage(3), 2200)
+      const projectId = recallProjectMemoryProjectId() || undefined
+      const res = await generateReport({ draftId, projectId })
+      if (waitingTimer !== undefined) window.clearTimeout(waitingTimer)
+      progress.setStage(4)
+      await new Promise(resolve => window.setTimeout(resolve, 260))
       rememberReportId(res.report.id)
       navigate({ name: 'report', reportId: res.report.id })
     } catch (err) {
-      status.textContent = err instanceof Error ? err.message : '生成失败，请重试'
+      if (waitingTimer !== undefined) window.clearTimeout(waitingTimer)
+      const message = err instanceof Error ? err.message : '生成失败，请重试'
+      progress.markFailed(message)
+      status.textContent = message
       submit.disabled = false
-    } finally {
-      overlay.remove()
+      window.setTimeout(() => progress.node.remove(), 900)
     }
   }
   actions.appendChild(submit)
@@ -852,6 +976,10 @@ export async function renderReportPage(root: HTMLElement, reportId: string): Pro
 
   page.appendChild(renderProjectMemoryAttach(reportId))
 
+  // 明确区分“被分析的原始材料”和“系统生成的清偿训练”。原始材料只在
+  // 用户主动展开时显示，避免把上传的 AI 对话误认成 MindIOU 的提问。
+  page.appendChild(renderSourceMaterial(report))
+
   // 第 1 部分：AI 完成了什么
   page.appendChild(renderSection('一、AI 完成了什么', 'ai-completed',
     report.sections.aiCompleted.map(item => evidenceItem(item.item, item.evidence))))
@@ -862,7 +990,7 @@ export async function renderReportPage(root: HTMLElement, reportId: string): Pro
 
   // 第 3 部分：危险的理解缺口
   page.appendChild(renderSection('三、最危险的理解缺口', 'dangerous-gaps',
-    report.sections.dangerousGaps.map(g => gapCard(g.rank, g.gap, g.whyDangerous, g.evidence))))
+    report.sections.dangerousGaps.map(g => gapCard(g.rank, g.gap, g.whyDangerous, g.evidence, g.cognitiveDebtId))))
 
   // 第 4 部分：认知结构
   const struct = report.sections.cognitiveStructure
@@ -940,13 +1068,28 @@ function evidenceItem(item: string, evidence: string): HTMLElement {
   return node
 }
 
-function gapCard(rank: number, gap: string, why: string, evidence: string): HTMLElement {
+function gapCard(rank: number, gap: string, why: string, evidence: string, cognitiveDebtId?: string): HTMLElement {
   const node = el('div', 'gap-card')
   node.appendChild(el('span', 'gap-rank', String(rank)))
   node.appendChild(el('h3', 'gap-title', gap))
+  if (cognitiveDebtId) node.appendChild(el('span', 'gap-debt-binding', `认知欠条：${cognitiveDebtId}`))
   node.appendChild(el('p', 'gap-why', why))
   if (evidence) node.appendChild(el('p', 'gap-evidence', evidence))
   return node
+}
+
+function renderSourceMaterial(report: ClearanceReport): HTMLElement {
+  const section = el('section', 'section source-material-section')
+  section.appendChild(el('h2', 'section-heading', '本报告分析的原始材料'))
+  section.appendChild(el('p', 'section-desc', '下面是你提交给 MindIOU 的 AI 对话材料，不是清偿阶段生成的问题。'))
+  const details = document.createElement('details')
+  details.className = 'source-material-details'
+  const summary = document.createElement('summary')
+  summary.textContent = `${report.input?.artifactType || 'AI 协作材料'} · 展开查看原文`
+  details.appendChild(summary)
+  details.appendChild(el('pre', 'source-material-text', report.input?.artifactText || '未保存原始材料'))
+  section.appendChild(details)
+  return section
 }
 
 function actionItem(item: string, route: string, reason: string): HTMLElement {
@@ -963,6 +1106,11 @@ function actionItem(item: string, route: string, reason: string): HTMLElement {
 function renderCard(reportId: string, card: FeynmanCard): HTMLElement {
   const node = el('div', 'feynman-card')
   if (card.difficulty) node.appendChild(el('span', `card-difficulty difficulty-${card.difficulty}`, card.difficulty))
+  if (card.cognitiveDebtId) {
+    node.appendChild(el('span', 'card-debt-binding', `对应认知欠条：${card.cognitiveDebtId}`))
+  } else if (card.gapRank) {
+    node.appendChild(el('span', 'card-debt-binding', `对应缺口：#${card.gapRank}`))
+  }
   if (card.target) node.appendChild(el('p', 'card-target', card.target))
   node.appendChild(el('p', 'card-prompt', card.prompt))
   if (card.answeredAt) node.appendChild(el('span', 'card-badge card-answered', '已尝试'))
@@ -1047,8 +1195,11 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
 
   // 清偿问题
   const questionBox = el('section', 'session-question')
-  questionBox.appendChild(el('p', 'session-question-label', '清偿问题'))
+  questionBox.appendChild(el('p', 'session-question-label', 'MindIOU 生成的清偿问题'))
   questionBox.appendChild(el('h2', 'session-question-text', session.clearanceQuestion))
+  if (session.cognitiveDebtId) {
+    questionBox.appendChild(el('p', 'session-debt-binding', `对应认知欠条：${session.cognitiveDebtId}`))
+  }
   page.appendChild(questionBox)
 
   // 来源（如果有）
@@ -1075,7 +1226,7 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
   const history = el('section', 'session-history')
   history.appendChild(el('h3', 'history-heading', '对话记录'))
   for (const attempt of session.attempts) {
-    history.appendChild(renderAttempt(attempt.answer, attempt.analysis.feedback, attempt.analysis.teaching, attempt.analysis.nextQuestion))
+    history.appendChild(renderAttempt(attempt.question || session.originalCard.prompt, attempt.answer, attempt.analysis.feedback, attempt.analysis.teaching, attempt.analysis.nextQuestion))
   }
   page.appendChild(history)
 
@@ -1245,8 +1396,10 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
   page.appendChild(renderSiteFooter())
 }
 
-function renderAttempt(answer: string, feedback: string, teaching?: string, nextQuestion?: string): HTMLElement {
+function renderAttempt(question: string, answer: string, feedback: string, teaching?: string, nextQuestion?: string): HTMLElement {
   const node = el('div', 'attempt')
+  node.appendChild(el('p', 'attempt-label', '本轮问题'))
+  node.appendChild(el('p', 'attempt-question', question))
   node.appendChild(el('p', 'attempt-label', '你的解释'))
   node.appendChild(el('p', 'attempt-answer', answer))
   node.appendChild(el('p', 'attempt-label', 'AI 反馈'))

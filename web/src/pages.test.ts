@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { ApiError, createSession, fetchDashboard, fetchReport, fetchSession, fetchTodayTraining } from "./api";
-import { renderAppPage, renderDevicesPage, renderGenesisPage, renderReportPage, renderSessionPage, renderTrainingPage } from "./pages";
-import { el } from "./router";
+import { ApiError, createSession, fetchDashboard, fetchDraft, fetchReport, fetchSession, fetchTodayTraining, generateReport, saveDraftConfusions } from "./api";
+import { renderAppPage, renderDevicesPage, renderGenesisPage, renderReportPage, renderSessionPage, renderTimelinePage, renderTrainingPage } from "./pages";
+import { el, navigate } from "./router";
 import { setLocale, translateText } from "./i18n";
 
 // Mock API module to avoid network calls
@@ -14,6 +14,9 @@ vi.mock("./api", () => ({
     }
   },
   generateTimeline: vi.fn().mockResolvedValue({ draft: { id: "d-1" } }),
+  fetchDraft: vi.fn(),
+  saveDraftConfusions: vi.fn().mockResolvedValue({ ok: true }),
+  generateReport: vi.fn(),
   checkHealth: vi.fn().mockResolvedValue({ ok: true }),
   createSession: vi.fn(),
   createDeviceToken: vi.fn().mockResolvedValue({ id: "device-1", name: "眼镜", createdAt: "2026-08-01T00:00:00.000Z", lastUsedAt: null, token: "device-token" }),
@@ -198,6 +201,37 @@ describe("renderAppPage", () => {
     expect(root.textContent).toContain("解释重试策略的取舍");
     expect(root.textContent).toContain("继续清偿");
     expect(root.textContent).toContain("Explain the retry strategy");
+  });
+
+  it("shows five visible report-generation stages while the report request is pending", async () => {
+    vi.mocked(fetchDraft).mockResolvedValueOnce({
+      ok: true,
+      draft: {
+        id: "d-1",
+        generation: { fallback: false },
+        timeline: { steps: [{ id: "step-1", title: "确定边界", aiDid: "AI 拆解了任务范围", keyActions: [], keyConcepts: [], userConfusion: "" }] }
+      }
+    } as never);
+
+    let resolveReport!: (value: unknown) => void;
+    vi.mocked(generateReport).mockReturnValueOnce(new Promise(resolve => { resolveReport = resolve; }) as never);
+
+    await renderTimelinePage(root, "d-1");
+    const submit = [...root.querySelectorAll("button")].find(button => button.textContent?.includes("生成认知债务报告")) as HTMLButtonElement;
+    submit.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const progress = root.querySelector(".report-progress-overlay");
+    expect(progress).not.toBeNull();
+    expect(progress?.querySelectorAll(".report-progress-step")).toHaveLength(5);
+    expect(progress?.textContent).toContain("Step B：根能力缺口分析");
+    expect(progress?.querySelector(".report-progress-step.is-active")?.textContent).toContain("最多 3 次外部资料检索");
+
+    resolveReport({ report: { id: "report-1" } });
+    await new Promise(resolve => window.setTimeout(resolve, 320));
+    expect(navigate).toHaveBeenCalledWith({ name: "report", reportId: "report-1" });
+    expect(vi.mocked(saveDraftConfusions)).toHaveBeenCalledWith("d-1", []);
   });
 });
 

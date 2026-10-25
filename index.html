@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Learn Coach</title>
+    <title>MindIOU</title>
   </head>
   <body>
     <main id="app">
@@ -11,18 +11,30 @@
         <header class="topbar">
           <div>
             <p class="eyebrow">LEARN COACH</p>
-            <h1 class="product-title">Spiral</h1>
+            <h1 class="product-title">MindIOU</h1>
           </div>
           <span id="status-pill" class="pill">phone</span>
         </header>
 
-        <nav class="tabs" aria-label="Learn Coach sections">
+        <nav class="tabs" aria-label="MindIOU sections">
           <button class="tab is-active" type="button" data-tab="today">Today</button>
+          <button class="tab" type="button" data-tab="projects">Projects</button>
+          <button class="tab" type="button" data-tab="english-loop">英语 Loop</button>
           <button class="tab" type="button" data-tab="capture">Capture</button>
           <button class="tab" type="button" data-tab="debts">Knowledge</button>
           <button class="tab" type="button" data-tab="review">Review</button>
           <button class="tab" type="button" data-tab="settings">Settings</button>
         </nav>
+
+        <section class="tab-panel" data-panel="projects">
+          <p id="progress-focus-current" class="result-notice">尚未设定推进焦点</p>
+          <div id="progress-list" aria-label="Project progress"></div>
+          <div class="capture-row">
+            <input id="progress-focus-input" type="text" placeholder="想继续推进的内容，留空则用选中项目" />
+            <button id="progress-focus-submit" class="primary" type="button">设定推进</button>
+          </div>
+          <p class="hint">眼镜端：说「看项目」进入，「继续这个」提交焦点，上/下滑切换项目，「去学习」返回。</p>
+        </section>
 
         <section class="tab-panel" data-panel="today">
           <p id="study-notice" class="result-notice" hidden></p>
@@ -68,6 +80,64 @@
           </label>
           <button id="submit-answer" class="primary-action" type="button">提交回答</button>
           <button id="sync-today" class="quiet-action" type="button">同步今日队列</button>
+        </section>
+
+        <section class="tab-panel" data-panel="english-loop" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">PERSONAL LEARNING LOOP</p>
+              <h2>英语口语 Speaking Profile</h2>
+            </div>
+          </div>
+          <p class="loop-intro">每天和 AI 用英语聊 10–20 分钟。Loop 先记录真实证据，再判断变化；没有足够证据时，它会继续观察，而不是给你泛化建议。</p>
+          <label>这段时间最重要的真实目标是什么？
+            <input id="english-loop-goal" autocomplete="off" spellcheck="false" placeholder="例如：9 月会议能独立介绍产品并完成问答" />
+          </label>
+          <label>今天想聊什么？
+            <input id="english-loop-topic" autocomplete="off" spellcheck="false" />
+          </label>
+          <div class="inline-controls english-loop-actions">
+            <button id="english-loop-toggle" type="button">开启英语 Loop</button>
+            <button id="english-loop-start-voice" class="primary-action" type="button">开始本次口语</button>
+          </div>
+          <p id="english-loop-status" class="status-line">先开启英语 Loop，再用 G2 麦克风进行 10–20 分钟真实对话。</p>
+          <p id="english-loop-sync-status" class="quiet-note">本设备本地保存 · 正在连接内部 Loop</p>
+          <div class="english-loop-session-summary">
+            <span class="section-kicker">上一次会话总结</span>
+            <p id="english-loop-session-summary">结束一次真实对话后，这里会留下本次观察和下一步建议。</p>
+          </div>
+
+          <div class="english-loop-card">
+            <p class="section-kicker">AI 对话</p>
+            <p id="english-loop-reply" class="english-loop-reply">本次对话的 AI 回应会显示在这里。</p>
+            <p id="english-loop-feedback" class="english-loop-feedback">Loop 不会把你变成考试分数，只会根据真实表达调整下一步练习。</p>
+            <div class="english-loop-next">
+              <span>下一步</span>
+              <p id="english-loop-next">先开始一次真实对话。</p>
+            </div>
+            <div class="english-loop-decision">
+              <span>本轮判断</span>
+              <p id="english-loop-decision">继续观察，不提前下结论。</p>
+            </div>
+            <div class="english-loop-intervention">
+              <span class="section-kicker">干预验证</span>
+              <div id="english-loop-intervention">
+                <p class="empty-state">目前没有待验证干预。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="english-loop-columns">
+            <div>
+              <p class="section-kicker">Speaking Profile · 当前信号</p>
+              <div id="english-loop-profile" class="english-loop-profile"></div>
+            </div>
+            <div>
+              <p class="section-kicker">待掌握表达</p>
+              <div id="english-loop-expression-debts" class="english-loop-expression-debts"></div>
+            </div>
+          </div>
+          <p class="quiet-note">这不是 IELTS 分数，也不是一次测试。它是从你的长期真实对话里逐步形成的个人学习模型。</p>
         </section>
 
         <section class="tab-panel" data-panel="capture" hidden>
@@ -131,6 +201,7 @@
               <h2>Source-linked knowledge</h2>
             </div>
           </div>
+          <div id="debt-g2-list" aria-label="Cognitive debts for glasses"></div>
           <div id="debt-list" class="debt-list">
             <p class="empty-state">No knowledge atoms yet.</p>
           </div>

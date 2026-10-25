@@ -13,7 +13,15 @@ function renderPublicHeader(parent: HTMLElement, active: 'landing' | 'how-it-wor
   const header = el('header', 'site-header')
   const brand = el('a', 'site-brand', 'MindIOU')
   ;(brand as HTMLAnchorElement).href = '#'
-  header.appendChild(brand)
+  const brandGroup = el('div', 'site-header-brand-group')
+  brandGroup.appendChild(brand)
+  if (active === 'landing') {
+    const fluencyEntry = el('a', 'site-fluency-entry', t('AI 协作循环预告', 'Fluency Loop preview')) as HTMLAnchorElement
+    fluencyEntry.href = '#/fluency-loop-preview'
+    fluencyEntry.setAttribute('aria-label', t('查看 AI 协作循环功能预告', 'View the Fluency Loop feature preview'))
+    brandGroup.appendChild(fluencyEntry)
+  }
+  header.appendChild(brandGroup)
 
   const nav = el('nav', 'site-nav')
   const navHome = el('a', `site-nav-link ${active === 'landing' ? 'is-active' : ''}`, '首页')

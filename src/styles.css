@@ -72,7 +72,7 @@ select {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   border-bottom: 1px solid #28584e;
 }
 
@@ -426,6 +426,176 @@ select {
   color: #78a79c;
 }
 
+.loop-intro {
+  margin: 14px 0 18px;
+  color: #c5e2da;
+  line-height: 1.55;
+}
+
+.english-loop-actions {
+  grid-template-columns: 1fr 1fr;
+}
+
+.english-loop-card {
+  margin-top: 22px;
+  padding: 16px;
+  border: 1px solid #34796a;
+  background: linear-gradient(135deg, #102b24, #0a1a16);
+}
+
+.english-loop-session-summary {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid #28584e;
+  background: rgba(16, 43, 36, 0.55);
+}
+
+.english-loop-session-summary .section-kicker {
+  color: #72c4b0;
+}
+
+.english-loop-session-summary p {
+  margin: 7px 0 0;
+  color: #c5e2da;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.english-loop-reply {
+  margin: 8px 0 0;
+  color: #f0fff9;
+  font-size: 20px;
+  line-height: 1.4;
+}
+
+.english-loop-feedback {
+  margin: 12px 0 0;
+  color: #a9d8cc;
+  line-height: 1.45;
+}
+
+.english-loop-next {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #2b594e;
+}
+
+.english-loop-next span {
+  color: #72c4b0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.english-loop-next p {
+  margin: 6px 0 0;
+  color: #ffffff;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.english-loop-decision {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed #2b594e;
+}
+
+.english-loop-decision span {
+  color: #e7be63;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.english-loop-decision p {
+  margin: 6px 0 0;
+  color: #d5eee7;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.english-loop-intervention {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed #2b594e;
+}
+
+.english-loop-intervention > span {
+  color: #e7be63;
+}
+
+.english-loop-intervention p {
+  margin: 7px 0 0;
+  color: #c5e2da;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.intervention-actions {
+  grid-template-columns: 1fr 1fr;
+  margin-top: 10px;
+}
+
+.english-loop-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.english-loop-profile,
+.english-loop-expression-debts {
+  margin-top: 10px;
+  border-top: 1px solid #28584e;
+}
+
+.english-profile-row,
+.english-debt-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid #20483f;
+  color: #b9d9d0;
+  font-size: 13px;
+}
+
+.english-profile-row strong {
+  color: #75ddbf;
+  font-size: 16px;
+}
+
+.english-debt-item {
+  display: block;
+}
+
+.english-debt-item strong,
+.english-debt-item span {
+  display: block;
+}
+
+.english-debt-item strong {
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.english-debt-item span {
+  margin-top: 4px;
+  color: #8fbdb2;
+  font-size: 12px;
+}
+
+.quiet-note {
+  margin: 22px 0 0;
+  color: #729f94;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 @media (max-width: 560px) {
   #app {
     padding: 0;
@@ -469,6 +639,11 @@ select {
   }
 
   .inline-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .english-loop-actions,
+  .english-loop-columns {
     grid-template-columns: 1fr;
   }
 
@@ -671,4 +846,35 @@ select {
   .desktop-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Projects progress panel */
+.progress-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.progress-row.is-selected {
+  border-color: #7ce38b;
+  background: rgba(124, 227, 139, 0.12);
+}
+.progress-row strong {
+  display: block;
+  font-size: 15px;
+}
+.progress-row small {
+  display: block;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+.progress-row p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  opacity: 0.85;
 }

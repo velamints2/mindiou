@@ -360,6 +360,30 @@ describe("generateClearanceReport (multi-step pipeline)", () => {
       // Invalid route is normalized
       expect(report.sections.nextActions[0].route).toBe("task");
     });
+
+    it("binds each card to its source gap instead of relying on card order", async () => {
+      const stepB = {
+        ...STEP_B,
+        dangerousGaps: [
+          { ...STEP_B.dangerousGaps[0], rank: 1, sourceGapId: "gap-1" },
+          { ...STEP_B.dangerousGaps[1], rank: 2, sourceGapId: "gap-2" }
+        ]
+      };
+      const stepD = {
+        feynmanCards: [
+          { ...STEP_D.feynmanCards[1], id: "card-for-gap-2", sourceGapId: "gap-2", gapRank: 2 },
+          { ...STEP_D.feynmanCards[0], id: "card-for-gap-1", sourceGapId: "gap-1", gapRank: 1 },
+          { ...STEP_D.feynmanCards[2], id: "card-for-gap-1b", sourceGapId: "gap-1", gapRank: 1 }
+        ],
+        nextActions: []
+      };
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline({ stepB, stepD }));
+      expect(report.sections.feynmanCards[0].sourceGapId).toBe("gap-2");
+      expect(report.sections.feynmanCards[0].gapRank).toBe(2);
+      expect(report.sections.feynmanCards[1].sourceGapId).toBe("gap-1");
+      expect(report.sections.dangerousGaps[0].sourceGapId).toBe("gap-1");
+      expect(report.sections.dangerousGaps[0].evidence).toBeTruthy();
+    });
   });
 
   describe("bounded research (step C)", () => {

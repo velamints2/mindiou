@@ -1,0 +1,171 @@
+{
+ "generated_at": "2026-10-13T00:27:22.658Z",
+ "n": 15,
+ "summary": {
+  "no_anchor_terms": 11,
+  "exposure_anchored": 2,
+  "weakly_anchored": 2
+ },
+ "results": [
+  {
+   "debt_id": "cc84609d-ed6f-4f60-9f18-b48fa2c5beb4",
+   "report_id": "8998ed0a-96a5-4826-ba6e-0596af89fe2a",
+   "report_found": true,
+   "concept": "比较应用层",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "400b4113-1aad-4dd8-b6c2-bed7148a66a5",
+   "report_id": "8998ed0a-96a5-4826-ba6e-0596af89fe2a",
+   "report_found": true,
+   "concept": "“服务恢复”“机制解释”“复发风险评估”连接成完",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "f50567d4-cafa-4b28-b691-6f6d6c422a79",
+   "report_id": "8998ed0a-96a5-4826-ba6e-0596af89fe2a",
+   "report_found": true,
+   "concept": "“症状→候选根因→排查顺序→排除证据→结论”组织",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "348fc2ac-de61-48b0-b148-54b98e587043",
+   "report_id": "290d550b-9c08-4d7d-ac69-3e9772fb0062",
+   "report_found": true,
+   "concept": "“nginx 大量写日志”“高 iowait”“",
+   "anchors": 2,
+   "anchor_hits": 2,
+   "hit_terms": [
+    "nginx",
+    "iowait"
+   ],
+   "audit": "exposure_anchored"
+  },
+  {
+   "debt_id": "ebbc1b46-c33b-4123-a301-5b0fef53967a",
+   "report_id": "4263095c-bc75-4c9a-93bf-86c98195aacd",
+   "report_found": true,
+   "concept": "“高 load",
+   "anchors": 1,
+   "anchor_hits": 1,
+   "hit_terms": [
+    "load"
+   ],
+   "audit": "weakly_anchored"
+  },
+  {
+   "debt_id": "30ba3aa1-ac4d-433b-aa06-36ab62a48d0a",
+   "report_id": "c7b5e1b4-b33e-465b-b5f8-8b2521851054",
+   "report_found": true,
+   "concept": "长期方案放进同一决策框架比较：调日志级别",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "f2cfd400-f655-4af0-b208-80686fae891c",
+   "report_id": "c7b5e1b4-b33e-465b-b5f8-8b2521851054",
+   "report_found": true,
+   "concept": "设计一套从广到窄的排查漏斗：先排硬故障",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "f839113b-aa73-42f1-8cb6-815a9763873d",
+   "report_id": "c7b5e1b4-b33e-465b-b5f8-8b2521851054",
+   "report_found": true,
+   "concept": " load",
+   "anchors": 1,
+   "anchor_hits": 1,
+   "hit_terms": [
+    "load"
+   ],
+   "audit": "weakly_anchored"
+  },
+  {
+   "debt_id": "5bec4858-8b7d-4127-8be6-afff14d5fe51",
+   "report_id": "9959bd84-dc21-4a09-bc91-1c2b6d4aa313",
+   "report_found": true,
+   "concept": "系统比较不同方案分别在改变哪一层约束：日志级别调",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "277b9d6d-d1d8-4747-a056-9052e641cd4a",
+   "report_id": "9959bd84-dc21-4a09-bc91-1c2b6d4aa313",
+   "report_found": true,
+   "concept": "“怀疑根因未修复”转成一个明确的验证计划：要验证",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "fc162656-cc97-4de6-bf4f-fc2e9f808c8a",
+   "report_id": "9959bd84-dc21-4a09-bc91-1c2b6d4aa313",
+   "report_found": true,
+   "concept": "监控信号组织成一条可解释",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "9272a4d6-92e8-4264-a95f-1666b2d36eea",
+   "report_id": "dde149a9-b702-480e-a983-bf4a910d1a48",
+   "report_found": true,
+   "concept": "现场动作系统化分成三层：临时缓解",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "42a20815-4516-41fa-8b96-9dbaa8cd6d77",
+   "report_id": "dde149a9-b702-480e-a983-bf4a910d1a48",
+   "report_found": true,
+   "concept": "请求流量",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "83c36249-1016-4d9f-9d9d-ef089fc08a65",
+   "report_id": "adc5e35e-3807-4593-b19e-0cf521efe00f",
+   "report_found": true,
+   "concept": "“AI 给出的写法”转化为“我能解释为什么这样设",
+   "anchors": 0,
+   "anchor_hits": 0,
+   "hit_terms": [],
+   "audit": "no_anchor_terms"
+  },
+  {
+   "debt_id": "dfd9f02a-e1ca-4df5-bb7a-8c8330be1239",
+   "report_id": "adc5e35e-3807-4593-b19e-0cf521efe00f",
+   "report_found": true,
+   "concept": " React 组件中的 state",
+   "anchors": 2,
+   "anchor_hits": 2,
+   "hit_terms": [
+    "React",
+    "state"
+   ],
+   "audit": "exposure_anchored"
+  }
+ ]
+}

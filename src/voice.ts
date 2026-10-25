@@ -1,4 +1,4 @@
-export type VoiceAction = "repeat" | "ask" | "next" | "known";
+export type VoiceAction = "repeat" | "ask" | "next" | "known" | "focus" | "projects" | "learn" | "debts" | "quiz" | "record";
 export type TranscriptIgnoreReason = "empty" | "duplicate";
 
 export type TranscriptIntakeResult =
@@ -12,14 +12,26 @@ const chineseCommands: Record<VoiceAction, string[]> = {
   next: ["下一个", "下一张", "下一張", "下一章", "下一项", "下一题", "跳过", "略过", "过"],
   known: ["会了", "我会了", "记住了", "懂了", "明白了"],
   ask: ["提问", "问我", "考我", "考我一下", "问一个", "问一下"],
-  repeat: ["跟读", "再读", "重复", "再来一次", "再说一遍", "重来"]
+  repeat: ["跟读", "再读", "重复", "再来一次", "再说一遍", "重来"],
+  focus: ["继续这个", "继续推进", "就做这个", "推进这个"],
+  projects: ["看项目", "项目", "项目进度", "查项目"],
+  learn: ["去学习", "学习模式", "背单词", "回到学习"],
+  debts: ["看欠条", "欠条", "认知欠条", "我的欠条"],
+  quiz: ["考我", "考我一下", "出题", "问我"],
+  record: ["记录", "记录证据", "提交", "记下来"]
 };
 
 const englishCommands: Record<VoiceAction, string[]> = {
   next: ["next", "next one", "next card", "skip", "skip this"],
   known: ["known", "done", "got it", "i got it", "understood"],
   ask: ["ask", "quiz", "quiz me", "ask me", "question"],
-  repeat: ["repeat", "again", "say again", "read again", "one more time"]
+  repeat: ["repeat", "again", "say again", "read again", "one more time"],
+  focus: ["continue this", "focus this", "work on this"],
+  projects: ["projects", "show projects", "project status"],
+  learn: ["learn mode", "back to learning", "study"],
+  debts: ["debts", "show debts", "my debts", "cognitive debts"],
+  quiz: ["quiz me on this", "test me", "check me"],
+  record: ["record", "save evidence", "log it", "submit"]
 };
 
 function normalizeVoiceText(text: string): string {

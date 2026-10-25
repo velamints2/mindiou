@@ -311,6 +311,8 @@ describe("MVP-0 API endpoints", () => {
       expect(data.report.sections.nextActions.length).toBeGreaterThan(0);
       expect(data.report.research).toBeDefined();
       expect(data.report.confusionResolutions).toBeDefined();
+      expect(data.report.sections.dangerousGaps.every((gap: any) => gap.sourceGapId && gap.cognitiveDebtId)).toBe(true);
+      expect(data.report.sections.feynmanCards.every((card: any) => card.sourceGapId && card.gapRank && card.cognitiveDebtId)).toBe(true);
       createdReportId = data.report.id;
       firstCardId = data.report.sections.feynmanCards[0].id;
     });
@@ -335,6 +337,36 @@ describe("MVP-0 API endpoints", () => {
       expect(domain.source).toBe("report_inferred");
       expect(domain.dimensions.conceptualUnderstanding.score).toBe(0);
       expect(domain.dimensions.conceptualUnderstanding.stability).toBe("unverified");
+    });
+
+    it("attaches a newly generated report to the selected project and its debt links", async () => {
+      const projectRes = await fetch(`${BASE}/api/projects`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: authCookie },
+        body: JSON.stringify({ name: "自动归档测试项目", projectType: "software" })
+      });
+      expect(projectRes.status).toBe(201);
+      const project = (await projectRes.json()).project;
+
+      const reportRes = await fetch(`${BASE}/api/mvp0/report`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: authCookie },
+        body: JSON.stringify({
+          projectId: project.id,
+          artifactText: SAMPLE_ARTIFACT,
+          artifactType: "chatgpt"
+        })
+      });
+      expect(reportRes.status).toBe(200);
+      const reportData = await reportRes.json();
+      expect(reportData.report.projectId).toBe(project.id);
+      expect(reportData.projectMemory).toMatchObject({ ok: true });
+
+      const memoryRes = await fetch(`${BASE}/api/projects/${project.id}/memory`, { headers: { cookie: authCookie } });
+      expect(memoryRes.status).toBe(200);
+      const memory = (await memoryRes.json()).memory;
+      expect(memory.sessions).toHaveLength(1);
+      expect(memory.counts.debts).toBeGreaterThanOrEqual(1);
     });
 
     it("links an existing report into project memory without re-importing or duplicating it", async () => {

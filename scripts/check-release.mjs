@@ -32,5 +32,5 @@ console.log(JSON.stringify({
   ok: true,
   version: appJson.version,
   packageId: appJson.package_id,
-  output: `release/learn-coach-${appJson.version}.ehpk`
+  output: `release/mindiou-${appJson.version}.ehpk`
 }, null, 2));
