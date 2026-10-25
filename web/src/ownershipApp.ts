@@ -855,7 +855,7 @@ function remainingDebtsSection(m: ModuleDetailView): HTMLElement {
   return section
 }
 
-function debtCard(gapText: string, status: string, riskType: string | undefined, highlight = false): HTMLElement {
+function debtCard(gapText: string, status: string, riskType?: string, highlight = false): HTMLElement {
   const card = el('div', `debt-card ${highlight ? 'is-highlight' : ''}`)
   card.appendChild(el('p', 'debt-gap', gapText))
   const meta = el('div', 'debt-meta')

@@ -1,6 +1,6 @@
 {
   "name": "evenhub-g2-learning",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "main": "src/desktop/main.cjs",
@@ -27,6 +27,7 @@
     "test:spiral": "node scripts/spiral-smoke-test.mjs",
     "test:rokid": "node scripts/rokid-smoke-test.mjs",
     "test:simulator": "node scripts/pre-release-test.mjs",
+    "test:g2-simulator": "node scripts/g2-simulator-test.mjs",
     "check:release": "node scripts/check-release.mjs",
     "pack:ehpk": "node scripts/pack-ehpk.mjs",
     "launch-url": "node scripts/print-launch-url.mjs"
@@ -37,6 +38,7 @@
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.0.0",
     "cheerio": "^1.1.2",
+    "nodemailer": "^6.9.16",
     "typescript": "^5.7.3",
     "vite": "^7.0.0"
   },

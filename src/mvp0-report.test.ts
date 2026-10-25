@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, it, vi } from "vitest";
-import { generateClearanceReport, getReportStepPrompts } from "../mvp0-report.js";
+import { generateClearanceReport, getReportStepPrompts, buildCapabilitySnapshot } from "../mvp0-report.js";
 
 const SAMPLE_TEXT = `
 I'm building a React app with Vite. The AI suggested using TypeScript for type safety.
@@ -637,6 +637,220 @@ describe("generateClearanceReport (multi-step pipeline)", () => {
       expect(cards).toContain("note");
       expect(cards).toContain("task");
       expect(cards).toContain("ask");
+    });
+  });
+
+  // ── Three-layer capability snapshot (priorProfile) ──
+
+  describe("buildCapabilitySnapshot (three-layer aggregation)", () => {
+    it("returns an empty snapshot when no history exists (cold start)", () => {
+      const snap = buildCapabilitySnapshot({ reports: [], capabilityProfiles: [], userId: "u1" });
+      expect(snap.schemaVersion).toBe("capability_snapshot_v1");
+      expect(snap.layers.L1_ai_collaboration.available).toBe(false);
+      expect(snap.layers.L2_domain.available).toBe(false);
+      expect(snap.layers.L3_knowledge_points.available).toBe(false);
+      expect(snap.rules.length).toBeGreaterThan(0);
+    });
+
+    it("aggregates L1 from historical reports' userCapability dimensions", () => {
+      const reports = [
+        {
+          analysis: {
+            userCapability: {
+              overall: "L2",
+              dimensions: {
+                productProblemFraming: { level: "L3", evidenceStatus: "proven", confidence: 0.8 },
+                aiAgentSteering: { level: "L2", evidenceStatus: "partial", confidence: 0.6 }
+              }
+            }
+          },
+          generation: { fallback: false }
+        },
+        {
+          analysis: {
+            userCapability: {
+              overall: "L3",
+              dimensions: {
+                productProblemFraming: { level: "L3", evidenceStatus: "proven", confidence: 0.9 },
+                aiAgentSteering: { level: "L1", evidenceStatus: "partial", confidence: 0.5 }
+              }
+            }
+          },
+          generation: { fallback: false }
+        }
+      ];
+      const snap = buildCapabilitySnapshot({ reports, capabilityProfiles: [], userId: "u1" });
+      expect(snap.layers.L1_ai_collaboration.available).toBe(true);
+      expect(snap.layers.L1_ai_collaboration.reportCount).toBe(2);
+      const l1 = snap.layers.L1_ai_collaboration.dimensions;
+      // productProblemFraming observed L3 twice → inferredLevel L3
+      expect(l1.productProblemFraming.inferredLevel).toBe("L3");
+      expect(l1.productProblemFraming.observationCount).toBe(2);
+      expect(l1.productProblemFraming.commonEvidenceStatus).toBe("proven");
+      // aiAgentSteering observed L2 then L1 → mode picks first in tie; both appear once
+      expect(["L1", "L2"]).toContain(l1.aiAgentSteering.inferredLevel);
+    });
+
+    it("excludes fallback reports from L1 aggregation", () => {
+      const reports = [
+        {
+          analysis: { userCapability: { dimensions: { productProblemFraming: { level: "L4", evidenceStatus: "proven", confidence: 0.9 } } } },
+          generation: { fallback: true }
+        }
+      ];
+      const snap = buildCapabilitySnapshot({ reports, capabilityProfiles: [], userId: "u1" });
+      expect(snap.layers.L1_ai_collaboration.available).toBe(false);
+    });
+
+    it("aggregates L2 (domain overall) and L3 (knowledge-point dimensions) from capabilityProfiles", () => {
+      const profiles = [
+        {
+          userId: "u1",
+          domain: "database",
+          dimensions: {
+            conceptualUnderstanding: { score: 80, level: "L3", stability: "stable", evidence: [{ source: "user_verified" }, { source: "user_verified" }, { source: "model_inferred" }] },
+            causalExplanation: { score: 60, level: "L2", stability: "one_shot", evidence: [{ source: "model_inferred" }] }
+          },
+          updatedAt: "2026-08-01T00:00:00Z"
+        },
+        {
+          userId: "u1",
+          domain: "frontend",
+          dimensions: {
+            conceptualUnderstanding: { score: 40, level: "L2", stability: "one_shot", evidence: [{ source: "model_inferred" }] }
+          },
+          updatedAt: "2026-08-02T00:00:00Z"
+        }
+      ];
+      const snap = buildCapabilitySnapshot({ reports: [], capabilityProfiles: profiles, userId: "u1" });
+      // L2
+      expect(snap.layers.L2_domain.available).toBe(true);
+      const dbL2 = snap.layers.L2_domain.domains.find(d => d.domain === "database");
+      expect(dbL2).toBeDefined();
+      expect(dbL2.overallScore).toBe(70); // (80+60)/2
+      expect(dbL2.stability).toBe("stable"); // 1 of 2 stable → >= half
+      expect(dbL2.userVerifiedEvidenceCount).toBe(2);
+      // L3
+      expect(snap.layers.L3_knowledge_points.available).toBe(true);
+      const dbL3 = snap.layers.L3_knowledge_points.domains.find(d => d.domain === "database");
+      expect(dbL3.dimensions.conceptualUnderstanding.score).toBe(80);
+      expect(dbL3.dimensions.conceptualUnderstanding.stability).toBe("stable");
+      expect(dbL3.dimensions.causalExplanation.stability).toBe("one_shot");
+    });
+
+    it("filters capabilityProfiles by userId", () => {
+      const profiles = [
+        { userId: "u1", domain: "db", dimensions: { conceptualUnderstanding: { score: 50, level: "L2", stability: "one_shot", evidence: [] } } },
+        { userId: "u2", domain: "db", dimensions: { conceptualUnderstanding: { score: 90, level: "L4", stability: "stable", evidence: [] } } }
+      ];
+      const snap = buildCapabilitySnapshot({ reports: [], capabilityProfiles: profiles, userId: "u1" });
+      expect(snap.layers.L2_domain.domains.length).toBe(1);
+      expect(snap.layers.L2_domain.domains[0].domain).toBe("db");
+      expect(snap.layers.L2_domain.domains[0].overallScore).toBe(50);
+    });
+
+    it("rules explicitly state material evidence overrides prior", () => {
+      const snap = buildCapabilitySnapshot({ reports: [], capabilityProfiles: [], userId: "u1" });
+      const rulesText = snap.rules.join(" ");
+      expect(rulesText).toContain("overrides");
+      expect(rulesText).toContain("L1");
+      expect(rulesText).toContain("L2");
+      expect(rulesText).toContain("L3");
+    });
+  });
+
+  describe("generateClearanceReport with priorProfile", () => {
+    it("cold start (no priorProfile) does not add priorProfile field and does not inject hint", async () => {
+      const mockChatFn = mockPipeline();
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn);
+      expect(report.priorProfile).toBeUndefined();
+      // Step A hint should not contain the prior profile marker
+      const stepApayload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
+      expect(stepApayload.hint).not.toContain("历史能力先验");
+    });
+
+    it("injects three-layer prior hint into Step A when priorProfile is provided", async () => {
+      const priorProfile = buildCapabilitySnapshot({
+        reports: [{
+          analysis: { userCapability: { overall: "L2", dimensions: { productProblemFraming: { level: "L3", evidenceStatus: "proven", confidence: 0.8 } } } },
+          generation: { fallback: false }
+        }],
+        capabilityProfiles: [{
+          userId: "u1",
+          domain: "database",
+          dimensions: { conceptualUnderstanding: { score: 70, level: "L3", stability: "stable", evidence: [{ source: "user_verified" }, { source: "user_verified" }] } }
+        }],
+        userId: "u1"
+      });
+      const mockChatFn = mockPipeline();
+      await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn, { priorProfile });
+      const stepApayload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
+      expect(stepApayload.hint).toContain("历史能力先验");
+      expect(stepApayload.hint).toContain("L1");
+      expect(stepApayload.hint).toContain("L2");
+      expect(stepApayload.hint).toContain("L3");
+      // Rule: material evidence overrides prior
+      expect(stepApayload.hint).toContain("本次材料证据优先");
+    });
+
+    it("attaches priorProfile snapshot to the generated report", async () => {
+      const priorProfile = buildCapabilitySnapshot({
+        reports: [],
+        capabilityProfiles: [{
+          userId: "u1",
+          domain: "db",
+          dimensions: { conceptualUnderstanding: { score: 60, level: "L2", stability: "one_shot", evidence: [] } }
+        }],
+        userId: "u1"
+      });
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockPipeline(), { priorProfile });
+      expect(report.priorProfile).toBeDefined();
+      expect(report.priorProfile.schemaVersion).toBe("capability_snapshot_v1");
+      expect(report.priorProfile.layers.L2_domain.available).toBe(true);
+    });
+
+    it("attaches priorProfile to fallback report when AI is unavailable", async () => {
+      const priorProfile = buildCapabilitySnapshot({
+        reports: [],
+        capabilityProfiles: [{
+          userId: "u1",
+          domain: "db",
+          dimensions: { conceptualUnderstanding: { score: 60, level: "L2", stability: "one_shot", evidence: [] } }
+        }],
+        userId: "u1"
+      });
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", null, { priorProfile });
+      expect(report.generation.fallback).toBe(true);
+      expect(report.priorProfile).toBeDefined();
+      expect(report.priorProfile.layers.L2_domain.available).toBe(true);
+    });
+
+    it("ignores invalid priorProfile (wrong schema) and behaves as cold start", async () => {
+      const mockChatFn = mockPipeline();
+      const report = await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn, {
+        priorProfile: { schemaVersion: "wrong", layers: {} }
+      });
+      expect(report.priorProfile).toBeUndefined();
+      const stepApayload = JSON.parse(mockChatFn.mock.calls[0][0][1].content);
+      expect(stepApayload.hint).not.toContain("历史能力先验");
+    });
+
+    it("does not pass priorProfile to Step B or Step D payloads", async () => {
+      const priorProfile = buildCapabilitySnapshot({
+        reports: [],
+        capabilityProfiles: [{
+          userId: "u1",
+          domain: "db",
+          dimensions: { conceptualUnderstanding: { score: 60, level: "L2", stability: "one_shot", evidence: [] } }
+        }],
+        userId: "u1"
+      });
+      const mockChatFn = mockPipeline();
+      await generateClearanceReport(SAMPLE_TEXT, "chatgpt", mockChatFn, { priorProfile });
+      const stepBpayload = JSON.parse(mockChatFn.mock.calls[1][0][1].content);
+      const stepDpayload = JSON.parse(mockChatFn.mock.calls[2][0][1].content);
+      expect(JSON.stringify(stepBpayload)).not.toContain("历史能力先验");
+      expect(JSON.stringify(stepDpayload)).not.toContain("历史能力先验");
     });
   });
 });

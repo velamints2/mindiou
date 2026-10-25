@@ -183,6 +183,7 @@ export type AuthUser = {
   id: string
   email: string
   name?: string
+  emailVerified?: boolean
   genesisIdentity?: GenesisIdentity
 }
 
@@ -295,6 +296,23 @@ export async function checkAuthSession(): Promise<AuthUser | null> {
     clearAccessToken()
   }
   return user
+}
+
+/** 验证邮箱（提交 token） */
+export async function verifyEmail(token: string): Promise<{ ok: boolean; message?: string }> {
+  const res = await apiFetch<{ ok: boolean; message?: string; error?: string }>('/api/auth/verify-email', {
+    method: 'POST',
+    body: JSON.stringify({ token })
+  })
+  return res
+}
+
+/** 重发验证邮件 */
+export async function resendVerificationEmail(): Promise<{ ok: boolean; message?: string }> {
+  const res = await apiFetch<{ ok: boolean; message?: string; error?: string }>('/api/auth/resend-verification', {
+    method: 'POST'
+  })
+  return res
 }
 
 // ── 设备 Token 管理 ──
@@ -564,6 +582,7 @@ export type DashboardSummary = {
     status: string
     locale?: string
   }>
+  repaidCount?: number
   latestSession: (ClearanceSession & {
     reportDisplay?: { title: string; domain: string } | null
     cardTitle?: string

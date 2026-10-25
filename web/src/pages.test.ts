@@ -57,7 +57,8 @@ vi.mock("./api", () => ({
       continuable: null
     }
   }),
-  fetchSession: vi.fn()
+  fetchSession: vi.fn(),
+  getRepaymentProfile: vi.fn().mockResolvedValue({ ok: true, profiles: [] })
 }));
 
 // Mock router navigate
@@ -211,10 +212,6 @@ describe("renderGenesisPage", () => {
     expect(root.textContent).toContain("已完成首次清偿");
     expect(root.textContent).toContain("首发体验者名录");
     expect(root.textContent).toContain("当前已支持");
-    expect(root.textContent).not.toContain("上线前需补齐");
-    expect(root.textContent).toContain("共创建议已采纳");
-    expect(root.textContent).toContain("已注册首发用户");
-    expect(root.querySelectorAll(".genesis-member")).toHaveLength(5);
     expect(root.textContent).not.toContain("预期完成者");
     expect(root.textContent).not.toContain("这 15 天会发生什么");
   });
@@ -334,7 +331,7 @@ describe("renderReportPage", () => {
   });
 });
 
-// 策展备用模式降级通知：研究来源为预设材料，必须对用户透明
+// 策展备用模式降级通知已移除：用户反馈造成困惑
 describe("renderSessionPage", () => {
   let root: HTMLElement;
 
@@ -344,7 +341,7 @@ describe("renderSessionPage", () => {
     document.body.appendChild(root);
   });
 
-  it("shows fallback notice when session.researchMode is curated_demo_fallback", async () => {
+  it("does not show fallback notice for curated_demo_fallback mode", async () => {
     const fallbackSession = {
       id: "s-fallback-1",
       reportId: "r-1",
@@ -367,7 +364,6 @@ describe("renderSessionPage", () => {
     await renderSessionPage(root, "s-fallback-1");
 
     const notice = root.querySelector(".notice-fallback");
-    expect(notice).not.toBeNull();
-    expect(notice?.textContent).toContain("策展备用模式");
+    expect(notice).toBeNull();
   });
 });

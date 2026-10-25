@@ -15,6 +15,7 @@ export type DangerousGap = {
   gap: string
   whyDangerous: string
   evidence: string
+  surfaceSignals?: string[]
 }
 
 export type CognitiveStructure = {
@@ -36,6 +37,14 @@ export type FeynmanCard = {
   userAnswer: string
   aiFollowUp: string
   answeredAt: string | null
+  clearance?: {
+    sessionId: string
+    status: string
+    sourceReviewRequired?: boolean
+    endedAt?: string
+    nextRecommendation?: string
+    remainingGaps?: string[]
+  }
 }
 
 export type NextAction = {
@@ -95,6 +104,54 @@ export type ClearanceReport = {
     fallback?: boolean
     error?: string
     failedStep?: string
+  }
+  priorProfile?: CapabilitySnapshot
+}
+
+// ── 三层能力快照（报告生成时聚合的历史能力先验）──
+
+export type CapabilitySnapshot = {
+  schemaVersion: string
+  collectedAt: string
+  userId: string | null
+  source: string
+  rules: string[]
+  layers: {
+    L1_ai_collaboration: {
+      available: boolean
+      dimensions: Record<string, {
+        inferredLevel: string
+        commonEvidenceStatus: string
+        avgConfidence: number
+        observationCount: number
+      }>
+      overallMode?: Record<string, number>
+      reportCount?: number
+      note?: string
+    }
+    L2_domain: {
+      available: boolean
+      domains: Array<{
+        domain: string
+        overallScore: number
+        stability: string
+        userVerifiedEvidenceCount: number
+        updatedAt: string | null
+      }>
+    }
+    L3_knowledge_points: {
+      available: boolean
+      domains: Array<{
+        domain: string
+        dimensions: Record<string, {
+          score: number
+          level: string
+          stability: string
+          evidenceCount: number
+        }>
+        updatedAt: string | null
+      }>
+    }
   }
 }
 
@@ -209,6 +266,9 @@ export type ClearanceSession = {
     difficulty?: string
   }
   clearanceQuestion: string
+  // 追问被采纳后，学习者实际正在回答的问题（缺省时等于 clearanceQuestion）
+  currentQuestion?: string
+  teachingMode?: 'coach' | 'direct'
   researchSummary?: string
   researchMode?: string
   sources?: SourceRecord[]
@@ -302,10 +362,13 @@ export type CognitiveDebt = {
 export type MasteryProfile = {
   cognitiveDebtId: string
   userId: string
-  currentStage: TrainingStage
+  // 后端存储为 1-5 数字（review-scheduler.stageFromNumber）
+  currentStage: TrainingStage | number
   overallMastery: number
   dimensionScores?: Record<string, number>
-  attemptCount: number
+  // 后端按成功/失败分别计数，无 attemptCount 字段
+  successfulAttempts?: number
+  failedAttempts?: number
   lastAttemptAt?: string
   nextReviewAt?: string
   relapseCount?: number

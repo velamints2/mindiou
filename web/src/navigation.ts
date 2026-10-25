@@ -19,7 +19,7 @@ export function renderPersistentNavigation(route: Route): void {
     ['#/how-it-works', t('原理', 'How it works'), 'how-it-works', 'how-it-works'],
     ['#/genesis', t('创始档案', 'Genesis archive'), 'genesis', 'genesis'],
     ['#/projects', t('项目记忆', 'Project memory'), 'projects', 'projects'],
-    ['#/profile', t('用户画像', 'User profile'), 'profile', 'profile'],
+    ['#/profile', t('能力画像', 'Capability profile'), 'profile', 'profile'],
     ['#/cognitive-loop', t('Fluency Loop', 'Fluency Loop'), 'cognitive-loop', 'cognitive-loop']
   ]
   links.forEach(([href, label, _key, routeName]) => {

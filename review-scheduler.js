@@ -153,6 +153,16 @@ export function sortReviewTasks(tasks, masteryMap) {
 
 // ─── 时间预算任务选择 ───
 
+// 任务类型预估时间（分钟）。学习编排（Phase 4）复用同一估时，保持口径一致。
+export const TASK_TYPE_ESTIMATED_MINUTES = {
+  feynman_explanation: 3,
+  short_recall: 1,
+  concept_comparison: 3,
+  scenario_judgment: 5,
+  error_detection: 3,
+  micro_practice: 5
+};
+
 /**
  * 根据用户可用时间选择复训任务
  *
@@ -164,18 +174,8 @@ export function selectTasksByTimeBudget(sortedTasks, availableMinutes) {
   const selected = [];
   let remaining = availableMinutes;
 
-  // 任务类型预估时间（分钟）
-  const estimatedTime = {
-    feynman_explanation: 3,
-    short_recall: 1,
-    concept_comparison: 3,
-    scenario_judgment: 5,
-    error_detection: 3,
-    micro_practice: 5
-  };
-
   for (const task of sortedTasks) {
-    const time = estimatedTime[task.taskType] || 3;
+    const time = TASK_TYPE_ESTIMATED_MINUTES[task.taskType] || 3;
     if (time <= remaining) {
       selected.push(task);
       remaining -= time;

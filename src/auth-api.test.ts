@@ -254,10 +254,8 @@ describe("auth API", () => {
     expect(genesis.actual.registered).toBeGreaterThanOrEqual(1);
     expect(genesis.actual.joined).toBe(0);
     expect(genesis.actual.completedFirstClearance).toBe(0);
-    expect(genesis.actual.adoptedSuggestions).toBe(4);
-    expect(genesis.members.length).toBeGreaterThanOrEqual(1);
-    expect(genesis.members[0].number).toMatch(/^MIOU-001-/);
-    expect(genesis.members[0]).not.toHaveProperty("email");
+    expect(genesis.actual.adoptedSuggestions).toBe(7);
+    expect(genesis.members).toEqual([]);
   });
 
   it("keeps the reserved identity private and immutable before activation", async () => {

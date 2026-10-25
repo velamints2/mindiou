@@ -1,0 +1,240 @@
+/* MindIOU glasses console styles — scoped to g2m-* elements. */
+#g2m-root {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px;
+  color: #eef9f5;
+}
+
+#g2m-root[hidden] {
+  display: none !important;
+}
+
+.g2m-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #1c3c35;
+  margin-bottom: 14px;
+}
+
+.g2m-title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.g2m-pill {
+  flex: 0 0 auto;
+  border: 1px solid #3c7d6d;
+  padding: 4px 8px;
+  color: #a9eadb;
+  font-size: 11px;
+}
+
+.g2m-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid #28584e;
+  margin-bottom: 14px;
+}
+
+.g2m-tab {
+  min-width: 0;
+  padding: 10px 6px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #72c4b0;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.g2m-tab.is-active {
+  border-bottom-color: #72c4b0;
+  color: #eef9f5;
+}
+
+.g2m-panel {
+  display: none;
+}
+
+.g2m-panel.is-active {
+  display: block;
+}
+
+.g2m-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.g2m-field label {
+  font-size: 12px;
+  color: #72c4b0;
+}
+
+.g2m-field input,
+.g2m-field textarea {
+  padding: 8px 10px;
+  background: #0f221e;
+  border: 1px solid #28584e;
+  color: #eef9f5;
+  font-size: 14px;
+  border-radius: 4px;
+}
+
+.g2m-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.g2m-actions button {
+  padding: 8px 12px;
+  background: #143630;
+  border: 1px solid #28584e;
+  color: #eef9f5;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.g2m-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.g2m-primary {
+  background: #1b4d3e !important;
+  border-color: #3c7d6d !important;
+}
+
+.g2m-danger {
+  background: #3d1a1a !important;
+  border-color: #7a2a2a !important;
+}
+
+.g2m-notice {
+  padding: 8px 10px;
+  background: #1f3a33;
+  border: 1px solid #3c7d6d;
+  color: #a9eadb;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.g2m-notice.is-error {
+  background: #2a1515;
+  border-color: #7a2a2a;
+  color: #f5b4b4;
+}
+
+.g2m-notice.is-demo {
+  background: #2a2515;
+  border-color: #7a6a2a;
+  color: #f5e4b4;
+}
+
+.g2m-card-stack {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.g2m-card {
+  background: #0f221e;
+  border: 1px solid #28584e;
+  padding: 12px;
+  border-radius: 4px;
+}
+
+.g2m-card h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #72c4b0;
+  text-transform: uppercase;
+}
+
+.g2m-card p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.g2m-mirror {
+  background: #0f221e;
+  border: 1px solid #28584e;
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+}
+
+.g2m-mirror h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #72c4b0;
+}
+
+.g2m-mirror pre {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.g2m-queue-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.g2m-queue-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  background: #0f221e;
+  border: 1px solid #28584e;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.g2m-queue-item.is-current {
+  border-color: #3c7d6d;
+}
+
+.g2m-queue-mark {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid #3c7d6d;
+  color: #a9eadb;
+  white-space: nowrap;
+}
+
+.g2m-debug {
+  background: #0f221e;
+  border: 1px solid #28584e;
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #72c4b0;
+  white-space: pre-wrap;
+}
+
+.g2m-link {
+  color: #72c4b0;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.g2m-link:hover {
+  text-decoration: underline;
+}

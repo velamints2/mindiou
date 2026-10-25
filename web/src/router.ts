@@ -25,23 +25,25 @@ export type Route =
   | { name: 'training-debt'; debtId: string }  // 产品区：认知欠条详情
   | { name: 'repayment' }            // 产品区：认知清偿 V1 列表
   | { name: 'repayment-detail'; gapId: string }  // 产品区：认知清偿欠条详情
-  | { name: 'profile' }              // 产品区：用户能力画像
+  | { name: 'profile' }              // 产品区：能力画像
+  | { name: 'projects' }
   | { name: 'fluency-loop-preview' } // 公开：Fluency Loop 功能预告
   | { name: 'cognitive-loop' }       // 产品区：每周 Cognitive Loop
   | { name: 'project'; projectId: string }
   | { name: 'work-item'; projectId: string; workItemId: string }
   | { name: 'agent-session'; sessionId: string }
+  | { name: 'verify-email'; token?: string; status?: string }
   | { name: 'not-found' }
 
 // 判断是否为公开路由（无需登录）
 export function isPublicRoute(route: Route): boolean {
-  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register' || route.name === 'genesis' || route.name === 'assessment' || route.name === 'challenge' || route.name === 'fluency-loop-preview'
+  return route.name === 'landing' || route.name === 'how-it-works' || route.name === 'register' || route.name === 'genesis' || route.name === 'assessment' || route.name === 'challenge' || route.name === 'verify-email' || route.name === 'fluency-loop-preview'
 }
 
 export function parseRoute(): Route {
   const hash = location.hash.replace(/^#\/?/, '')
   const parts = hash.split('/').filter(Boolean)
-  const path = parts[0] || ''
+  const path = (parts[0] || '').split('?')[0]
   const rest = parts.slice(1)
 
   switch (path) {
@@ -107,6 +109,9 @@ export function parseRoute(): Route {
         moduleId: decodeURIComponent(moduleId)
       }
     }
+      return rest[0] ? { name: 'agent-session', sessionId: decodeURIComponent(rest[0]) } : { name: 'not-found' }
+    case 'verify-email':
+      const vp = new URLSearchParams(location.hash.split('?')[1] || ''); return { name: 'verify-email', token: vp.get('token') || undefined, status: vp.get('status') || undefined }
     default:
       return { name: 'not-found' }
   }
@@ -143,6 +148,7 @@ export function navigate(route: Route): void {
       path = `/project-ownership-module/${encodeURIComponent(route.projectId)}/${encodeURIComponent(route.moduleId)}`
       break
     case 'repayment-detail': path = `/repayment/${encodeURIComponent(route.gapId)}`; break
+    case 'verify-email': path = '/verify-email'; break
     case 'not-found': path = '/not-found'; break
   }
   location.hash = path

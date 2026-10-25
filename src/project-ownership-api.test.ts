@@ -228,7 +228,9 @@ beforeAll(async () => {
   // start their own API servers in parallel.
   appProcess.stdout?.resume();
   appProcess.stderr?.resume();
-  await waitFor(`${BASE}/health`);
+  // 全量并行运行时多个测试文件同时拉起 server.js 子进程，
+  // CPU 竞争会把启动+健康轮询挤过默认 10s hook 超时，这里放宽。
+  await waitFor(`${BASE}/health`, 120);
 }, 30000);
 
 afterAll(async () => {

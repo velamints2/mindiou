@@ -24,6 +24,7 @@ import {
   linkReportToProjectMemory,
   listProjectHookTokens,
   listProjects,
+  getRepaymentProfile,
   listDeviceTokens,
   login,
   logoutAuth,
@@ -31,9 +32,11 @@ import {
   register,
   createProjectHookToken,
   revokeProjectHookToken,
+  resendVerificationEmail,
   revokeDeviceToken,
   saveDraftConfusions,
   setAccessToken,
+  verifyEmail,
   startReviewTask,
   submitAnswer,
   submitReviewAnswer,
@@ -43,12 +46,14 @@ import type { DeviceTokenInfo, GenesisIdentity, ProjectHookTokenInfo } from './a
 import { renderSiteFooter } from './navigation'
 import { isEnglish, t } from './i18n'
 import type {
+  CapabilitySnapshot,
   ClearanceReport,
   ClearanceSession,
   Confusion,
   ConfusionResolution,
   Draft,
   FeynmanCard,
+  RepaymentProfile,
   ReviewTask,
   SubmitReviewResponse,
   TimelineStep
@@ -244,6 +249,45 @@ function stepIndicator(active: 1 | 2 | 3): HTMLElement {
   return wrap
 }
 
+// 能力画像卡片：按领域展示五维能力得分
+const PROFILE_DOMAIN_LABELS: Record<string, string> = {
+  'web-development': 'Web 开发',
+  'system-architecture': '系统架构',
+  general: '通用领域'
+}
+const PROFILE_DIMENSION_LABELS: Record<string, string> = {
+  conceptualUnderstanding: '概念理解',
+  causalExplanation: '因果解释',
+  practicalReproduction: '实践复现',
+  boundariesAndRisks: '边界与风险',
+  transferAbility: '迁移能力'
+}
+
+function renderCapabilityProfileCard(profile: RepaymentProfile): HTMLElement {
+  const card = el('article', 'profile-card')
+  const head = el('div', 'profile-card-head')
+  head.appendChild(el('strong', 'profile-card-domain', PROFILE_DOMAIN_LABELS[profile.domain] || profile.domain))
+  head.appendChild(el('span', 'profile-card-updated', `更新于 ${new Date(profile.updatedAt).toLocaleDateString('zh-CN')}`))
+  card.appendChild(head)
+  const dims = el('div', 'profile-dims')
+  for (const [key, label] of Object.entries(PROFILE_DIMENSION_LABELS)) {
+    const dim = profile.dimensions?.[key]
+    if (!dim) continue
+    const row = el('div', 'profile-dim-row')
+    row.appendChild(el('span', 'profile-dim-label', label))
+    const meter = el('div', 'profile-dim-meter')
+    const fill = el('div', 'profile-dim-fill')
+    fill.style.width = `${Math.max(0, Math.min(100, dim.score))}%`
+    meter.appendChild(fill)
+    row.appendChild(meter)
+    row.appendChild(el('span', 'profile-dim-score', `${dim.score} · ${dim.level}`))
+    dims.appendChild(row)
+  }
+  card.appendChild(dims)
+  card.appendChild(el('p', 'profile-card-note', '随每次清偿与复训持续更新，反映系统对你的长期了解。'))
+  return card
+}
+
 // ── 登录页 ──
 
 export function renderLoginPage(root: HTMLElement): void {
@@ -289,10 +333,10 @@ export function renderLoginPage(root: HTMLElement): void {
     submit.disabled = true
     status.textContent = '登录中…'
     try {
-      await login(email, password)
+      const user = await login(email, password)
       // setAccessToken 已在 login 内完成
       status.textContent = ''
-      navigate({ name: 'app' })
+      navigate({ name: user.emailVerified ? 'app' : 'verify-email' })
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         status.textContent = '邮箱或密码不正确'
@@ -310,6 +354,125 @@ export function renderLoginPage(root: HTMLElement): void {
   registerLink.href = '#/register'
   footer.appendChild(registerLink)
   card.appendChild(footer)
+
+  page.appendChild(card)
+  root.appendChild(page)
+}
+
+// ── 邮箱验证页 ──
+
+export function renderEmailVerificationPage(root: HTMLElement, token?: string, status?: string): void {
+  const page = el('div', 'page page-verify-email')
+  page.appendChild(el('h1', 'brand-title', t('验证你的邮箱', 'Verify Your Email')))
+
+  if (status === 'success') {
+    page.appendChild(el('h1', 'brand-title', t('邮箱验证成功', 'Email Verified')))
+    page.appendChild(el('p', 'brand-subtitle', t('你的邮箱已验证成功，现在可以开始使用了。', 'Your email has been verified. You can now start using MindIOU.')))
+    const btn = el('button', 'btn btn-primary', t('进入工作区', 'Go to workspace')) as HTMLButtonElement
+    btn.onclick = () => navigate({ name: 'app' })
+    page.appendChild(btn)
+    root.appendChild(page)
+    return
+  }
+  if (status === 'failed') {
+    page.appendChild(el('h1', 'brand-title', t('验证失败', 'Verification Failed')))
+    page.appendChild(el('p', 'brand-subtitle', t('验证链接无效或已过期。', 'The verification link is invalid or has expired.')))
+    const btn = el('button', 'btn btn-primary', t('返回登录', 'Back to login')) as HTMLButtonElement
+    btn.onclick = () => navigate({ name: 'login' })
+    page.appendChild(btn)
+    root.appendChild(page)
+    return
+  }
+  if (token) {
+    const statusEl = el('p', 'login-status', t('正在验证…', 'Verifying…'))
+    page.appendChild(statusEl)
+    root.appendChild(page)
+    void (async () => {
+      try {
+        const result = await verifyEmail(token)
+        clear(page)
+        if (result.ok) {
+          page.appendChild(el('h1', 'brand-title', t('邮箱验证成功', 'Email Verified')))
+          page.appendChild(el('p', 'brand-subtitle', t('你的邮箱已验证成功，现在可以开始使用了。', 'Your email has been verified. You can now start using MindIOU.')))
+          const btn = el('button', 'btn btn-primary', t('进入工作区', 'Go to workspace')) as HTMLButtonElement
+          btn.onclick = () => navigate({ name: 'app' })
+          page.appendChild(btn)
+        } else {
+          page.appendChild(el('h1', 'brand-title', t('验证失败', 'Verification Failed')))
+          page.appendChild(el('p', 'brand-subtitle', t('验证链接无效或已过期。', 'The verification link is invalid or has expired.')))
+          const btn = el('button', 'btn btn-primary', t('返回登录', 'Back to login')) as HTMLButtonElement
+          btn.onclick = () => navigate({ name: 'login' })
+          page.appendChild(btn)
+        }
+      } catch {
+        clear(page)
+        page.appendChild(el('h1', 'brand-title', t('验证失败', 'Verification Failed')))
+        page.appendChild(el('p', 'brand-subtitle', t('验证过程中出错，请稍后重试。', 'An error occurred during verification. Please try again later.')))
+        const btn = el('button', 'btn btn-primary', t('返回登录', 'Back to login')) as HTMLButtonElement
+        btn.onclick = () => navigate({ name: 'login' })
+        page.appendChild(btn)
+      }
+    })()
+    return
+  }
+
+  const card = el('div', 'login-card')
+  card.appendChild(el('h2', 'login-heading', t('请验证你的邮箱', 'Please Verify Your Email')))
+  card.appendChild(el('p', 'login-desc', t('我们已向你的注册邮箱发送了一封验证邮件，请点击邮件中的链接完成验证。', 'We have sent a verification email to your registered email address. Please click the link in the email to complete verification.')))
+
+  const statusEl = el('p', 'login-status')
+  card.appendChild(statusEl)
+
+  const resend = el('button', 'btn btn-secondary', t('重新发送验证邮件', 'Resend verification email')) as HTMLButtonElement
+  let resendTimer: ReturnType<typeof setTimeout> | null = null
+  let resendCountdown = 0
+  const updateResendButton = () => {
+    if (resendCountdown > 0) {
+      resend.disabled = true
+      resend.textContent = t('请等待 ' + resendCountdown + ' 秒后重试', 'Wait ' + resendCountdown + 's before retrying')
+    } else {
+      resend.disabled = false
+      resend.textContent = t('重新发送验证邮件', 'Resend verification email')
+    }
+  }
+  resend.onclick = async () => {
+    resend.disabled = true
+    statusEl.textContent = t('发送中…', 'Sending…')
+    try {
+      const result = await resendVerificationEmail()
+      if (result.ok) {
+        statusEl.textContent = t('验证邮件已发送，请检查你的邮箱。', 'Verification email sent. Please check your inbox.')
+        resendCountdown = 60
+        updateResendButton()
+        resendTimer = setInterval(() => {
+          resendCountdown--
+          updateResendButton()
+          if (resendCountdown <= 0 && resendTimer) { clearInterval(resendTimer); resendTimer = null }
+        }, 1000)
+      } else {
+        statusEl.textContent = t('发送失败，请稍后重试。', 'Failed to send. Please try again later.')
+        resend.disabled = false
+      }
+    } catch {
+      statusEl.textContent = t('发送失败，请稍后重试。', 'Failed to send. Please try again later.')
+      resend.disabled = false
+    }
+  }
+  card.appendChild(resend)
+
+  const refresh = el('button', 'btn btn-primary', t('我已验证，刷新状态', 'I have verified, refresh')) as HTMLButtonElement
+  refresh.onclick = async () => {
+    refresh.disabled = true
+    try {
+      const user = await fetchCurrentUser()
+      if (user?.emailVerified) { navigate({ name: 'app' }) }
+      else { statusEl.textContent = t('邮箱尚未验证，请先完成验证。', 'Email not yet verified. Please complete verification first.'); refresh.disabled = false }
+    } catch {
+      statusEl.textContent = t('刷新失败，请稍后重试。', 'Refresh failed. Please try again later.')
+      refresh.disabled = false
+    }
+  }
+  card.appendChild(refresh)
 
   page.appendChild(card)
   root.appendChild(page)
@@ -392,7 +555,7 @@ export function renderRegisterPage(root: HTMLElement): void {
     try {
       await register(email, password, name || undefined)
       status.textContent = ''
-      navigate({ name: 'app' })
+      navigate({ name: 'verify-email' })
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         status.textContent = '该邮箱已注册'
@@ -473,6 +636,10 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
     debtMetric.appendChild(el('strong', 'dashboard-metric-value', String(data.outstandingDebts.length)))
     debtMetric.appendChild(el('span', 'dashboard-metric-label', t('尚未清偿', 'Outstanding debts')))
     metrics.appendChild(debtMetric)
+    const repaidMetric = el('article', 'dashboard-metric')
+    repaidMetric.appendChild(el('strong', 'dashboard-metric-value', String(data.repaidCount ?? 0)))
+    repaidMetric.appendChild(el('span', 'dashboard-metric-label', t('已清偿', 'Repaid')))
+    metrics.appendChild(repaidMetric)
     dashboardBody.appendChild(metrics)
 
     const grid = el('div', 'dashboard-grid')
@@ -533,6 +700,14 @@ export async function renderAppPage(root: HTMLElement): Promise<void> {
       continuation.appendChild(continueBtn)
       dashboardBody.appendChild(continuation)
     }
+
+    // 能力画像入口：链接到独立子页面，不再在 dashboard 内联异步加载
+    const profileEntry = el('section', 'dashboard-profile-entry')
+    profileEntry.appendChild(el('h3', 'dashboard-section-title', t('我的能力画像', 'My capability profile')))
+    const profileLink = el('button', 'btn btn-ghost btn-sm', t('查看能力画像 →', 'View capability profile →'))
+    profileLink.onclick = () => navigate({ name: 'profile' })
+    profileEntry.appendChild(profileLink)
+    dashboardBody.appendChild(profileEntry)
   } catch {
     clear(dashboardBody)
     dashboardBody.appendChild(errorBox(t('加载失败，请重试', 'Could not load your dashboard. Try again.')))
@@ -851,6 +1026,10 @@ export async function renderReportPage(root: HTMLElement, reportId: string): Pro
   }
 
   page.appendChild(renderProjectMemoryAttach(reportId))
+  // 历史能力先验（三层能力快照，本次材料证据优先）
+  if (report.priorProfile) {
+    page.appendChild(renderPriorProfile(report.priorProfile))
+  }
 
   // 第 1 部分：AI 完成了什么
   page.appendChild(renderSection('一、AI 完成了什么', 'ai-completed',
@@ -893,6 +1072,103 @@ export async function renderReportPage(root: HTMLElement, reportId: string): Pro
   if (report.confusionResolutions?.length) {
     page.appendChild(renderConfusionResolutions(report.confusionResolutions))
   }
+}
+
+/**
+ * 渲染三层能力快照（历史能力先验）。本次材料证据优先于先验。
+ */
+function renderPriorProfile(snapshot: CapabilitySnapshot): HTMLElement {
+  const section = el('section', 'section prior-profile-section')
+  section.appendChild(el('h2', 'section-heading', '历史能力先验'))
+  section.appendChild(el('p', 'section-desc',
+    '基于你的历史报告与清偿记录聚合的三层能力快照。本次材料证据优先于先验。'))
+
+  const l1 = snapshot.layers.L1_ai_collaboration
+  const l2 = snapshot.layers.L2_domain
+  const l3 = snapshot.layers.L3_knowledge_points
+
+  // L1 通用 AI 协作能力（可跨领域迁移）
+  const l1Block = el('div', 'prior-layer prior-l1')
+  l1Block.appendChild(el('h3', 'prior-layer-heading', 'L1 通用 AI 协作能力（可跨领域迁移）'))
+  if (!l1.available) {
+    l1Block.appendChild(el('p', 'prior-empty', '暂无历史报告数据。'))
+  } else {
+    if (l1.reportCount) {
+      l1Block.appendChild(el('p', 'prior-meta', `来自 ${l1.reportCount} 份历史报告`))
+    }
+    const dims = el('div', 'prior-dims')
+    for (const [key, val] of Object.entries(l1.dimensions || {})) {
+      const label = L1_DIM_LABELS[key] || key
+      dims.appendChild(el('span', 'prior-dim',
+        `${label}: ${val.inferredLevel}（${val.commonEvidenceStatus}，置信度 ${Math.round(val.avgConfidence * 100)}%，观察 ${val.observationCount} 次）`))
+    }
+    l1Block.appendChild(dims)
+  }
+  section.appendChild(l1Block)
+
+  // L2 领域能力（不跨领域推断）
+  const l2Block = el('div', 'prior-layer prior-l2')
+  l2Block.appendChild(el('h3', 'prior-layer-heading', 'L2 领域能力（不跨领域推断）'))
+  if (!l2.available || l2.domains.length === 0) {
+    l2Block.appendChild(el('p', 'prior-empty', '暂无领域能力画像。'))
+  } else {
+    const dims = el('div', 'prior-dims')
+    for (const d of l2.domains) {
+      const stabilityLabel = d.stability === 'stable' ? '稳定' : '一次性'
+      dims.appendChild(el('span', 'prior-dim',
+        `${d.domain}: ${d.overallScore}（${stabilityLabel}，user_verified ${d.userVerifiedEvidenceCount} 条）`))
+    }
+    l2Block.appendChild(dims)
+  }
+  section.appendChild(l2Block)
+
+  // L3 具体知识点（费曼卡片训练层）
+  const l3Block = el('div', 'prior-layer prior-l3')
+  l3Block.appendChild(el('h3', 'prior-layer-heading', 'L3 具体知识点（费曼卡片训练层）'))
+  if (!l3.available || l3.domains.length === 0) {
+    l3Block.appendChild(el('p', 'prior-empty', '暂无知识点深度画像。'))
+  } else {
+    for (const d of l3.domains) {
+      const domainBlock = el('div', 'prior-knowledge-domain')
+      domainBlock.appendChild(el('p', 'prior-knowledge-domain-name', d.domain))
+      const dims = el('div', 'prior-dims')
+      for (const [dim, val] of Object.entries(d.dimensions || {})) {
+        const dimLabel = L3_DIM_LABELS[dim] || dim
+        const stabilityLabel = val.stability === 'stable' ? '稳定' : '一次性'
+        dims.appendChild(el('span', `prior-dim ${val.stability === 'stable' ? 'is-stable' : 'is-one-shot'}`,
+          `${dimLabel}: ${val.score}/${val.level}（${stabilityLabel}，证据 ${val.evidenceCount} 条）`))
+      }
+      domainBlock.appendChild(dims)
+      l3Block.appendChild(domainBlock)
+    }
+  }
+  section.appendChild(l3Block)
+
+  if (Array.isArray(snapshot.rules) && snapshot.rules.length > 0) {
+    const rules = el('ul', 'prior-rules')
+    for (const rule of snapshot.rules.slice(0, 4)) {
+      rules.appendChild(el('li', undefined, rule))
+    }
+    section.appendChild(rules)
+  }
+
+  return section
+}
+
+const L1_DIM_LABELS: Record<string, string> = {
+  productProblemFraming: '问题定义',
+  aiAgentSteering: 'AI 指挥',
+  systemMentalModel: '系统心智模型',
+  technicalDecisionComprehension: '技术决策理解',
+  validationAndQualityJudgment: '验证与质量判断'
+}
+
+const L3_DIM_LABELS: Record<string, string> = {
+  conceptualUnderstanding: '概念理解',
+  causalExplanation: '因果解释',
+  practicalReproduction: '实践复现',
+  boundariesAndRisks: '边界与风险',
+  transferAbility: '迁移能力'
 }
 
 function renderConfusionResolutions(resolutions: ConfusionResolution[]): HTMLElement {
@@ -966,12 +1242,18 @@ function renderCard(reportId: string, card: FeynmanCard): HTMLElement {
   if (card.target) node.appendChild(el('p', 'card-target', card.target))
   node.appendChild(el('p', 'card-prompt', card.prompt))
   if (card.answeredAt) node.appendChild(el('span', 'card-badge card-answered', '已尝试'))
+  if (card.clearance?.status === 'provisionally_cleared') {
+    node.appendChild(el('span', 'card-badge card-cleared', '已清偿'))
+  }
 
   const btn = el('button', 'btn btn-primary card-start-btn', '开始清偿')
   btn.onclick = async () => {
     node.querySelector('.error-inline')?.remove()
     btn.disabled = true
     btn.textContent = '正在创建会话…'
+    // 创建会话需要大模型生成清偿问题与评估脚手架，耗时较长，给出明确加载提示
+    const overlay = spinnerOverlay('AI 正在生成清偿问题与评估标准，通常需要 10-30 秒…')
+    document.body.appendChild(overlay)
     try {
       const res = await createSession(reportId, card.id)
       rememberSessionId(res.session.id)
@@ -983,6 +1265,8 @@ function renderCard(reportId: string, card: FeynmanCard): HTMLElement {
       const errNode = el('p', 'error-inline', msg)
       errNode.setAttribute('role', 'alert')
       node.appendChild(errNode)
+    } finally {
+      overlay.remove()
     }
   }
   node.appendChild(btn)
@@ -1015,10 +1299,56 @@ export async function renderSessionPage(root: HTMLElement, sessionId: string): P
   }
 
   clear(page)
-  drawSession(page, session)
+  await drawSession(page, session)
 }
 
-function drawSession(page: HTMLElement, session: ClearanceSession): void {
+// 欠条来源上下文：告诉用户这笔认知欠条是在哪段 AI 协作中、因为什么表现被识别的
+async function renderDebtContext(session: ClearanceSession): Promise<HTMLElement | null> {
+  if (!session.reportId) return null
+  let report: ClearanceReport
+  try {
+    const res = await fetchReport(session.reportId)
+    report = res.report
+  } catch {
+    return null
+  }
+  const card = report.sections?.feynmanCards?.find(c => c.id === session.cardId) || null
+  const target = card?.target || session.clearanceQuestion || ''
+  const gaps = report.sections?.dangerousGaps || []
+  const gap = gaps.find(g => g.title === target)
+    || gaps.find(g => target && (target.includes(g.title || '') || (g.title || '').includes(target)))
+    || null
+
+  const box = el('section', 'debt-context')
+  box.appendChild(el('h3', 'debt-context-heading', '这笔欠条是在哪里产生的'))
+
+  const scene = el('p', 'debt-context-scene')
+  const artifactTitle = report.analysis?.artifactTitle || '一次 AI 协作'
+  const when = report.createdAt ? new Date(report.createdAt).toLocaleString('zh-CN') : ''
+  scene.textContent = `来自报告《${artifactTitle}》${when ? `（${when}）` : ''}。当时 AI 帮你完成了这项工作，而这个理解环节被它代劳了。`
+  box.appendChild(scene)
+
+  if (gap?.surfaceSignals?.length) {
+    const signals = el('div', 'debt-context-signals')
+    signals.appendChild(el('p', 'debt-context-sub', '当时的表现（系统据此识别出这笔欠条）：'))
+    const ul = el('ul', 'debt-context-signal-list')
+    for (const s of gap.surfaceSignals.slice(0, 4)) ul.appendChild(el('li', undefined, s))
+    signals.appendChild(ul)
+    box.appendChild(signals)
+  }
+
+  if (gap?.whyDangerous) {
+    box.appendChild(el('p', 'debt-context-why', `为什么值得清偿：${gap.whyDangerous}`))
+  }
+
+  const confusions = report.input?.confusions || []
+  if (confusions.length) {
+    box.appendChild(el('p', 'debt-context-confusion', `你当时标注的困惑：${confusions[0].text}`))
+  }
+  return box
+}
+
+async function drawSession(page: HTMLElement, session: ClearanceSession): Promise<void> {
   clear(page)
 
   // 头部
@@ -1036,14 +1366,11 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
   header.appendChild(headerActions)
   page.appendChild(header)
 
-  // 降级模式提示：策展备用研究或生成兜底，需对用户透明
-  // ClearanceSession 类型未声明 generation，运行时可能存在，用类型断言安全访问
-  const hasGenerationFallback =
-    Boolean((session as { generation?: { fallback?: boolean } }).generation?.fallback)
-  if (session.researchMode === 'curated_demo_fallback' || hasGenerationFallback) {
-    page.appendChild(el('div', 'notice notice-fallback',
-      '当前为策展备用模式，研究来源为预设材料'))
-  }
+  // 降级模式提示已移除：用户反馈策展备用模式提示造成困惑，不再展示
+
+  // 欠条来源上下文（产生场景 + 当时表现）
+  const contextBox = await renderDebtContext(session)
+  if (contextBox) page.appendChild(contextBox)
 
   // 清偿问题
   const questionBox = el('section', 'session-question')
@@ -1085,6 +1412,15 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
     return
   }
 
+  // 当前问题（追问被采纳后评估目标会更新，需在输入区上方明确展示）
+  const currentBox = el('section', 'session-question')
+  currentBox.appendChild(el('p', 'session-question-label', '当前问题'))
+  currentBox.appendChild(el('h2', 'session-question-text', session.currentQuestion || session.clearanceQuestion))
+  if (session.teachingMode === 'direct') {
+    currentBox.appendChild(el('p', 'session-question-label', '系统已进入直接教学模式：先学会，再用一句话确认。'))
+  }
+  page.appendChild(currentBox)
+
   // 输入区
   const inputArea = el('section', 'session-input')
   const textarea = el('textarea', 'answer-input') as HTMLTextAreaElement
@@ -1119,7 +1455,7 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
       // 重新拉取会话状态后重绘（确保最新 scaffold/attempts）
       const fresh = await fetchSession(session.id)
       clear(page)
-      drawSession(page, fresh.session)
+      await drawSession(page, fresh.session)
     } catch (err) {
       status.textContent = err instanceof Error ? err.message : '提交失败，请重试'
     } finally {
@@ -1138,9 +1474,10 @@ function drawSession(page: HTMLElement, session: ClearanceSession): void {
     try {
       const res = await endSession(session.id)
       clear(page)
-      drawSession(page, res.session)
+      await drawSession(page, res.session)
+      // 创世身份以弹出层呈现，非常驻页面；关闭后停留在清偿结果页
       if (res.genesisIdentity?.activatedAt) {
-        page.appendChild(renderGenesisIdentityChoice(res.genesisIdentity as GenesisIdentity))
+        showGenesisIdentityModal(res.genesisIdentity as GenesisIdentity)
       }
     } catch (err) {
       status.textContent = err instanceof Error ? err.message : '结束会话失败'
@@ -1193,6 +1530,29 @@ function renderGenesisIdentityChoice(identity: GenesisIdentity): HTMLElement {
   return panel
 }
 
+// 创世身份弹出层：清偿结束后一次性展示，可关闭，不常驻页面
+function showGenesisIdentityModal(identity: GenesisIdentity): void {
+  document.querySelector('.modal-overlay')?.remove()
+  const overlay = el('div', 'modal-overlay')
+  overlay.setAttribute('role', 'dialog')
+  overlay.setAttribute('aria-modal', 'true')
+  const dialog = el('div', 'modal-dialog')
+  const close = el('button', 'modal-close', '×')
+  close.setAttribute('aria-label', t('关闭', 'Close'))
+  close.onclick = () => overlay.remove()
+  dialog.appendChild(close)
+  dialog.appendChild(renderGenesisIdentityChoice(identity))
+  const later = el('button', 'btn btn-ghost', t('稍后再说', 'Maybe later'))
+  later.onclick = () => overlay.remove()
+  dialog.appendChild(later)
+  overlay.appendChild(dialog)
+  // 点击遮罩空白处关闭
+  overlay.onclick = (event) => {
+    if (event.target === overlay) overlay.remove()
+  }
+  document.body.appendChild(overlay)
+}
+
 export async function renderGenesisPage(root: HTMLElement): Promise<void> {
   const page = el('div', 'page page-genesis')
   page.appendChild(el('p', 'genesis-kicker', t('永久档案 · 001 期', 'Permanent archive · Cohort 001')))
@@ -1238,7 +1598,7 @@ export async function renderGenesisPage(root: HTMLElement): Promise<void> {
     const privacy = section('PRIVACY · CURRENT CAPABILITY', '隐私与数据说明', 'Privacy and data', '你的真实项目内容不会自动出现在公开档案中。', 'Your real project content will never automatically appear in the public archive.')
     const privacyGrid = el('div', 'genesis-privacy-grid')
     ;[
-      [t('当前已支持', 'Available now'), [t('公开展示完全由用户主动选择', 'Public display is always opt-in'), t('活动页面只展示匿名汇总统计', 'Activity statistics are anonymous aggregates'), t('公开名录不展示邮箱、原始对话、代码或私密训练内容', 'The public directory excludes emails, original chats, code, and private training content')]]
+      [t('当前已支持', 'Available now'), [t('公开展示完全由用户主动选择', 'Public display is always opt-in'), t('活动页面只展示匿名汇总统计', 'Activity statistics are anonymous aggregates'), t('公开名录不展示原始对话、代码或私密训练内容', 'The public directory excludes original chats, code, and private training content')]]
     ].forEach(([title, items]) => { const card = el('article', 'genesis-privacy-card'); card.appendChild(el('h3', '', title as string)); const list = el('ul'); (items as string[]).forEach(item => list.appendChild(el('li', '', item))); card.appendChild(list); privacyGrid.appendChild(card) })
     privacy.appendChild(privacyGrid); page.appendChild(privacy)
   } catch (error) { page.querySelector('.loading')?.remove(); page.appendChild(errorBox(error instanceof Error ? error.message : t('档案加载失败', 'Could not load archive'))) }
@@ -1613,7 +1973,7 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
   root.appendChild(page)
 
   try {
-    const data = await fetchTodayTraining()
+    const [data, debtsData] = await Promise.all([fetchTodayTraining(), fetchTrainingDebts()])
     clear(page)
     page.appendChild(header)
     page.appendChild(intro)
@@ -1679,12 +2039,52 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
           btn.textContent = '开始复训'
           actionMessage.textContent = e instanceof Error ? e.message : '网络错误，请稍后重试。'
         }
+        card.appendChild(btn)
+        card.appendChild(actionMessage)
+        list.appendChild(card)
       }
-      card.appendChild(btn)
-      card.appendChild(actionMessage)
-      list.appendChild(card)
-    }
     page.appendChild(list)
+
+    // 长期掌握度追踪：随清偿与复训累积的每笔记欠条掌握画像
+    const profiles = data.profiles || []
+    if (profiles.length > 0) {
+      const debtTextById = new Map<string, string>()
+      if (debtsData.ok) {
+        for (const debt of debtsData.debts) debtTextById.set(debt.id, debt.gapText)
+      }
+      const tracking = el('section', 'mastery-tracking')
+      tracking.appendChild(el('h2', 'mastery-tracking-title', '长期掌握度追踪'))
+      tracking.appendChild(el('p', 'mastery-tracking-desc', '每条欠条的掌握度随清偿与复训持续累积，按遗忘曲线安排下次复习。'))
+      const grid = el('div', 'mastery-grid')
+      for (const profile of profiles) {
+        const card = el('article', 'mastery-card')
+        const debtText = debtTextById.get(profile.cognitiveDebtId) || '认知欠条'
+        card.appendChild(el('p', 'mastery-card-debt', debtText))
+        const meterRow = el('div', 'mastery-meter-row')
+        const meter = el('div', 'mastery-meter')
+        const fill = el('div', 'mastery-meter-fill')
+        const score = Math.max(0, Math.min(100, profile.overallMastery))
+        fill.style.width = `${score}%`
+        meter.appendChild(fill)
+        meterRow.appendChild(meter)
+        meterRow.appendChild(el('strong', 'mastery-score-value', String(profile.overallMastery)))
+        card.appendChild(meterRow)
+        const meta = el('div', 'mastery-card-meta')
+        meta.appendChild(el('span', undefined, stageLabel(profile.currentStage)))
+        meta.appendChild(el('span', undefined, `练习 ${(profile.successfulAttempts ?? 0) + (profile.failedAttempts ?? 0)} 次`))
+        if (profile.nextReviewAt) {
+          meta.appendChild(el('span', undefined, `下次复习：${formatDate(profile.nextReviewAt)}`))
+        }
+        card.appendChild(meta)
+        grid.appendChild(card)
+      }
+      tracking.appendChild(grid)
+      page.appendChild(tracking)
+        }
+        card.appendChild(btn)
+        list.appendChild(card)
+      }
+    }
   } catch (e) {
     clear(page)
     page.appendChild(header)
@@ -1708,6 +2108,18 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
       page.appendChild(errorCard)
     }
   }
+}
+
+// 复训表单/结果页在 #/training 页内渲染，hash 不变时 navigate 不会触发重渲染，
+// 因此返回按钮需要原地重新渲染复训列表。
+async function backToTrainingList(page: HTMLElement): Promise<void> {
+  const root = page.parentElement as HTMLElement | null
+  if (!root) {
+    navigate({ name: 'training' })
+    return
+  }
+  clear(root)
+  await renderTrainingPage(root)
 }
 
 async function renderReviewSubmitForm(page: HTMLElement, task: ReviewTask): Promise<void> {
@@ -1992,7 +2404,7 @@ export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: st
       mastery.appendChild(el('h3', 'result-section-title', '掌握度信息'))
       mastery.appendChild(el('p', 'mastery-score', `总体掌握度：${data.profile.overallMastery}`))
       mastery.appendChild(el('p', 'mastery-stage', `当前阶段：${stageLabel(data.profile.currentStage)}`))
-      mastery.appendChild(el('p', 'mastery-attempts', `练习次数：${data.profile.attemptCount}`))
+      mastery.appendChild(el('p', 'mastery-attempts', `练习次数：${(data.profile.successfulAttempts ?? 0) + (data.profile.failedAttempts ?? 0)}`))
       if (data.profile.nextReviewAt) {
         mastery.appendChild(el('p', 'mastery-next', `下次复习：${formatDate(data.profile.nextReviewAt)}`))
       }
@@ -2018,10 +2430,13 @@ export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: st
     if (data.reviews.length > 0) {
       const reviews = el('div', 'review-history')
       reviews.appendChild(el('h3', 'result-section-title', '复训任务'))
+      const reviewStatusLabels: Record<string, string> = {
+        pending: '待复习', in_progress: '进行中', completed: '已完成'
+      }
       for (const review of data.reviews) {
         const item = el('div', 'review-item')
         item.appendChild(el('span', 'review-stage', stageLabel(review.trainingStage)))
-        item.appendChild(el('span', `review-status status-${review.status}`, review.status))
+        item.appendChild(el('span', `review-status status-${review.status}`, reviewStatusLabels[review.status] || review.status))
         item.appendChild(el('span', 'review-due', formatDate(review.dueAt)))
         reviews.appendChild(item)
       }
@@ -2034,8 +2449,8 @@ export async function renderTrainingDebtDetailPage(root: HTMLElement, debtId: st
   }
 }
 
-// 训练阶段中文标签
-function stageLabel(stage: string): string {
+// 训练阶段中文标签（兼容后端 MasteryProfile 的 1-5 数字阶段）
+function stageLabel(stage: string | number): string {
   const labels: Record<string, string> = {
     initial_compensation: '初始补偿',
     delayed_recall: '延迟回忆',
@@ -2044,7 +2459,12 @@ function stageLabel(stage: string): string {
     error_detection: '错误检测',
     real_work_validation: '真实工作验证'
   }
-  return labels[stage] || stage
+  // 与后端 review-scheduler.stageFromNumber 对齐：1-based 数字
+  const byNumber = ['initial_compensation', 'delayed_recall', 'misconception_check', 'scenario_transfer', 'real_work_validation']
+  const key = typeof stage === 'number'
+    ? byNumber[Math.max(0, Math.min(stage - 1, byNumber.length - 1))]
+    : stage
+  return labels[key] || String(stage)
 }
 
 // 日期格式化
@@ -2054,5 +2474,52 @@ function formatDate(iso: string): string {
     return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
   } catch {
     return iso
+  }
+}
+
+// ── 能力画像独立子页面 ──
+export async function renderProfilePage(root: HTMLElement): Promise<void> {
+  clear(root)
+  const page = el('div', 'page page-profile')
+  const header = el('header', 'page-header')
+  header.appendChild(el('p', 'dashboard-kicker', 'CAPABILITY PROFILE'))
+  header.appendChild(el('h1', 'page-title', t('我的能力画像', 'My capability profile')))
+  const back = el('button', 'btn btn-ghost btn-sm', t('返回工作区', 'Back to workspace'))
+  back.onclick = () => navigate({ name: 'app' })
+  header.appendChild(back)
+  page.appendChild(header)
+
+  const body = el('div', 'profile-page-body')
+  body.appendChild(loading(t('正在加载能力画像…', 'Loading capability profile…')))
+  page.appendChild(body)
+  root.appendChild(page)
+
+  try {
+    const res = await getRepaymentProfile()
+    clear(body)
+    const profiles = res.ok ? res.profiles || [] : []
+    if (!res.ok) {
+      body.appendChild(el('p', 'dashboard-empty', t('能力画像加载失败', 'Could not load capability profile')))
+      return
+    }
+    if (!profiles.length) {
+      body.appendChild(el('p', 'dashboard-empty', t(
+        '完成几次清偿作答后，这里会逐渐形成你的长期能力画像。',
+        'After a few repayment attempts, your long-term capability profile will form here.'
+      )))
+      return
+    }
+    for (const profile of profiles) {
+      body.appendChild(renderCapabilityProfileCard(profile))
+    }
+    if (res.degraded) {
+      body.appendChild(el('p', 'profile-degraded-note', t(
+        '当前为离线评估模式，画像可能不够精确。',
+        'Offline evaluation mode is active; the profile may be less precise.'
+      )))
+    }
+  } catch {
+    clear(body)
+    body.appendChild(el('p', 'dashboard-empty', t('能力画像加载失败', 'Could not load capability profile')))
   }
 }

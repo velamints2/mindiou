@@ -3,13 +3,15 @@
 // 公开区（landing/how-it-works）无需登录；产品区（app/report/session/login）需邀请码。
 // 视觉样式见 styles.css（占位），由设计师 agent 重构。
 
-import { checkAuthSession, setAccessToken } from './api'
+import { checkAuthSession, fetchCurrentUser, getAccessToken, setAccessToken } from './api'
 import { renderHowItWorksPage, renderLandingPage } from './marketing'
 import {
   renderAppPage,
   renderDevicesPage,
+  renderEmailVerificationPage,
   renderGenesisPage,
   renderLoginPage,
+  renderProfilePage,
   renderRegisterPage,
   renderReportPage,
   renderSessionPage,
@@ -107,6 +109,20 @@ async function render(route: Route): Promise<void> {
     renderFluencyLoopPreviewPage(app)
     trackRoute('fluency-loop-preview')
     return
+
+  // 邮箱验证页：公开路由，邮件链接跳转后无需登录态
+  if (route.name === 'verify-email') {
+    renderEmailVerificationPage(app, route.token, route.status)
+    trackRoute('verify-email')
+    return
+  }
+
+  // 非公开路由需要服务端会话。刷新后本地标记丢失时，以 HttpOnly Cookie 为准恢复。
+  if (!getAccessToken()) {
+    const hasServerSession = await checkAuthSession()
+    if (hasServerSession) {
+      setAccessToken('server-session')
+    }
   }
 
   // 非公开路由始终以服务端 HttpOnly Cookie 为准。localStorage 里的标记
@@ -125,9 +141,15 @@ async function render(route: Route): Promise<void> {
   }
   setAccessToken('server-session')
 
-  // 已登录用户访问登录页 → 跳工作区
+  // 已登录用户访问登录页 → 检查验证状态后跳转
   if (route.name === 'login') {
-    navigate({ name: 'app' })
+    const user = await fetchCurrentUser()
+    navigate({ name: user?.emailVerified ? 'app' : 'verify-email' })
+    return
+  }
+  // 其他已登录路由：检查邮箱验证状态
+  if (!await isEmailVerifiedCached()) {
+    navigate({ name: 'verify-email' })
     return
   }
 
@@ -219,6 +241,19 @@ function renderNotFoundPage(root: HTMLElement): void {
   btn.onclick = () => navigate({ name: 'landing' })
   page.appendChild(btn)
   root.appendChild(page)
+}
+
+let cachedEmailVerified: boolean | null = null
+let cacheExpiry = 0
+
+async function isEmailVerifiedCached(): Promise<boolean> {
+  if (cachedEmailVerified !== null && Date.now() < cacheExpiry) {
+    return cachedEmailVerified
+  }
+  const user = await fetchCurrentUser()
+  cachedEmailVerified = user?.emailVerified ?? false
+  cacheExpiry = Date.now() + 30_000
+  return cachedEmailVerified
 }
 
 async function boot(): Promise<void> {

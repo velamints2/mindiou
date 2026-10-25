@@ -1,3 +1,10 @@
+/* ============================================================================
+ * ⚠️ DEPRECATED — 旧 MVP1 报告样式（reportApp.ts / mvp1App.ts 使用）
+ * ----------------------------------------------------------------------------
+ * 该文件属于已废弃的旧多页前端，不再维护。当前产品前端是 web/src/ 下的
+ * SPA，样式在 web/src/styles.css。新样式不要加到这里。
+ * ========================================================================== */
+
 /* MindIOU report surface — self-contained, no framework */
 
 :root {
@@ -366,6 +373,94 @@ button, input, textarea, select {
   padding-left: 18px;
   color: #90aaa1;
   font-size: 0.86rem;
+}
+
+/* ── Prior profile (three-layer capability snapshot) ── */
+
+.prior-profile-section {
+  padding: 14px;
+  border: 1px solid #18352e;
+  border-radius: 6px;
+  background: #071310;
+}
+
+.prior-profile-intro {
+  margin: 0 0 12px 0;
+  color: #b0e0d0;
+  font-size: 0.86rem;
+}
+
+.prior-layer {
+  margin-bottom: 14px;
+  padding: 10px;
+  border-left: 3px solid #244b43;
+  background: #0a1a16;
+  border-radius: 0 4px 4px 0;
+}
+
+.prior-layer h3 {
+  margin: 0 0 8px 0;
+  font-size: 0.92rem;
+  color: #d6eee6;
+}
+
+.l1-layer { border-left-color: #2e6b5e; }
+.l2-layer { border-left-color: #4a7c6f; }
+.l3-layer { border-left-color: #6a9d8f; }
+
+.prior-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.prior-note {
+  background: #102a24;
+  color: #a0c8bc;
+  font-style: italic;
+}
+
+.prior-empty {
+  margin: 0;
+  color: #6a8580;
+  font-size: 0.82rem;
+}
+
+.prior-domain-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.prior-knowledge-domain {
+  margin-bottom: 8px;
+}
+
+.prior-knowledge-domain-name {
+  margin: 0 0 6px 0;
+  color: #c0ddd4;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.capability-dim.stable {
+  border-color: #2e6b5e;
+  background: #0e2420;
+  color: #b0e0d0;
+}
+
+.capability-dim.one-shot {
+  border-color: #3a4a45;
+  background: #0c1815;
+  color: #8aa39c;
+}
+
+.prior-rules {
+  margin: 8px 0 0 0;
+  padding-left: 18px;
+  color: #6a8580;
+  font-size: 0.78rem;
 }
 
 .item-list {
