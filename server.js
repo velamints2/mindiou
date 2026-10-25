@@ -4687,6 +4687,7 @@ const server = createServer(async (req, res) => {
     if (isWebDraftOrTimelineRequest) {
       const user = requireAuth(req, res);
       if (!user) return;
+    }
 
     // G2 full deck: returns the four-layer feynman cards for the device's
     // visible reports. Reuses the same device channel and report selection
