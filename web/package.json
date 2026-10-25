@@ -15,7 +15,7 @@
     "vite": "^7.0.0"
   },
   "devDependencies": {
-    "vitest": "^3.2.4",
-    "happy-dom": "^18.0.1"
+    "happy-dom": "^18.0.1",
+    "vitest": "^3.2.4"
   }
 }

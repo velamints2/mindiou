@@ -7968,6 +7968,7 @@ a.pm-tree-title:hover { text-decoration: underline; }
   .fluency-experiment-fields { grid-template-columns: 1fr; }
   .fluency-update-row { grid-template-columns: 1fr; gap: 9px; }
   .fluency-diet-highlight { font-size: 54px; }
+}
 
 /* ── 今日复训 / 认知欠条 / 长期掌握度追踪 ── */
 .page-training,

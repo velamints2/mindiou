@@ -11,7 +11,6 @@ import {
   renderEmailVerificationPage,
   renderGenesisPage,
   renderLoginPage,
-  renderProfilePage,
   renderRegisterPage,
   renderReportPage,
   renderSessionPage,
@@ -21,8 +20,8 @@ import {
   renderTrainingPage
 } from './pages'
 import { renderRepaymentDetailPage, renderRepaymentPage } from './repayment'
-import { renderProfilePage } from './profile'
 import { renderModuleDetailPage, renderOwnershipMapPage, renderProjectListPage as renderOwnershipProjectListPage } from './ownershipApp'
+import { renderProfilePage } from './profile'
 import { clear, el, navigate, parseRoute, type Route } from './router'
 import { initTracker, trackRoute } from './tracker'
 import { getLocale, observeTranslations, setLocale } from './i18n'
@@ -109,6 +108,7 @@ async function render(route: Route): Promise<void> {
     renderFluencyLoopPreviewPage(app)
     trackRoute('fluency-loop-preview')
     return
+  }
 
   // 邮箱验证页：公开路由，邮件链接跳转后无需登录态
   if (route.name === 'verify-email') {

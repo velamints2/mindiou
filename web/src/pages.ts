@@ -1973,7 +1973,7 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
   root.appendChild(page)
 
   try {
-    const [data, debtsData] = await Promise.all([fetchTodayTraining(), fetchTrainingDebts()])
+    const data = await fetchTodayTraining()
     clear(page)
     page.appendChild(header)
     page.appendChild(intro)
@@ -2039,52 +2039,12 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
           btn.textContent = '开始复训'
           actionMessage.textContent = e instanceof Error ? e.message : '网络错误，请稍后重试。'
         }
-        card.appendChild(btn)
-        card.appendChild(actionMessage)
-        list.appendChild(card)
       }
-    page.appendChild(list)
-
-    // 长期掌握度追踪：随清偿与复训累积的每笔记欠条掌握画像
-    const profiles = data.profiles || []
-    if (profiles.length > 0) {
-      const debtTextById = new Map<string, string>()
-      if (debtsData.ok) {
-        for (const debt of debtsData.debts) debtTextById.set(debt.id, debt.gapText)
-      }
-      const tracking = el('section', 'mastery-tracking')
-      tracking.appendChild(el('h2', 'mastery-tracking-title', '长期掌握度追踪'))
-      tracking.appendChild(el('p', 'mastery-tracking-desc', '每条欠条的掌握度随清偿与复训持续累积，按遗忘曲线安排下次复习。'))
-      const grid = el('div', 'mastery-grid')
-      for (const profile of profiles) {
-        const card = el('article', 'mastery-card')
-        const debtText = debtTextById.get(profile.cognitiveDebtId) || '认知欠条'
-        card.appendChild(el('p', 'mastery-card-debt', debtText))
-        const meterRow = el('div', 'mastery-meter-row')
-        const meter = el('div', 'mastery-meter')
-        const fill = el('div', 'mastery-meter-fill')
-        const score = Math.max(0, Math.min(100, profile.overallMastery))
-        fill.style.width = `${score}%`
-        meter.appendChild(fill)
-        meterRow.appendChild(meter)
-        meterRow.appendChild(el('strong', 'mastery-score-value', String(profile.overallMastery)))
-        card.appendChild(meterRow)
-        const meta = el('div', 'mastery-card-meta')
-        meta.appendChild(el('span', undefined, stageLabel(profile.currentStage)))
-        meta.appendChild(el('span', undefined, `练习 ${(profile.successfulAttempts ?? 0) + (profile.failedAttempts ?? 0)} 次`))
-        if (profile.nextReviewAt) {
-          meta.appendChild(el('span', undefined, `下次复习：${formatDate(profile.nextReviewAt)}`))
-        }
-        card.appendChild(meta)
-        grid.appendChild(card)
-      }
-      tracking.appendChild(grid)
-      page.appendChild(tracking)
-        }
-        card.appendChild(btn)
-        list.appendChild(card)
-      }
+      card.appendChild(btn)
+      card.appendChild(actionMessage)
+      list.appendChild(card)
     }
+    page.appendChild(list)
   } catch (e) {
     clear(page)
     page.appendChild(header)
@@ -2108,18 +2068,6 @@ export async function renderTrainingPage(root: HTMLElement): Promise<void> {
       page.appendChild(errorCard)
     }
   }
-}
-
-// 复训表单/结果页在 #/training 页内渲染，hash 不变时 navigate 不会触发重渲染，
-// 因此返回按钮需要原地重新渲染复训列表。
-async function backToTrainingList(page: HTMLElement): Promise<void> {
-  const root = page.parentElement as HTMLElement | null
-  if (!root) {
-    navigate({ name: 'training' })
-    return
-  }
-  clear(root)
-  await renderTrainingPage(root)
 }
 
 async function renderReviewSubmitForm(page: HTMLElement, task: ReviewTask): Promise<void> {
@@ -2271,6 +2219,7 @@ function renderReviewResult(page: HTMLElement, result: SubmitReviewResponse): vo
   next.appendChild(nextActions)
   page.appendChild(next)
 }
+
 
 export async function renderTrainingDebtListPage(root: HTMLElement): Promise<void> {
   const page = el('div', 'page page-training-debts')
@@ -2478,48 +2427,3 @@ function formatDate(iso: string): string {
 }
 
 // ── 能力画像独立子页面 ──
-export async function renderProfilePage(root: HTMLElement): Promise<void> {
-  clear(root)
-  const page = el('div', 'page page-profile')
-  const header = el('header', 'page-header')
-  header.appendChild(el('p', 'dashboard-kicker', 'CAPABILITY PROFILE'))
-  header.appendChild(el('h1', 'page-title', t('我的能力画像', 'My capability profile')))
-  const back = el('button', 'btn btn-ghost btn-sm', t('返回工作区', 'Back to workspace'))
-  back.onclick = () => navigate({ name: 'app' })
-  header.appendChild(back)
-  page.appendChild(header)
-
-  const body = el('div', 'profile-page-body')
-  body.appendChild(loading(t('正在加载能力画像…', 'Loading capability profile…')))
-  page.appendChild(body)
-  root.appendChild(page)
-
-  try {
-    const res = await getRepaymentProfile()
-    clear(body)
-    const profiles = res.ok ? res.profiles || [] : []
-    if (!res.ok) {
-      body.appendChild(el('p', 'dashboard-empty', t('能力画像加载失败', 'Could not load capability profile')))
-      return
-    }
-    if (!profiles.length) {
-      body.appendChild(el('p', 'dashboard-empty', t(
-        '完成几次清偿作答后，这里会逐渐形成你的长期能力画像。',
-        'After a few repayment attempts, your long-term capability profile will form here.'
-      )))
-      return
-    }
-    for (const profile of profiles) {
-      body.appendChild(renderCapabilityProfileCard(profile))
-    }
-    if (res.degraded) {
-      body.appendChild(el('p', 'profile-degraded-note', t(
-        '当前为离线评估模式，画像可能不够精确。',
-        'Offline evaluation mode is active; the profile may be less precise.'
-      )))
-    }
-  } catch {
-    clear(body)
-    body.appendChild(el('p', 'dashboard-empty', t('能力画像加载失败', 'Could not load capability profile')))
-  }
-}
